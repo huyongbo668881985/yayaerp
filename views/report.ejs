@@ -1,0 +1,194 @@
+<%- include('partials/header') %>
+<h1>经营报表</h1>
+
+<div class="card">
+  <form method="GET" action="/reports" style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap">
+    <div class="form-row" style="margin-bottom:0">
+      <label>开始日期</label>
+      <input type="date" name="start" id="startInput" value="<%= start %>">
+    </div>
+    <div class="form-row" style="margin-bottom:0">
+      <label>结束日期</label>
+      <input type="date" name="end" id="endInput" value="<%= end %>">
+    </div>
+    <input type="hidden" name="mode" value="<%= includeReceivable ? 'with_receivable' : 'without_receivable' %>">
+    <button type="submit" class="btn btn-secondary">查询</button>
+  </form>
+  <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap">
+    <button type="button" class="btn btn-secondary btn-sm" onclick="setRange('thisMonth')">本月</button>
+    <button type="button" class="btn btn-secondary btn-sm" onclick="setRange('lastMonth')">上月</button>
+    <button type="button" class="btn btn-secondary btn-sm" onclick="setRange('last30')">近30天</button>
+    <button type="button" class="btn btn-secondary btn-sm" onclick="setRange('thisYear')">今年</button>
+  </div>
+</div>
+
+<div class="card">
+  <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
+    <span class="muted">毛利口径：</span>
+    <a class="btn <%= includeReceivable ? 'btn-secondary' : '' %> btn-sm"
+       href="/reports?start=<%= start %>&end=<%= end %>&mode=without_receivable">不含应收账款（只算已收完款的）</a>
+    <a class="btn <%= includeReceivable ? '' : 'btn-secondary' %> btn-sm"
+       href="/reports?start=<%= start %>&end=<%= end %>&mode=with_receivable">含应收账款（不管收没收到钱）</a>
+  </div>
+</div>
+
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="num">¥<%= summary.sales.amount.toFixed(2) %></div>
+    <div class="label">销售额（已扣退货）· <%= summary.sales.count %> 单销售，<%= summary.sales.returnCount %> 单退货</div>
+  </div>
+  <div class="stat-card">
+    <div class="num" style="color:#e5484d">¥<%= summary.returnsAmount.toFixed(2) %></div>
+    <div class="label">退货金额（已冲减进销售额和毛利）</div>
+  </div>
+  <div class="stat-card">
+    <div class="num" style="color:<%= summary.receivable.amount > 0 ? '#e5484d' : '#16a34a' %>">¥<%= summary.receivable.amount.toFixed(2) %></div>
+    <div class="label">应收金额（未结清）· <%= summary.receivable.count %> 单</div>
+  </div>
+  <div class="stat-card">
+    <div class="num">¥<%= (includeReceivable ? summary.profitWithReceivable : summary.profitWithoutReceivable).toFixed(2) %></div>
+    <div class="label">毛利（<%= includeReceivable ? '含应收账款' : '不含应收账款' %>，已扣退货）</div>
+  </div>
+  <div class="stat-card">
+    <div class="num">¥<%= summary.receivableProfit.toFixed(2) %></div>
+    <div class="label">应收订单毛利（欠款收回后能落的利润）</div>
+  </div>
+</div>
+
+<div style="margin:14px 0">
+  <a class="btn" href="/reports/export?start=<%= start %>&end=<%= end %>&mode=<%= includeReceivable ? 'with_receivable' : 'without_receivable' %>">导出这段明细CSV</a>
+</div>
+
+<div class="card desktop-table-wrap">
+  <table>
+    <tr><th>单号</th><th>日期</th><th>客户</th><th>仓库</th><th>销售额</th><th>已收</th><th>收款状态</th><th>该单毛利</th></tr>
+    <% orders.forEach(function(o) { %>
+      <tr>
+        <td><a href="/sales/<%= o.id %>">#<%= o.id %></a></td>
+        <td><%= o.order_date %></td>
+        <td><%= o.customer_name || '散客' %></td>
+        <td><%= o.warehouse_name %></td>
+        <td>¥<%= o.total_amount.toFixed(2) %></td>
+        <td>¥<%= o.paid_amount.toFixed(2) %></td>
+        <td>
+          <% if (o.payment_status === 'paid') { %>
+            <span class="badge" style="background:#dcfce7;color:#166534">已收款</span>
+          <% } else if (o.payment_status === 'partial') { %>
+            <span class="badge" style="background:#fef3c7;color:#92400e">部分收款</span>
+          <% } else { %>
+            <span class="badge" style="background:#fee2e2;color:#991b1b">未收款</span>
+          <% } %>
+        </td>
+        <td>¥<%= o.order_profit.toFixed(2) %></td>
+      </tr>
+    <% }) %>
+  </table>
+  <% if (orders.length === 0) { %><p class="muted">这段时间没有符合条件的订单</p><% } %>
+</div>
+
+<div class="mobile-order-cards">
+  <% orders.forEach(function(o) { %>
+    <a href="/sales/<%= o.id %>" class="order-card">
+      <div class="order-card-top">
+        <span class="order-card-id">#<%= o.id %> <%= o.customer_name || '散客' %></span>
+        <% if (o.payment_status === 'paid') { %>
+          <span class="badge" style="background:#dcfce7;color:#166534">已收款</span>
+        <% } else if (o.payment_status === 'partial') { %>
+          <span class="badge" style="background:#fef3c7;color:#92400e">部分收款</span>
+        <% } else { %>
+          <span class="badge" style="background:#fee2e2;color:#991b1b">未收款</span>
+        <% } %>
+      </div>
+      <div class="order-card-mid">
+        <span><%= o.order_date %></span>
+        <span><%= o.warehouse_name %></span>
+      </div>
+      <div class="order-card-bottom">
+        <span class="order-card-amount">¥<%= o.total_amount.toFixed(2) %></span>
+        <span class="muted">毛利 ¥<%= o.order_profit.toFixed(2) %></span>
+      </div>
+    </a>
+  <% }) %>
+  <% if (orders.length === 0) { %><p class="muted">这段时间没有符合条件的订单</p><% } %>
+</div>
+
+<h2 style="margin-top:24px">退货单明细（¥金额已从上面的销售额/毛利中扣除）</h2>
+<div class="card desktop-table-wrap">
+  <table>
+    <tr><th>单号</th><th>日期</th><th>客户</th><th>仓库</th><th>退货额</th><th>已退</th><th>退款状态</th><th>该单冲减毛利</th></tr>
+    <% returnOrders.forEach(function(o) { %>
+      <tr>
+        <td><a href="/returns/<%= o.id %>">#<%= o.id %></a></td>
+        <td><%= o.order_date %></td>
+        <td><%= o.customer_name || '散客' %></td>
+        <td><%= o.warehouse_name %></td>
+        <td>¥<%= o.total_amount.toFixed(2) %></td>
+        <td>¥<%= o.refunded_amount.toFixed(2) %></td>
+        <td>
+          <% if (o.refund_status === 'refunded') { %>
+            <span class="badge" style="background:#dcfce7;color:#166534">已退款</span>
+          <% } else if (o.refund_status === 'partial') { %>
+            <span class="badge" style="background:#fef3c7;color:#92400e">部分退款</span>
+          <% } else { %>
+            <span class="badge" style="background:#fee2e2;color:#991b1b">未退款</span>
+          <% } %>
+        </td>
+        <td>-¥<%= o.order_profit.toFixed(2) %></td>
+      </tr>
+    <% }) %>
+  </table>
+  <% if (returnOrders.length === 0) { %><p class="muted">这段时间没有符合条件的退货单</p><% } %>
+</div>
+
+<div class="mobile-order-cards">
+  <% returnOrders.forEach(function(o) { %>
+    <a href="/returns/<%= o.id %>" class="order-card">
+      <div class="order-card-top">
+        <span class="order-card-id">#<%= o.id %> <%= o.customer_name || '散客' %></span>
+        <% if (o.refund_status === 'refunded') { %>
+          <span class="badge" style="background:#dcfce7;color:#166534">已退款</span>
+        <% } else if (o.refund_status === 'partial') { %>
+          <span class="badge" style="background:#fef3c7;color:#92400e">部分退款</span>
+        <% } else { %>
+          <span class="badge" style="background:#fee2e2;color:#991b1b">未退款</span>
+        <% } %>
+      </div>
+      <div class="order-card-mid">
+        <span><%= o.order_date %></span>
+        <span><%= o.warehouse_name %></span>
+      </div>
+      <div class="order-card-bottom">
+        <span class="order-card-amount">¥<%= o.total_amount.toFixed(2) %></span>
+        <span class="muted">冲减毛利 ¥<%= o.order_profit.toFixed(2) %></span>
+      </div>
+    </a>
+  <% }) %>
+  <% if (returnOrders.length === 0) { %><p class="muted">这段时间没有符合条件的退货单</p><% } %>
+</div>
+
+<script>
+function fmt(d) { return d.toISOString().slice(0, 10); }
+function setRange(kind) {
+  const now = new Date();
+  let start, end;
+  if (kind === 'thisMonth') {
+    start = new Date(now.getFullYear(), now.getMonth(), 1);
+    end = now;
+  } else if (kind === 'lastMonth') {
+    start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    end = new Date(now.getFullYear(), now.getMonth(), 0);
+  } else if (kind === 'last30') {
+    end = now;
+    start = new Date(now);
+    start.setDate(start.getDate() - 29);
+  } else if (kind === 'thisYear') {
+    start = new Date(now.getFullYear(), 0, 1);
+    end = now;
+  }
+  document.getElementById('startInput').value = fmt(start);
+  document.getElementById('endInput').value = fmt(end);
+  document.querySelector('form[action="/reports"]').submit();
+}
+</script>
+
+<%- include('partials/footer') %>

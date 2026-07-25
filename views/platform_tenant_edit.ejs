@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>平台管理 - 编辑租户</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="topbar">
+  <div class="brand">🛠 平台管理后台</div>
+</div>
+<div class="container">
+  <h1>编辑租户 · <%= tenant.tenant_code %></h1>
+  <div class="card" style="max-width:520px">
+    <% if (error) { %><div class="error"><%= error %></div><% } %>
+    <form method="POST" action="/platform-admin/tenants/<%= tenant.id %>/edit">
+      <div class="form-row">
+        <label>租户名称</label>
+        <input type="text" name="tenant_name" value="<%= tenant.name || tenant.tenant_name || '' %>" required>
+      </div>
+      <div class="form-row">
+        <label>服务到期日期</label>
+        <input type="date" name="expires_at" value="<%= tenant.expires_at || '' %>">
+        <span class="muted" style="font-size:12px">留空 = 不限</span>
+      </div>
+      <div class="form-row">
+        <label>账号数上限</label>
+        <input type="number" name="max_users" min="1" value="<%= tenant.max_users || '' %>" placeholder="留空 = 不限">
+      </div>
+      <button class="btn" type="submit" style="width:100%">保存</button>
+    </form>
+  </div>
+  <p style="margin-top:14px"><a href="/platform-admin">← 返回租户列表</a></p>
+</div>
+</body>
+</html>

@@ -1,0 +1,59 @@
+<%- include('partials/header') %>
+<h1>仓库调拨</h1>
+<p class="muted">用于把货从一个仓库/门店挪到另一个（比如从总仓装车到车销车辆）。库存要审核通过后才会真正变动。</p>
+<div style="margin-bottom:12px"><a class="btn" href="/transfers/new">+ 新建调拨单</a></div>
+<div class="card desktop-table-wrap">
+  <table>
+    <tr><th>单号</th><th>日期</th><th>调出仓库</th><th>调入仓库</th><th>审核状态</th><th>操作人</th><th>操作</th></tr>
+    <% orders.forEach(function(o) { %>
+      <tr>
+        <td><a href="/transfers/<%= o.id %>">#<%= o.id %></a></td>
+        <td><%= o.order_date %></td>
+        <td><%= o.from_name %></td>
+        <td>→ <%= o.to_name %></td>
+        <td>
+          <%
+            const statusMap = {
+              draft:     { text: '草稿',   bg: '#f3f4f6', fg: '#6b7280' },
+              submitted: { text: '待审核', bg: '#fef3c7', fg: '#92400e' },
+              approved:  { text: '已审核', bg: '#dbeafe', fg: '#1e40af' },
+              rejected:  { text: '已拒绝', bg: '#fee2e2', fg: '#991b1b' }
+            };
+            const st = statusMap[o.status] || { text: o.status, bg: '#f3f4f6', fg: '#6b7280' };
+          %>
+          <span class="badge" style="background:<%= st.bg %>;color:<%= st.fg %>"><%= st.text %></span>
+        </td>
+        <td><%= o.user_name %></td>
+        <td><a href="/transfers/<%= o.id %>" class="btn btn-sm btn-secondary">详情</a></td>
+      </tr>
+    <% }) %>
+  </table>
+</div>
+
+<div class="mobile-order-cards">
+  <% const transferStatusMap = {
+       draft:     { text: '草稿',   bg: '#f3f4f6', fg: '#6b7280' },
+       submitted: { text: '待审核', bg: '#fef3c7', fg: '#92400e' },
+       approved:  { text: '已审核', bg: '#dbeafe', fg: '#1e40af' },
+       rejected:  { text: '已拒绝', bg: '#fee2e2', fg: '#991b1b' }
+     };
+  %>
+  <% orders.forEach(function(o) { %>
+    <% const st = transferStatusMap[o.status] || { text: o.status, bg: '#f3f4f6', fg: '#6b7280' }; %>
+    <a href="/transfers/<%= o.id %>" class="order-card">
+      <div class="order-card-top">
+        <span class="order-card-id">#<%= o.id %></span>
+        <span class="badge" style="background:<%= st.bg %>;color:<%= st.fg %>"><%= st.text %></span>
+      </div>
+      <div class="order-card-mid">
+        <span><%= o.from_name %> → <%= o.to_name %></span>
+        <span><%= o.order_date %></span>
+      </div>
+      <div class="order-card-bottom">
+        <span class="muted"><%= o.user_name %></span>
+      </div>
+    </a>
+  <% }) %>
+  <% if (orders.length === 0) { %><p class="muted">暂无调拨单</p><% } %>
+</div>
+<%- include('partials/footer') %>

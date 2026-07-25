@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>登录 - 进销存系统</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="card login-card">
+    <h1>📦 进销存系统</h1>
+    <% if (error) { %><div class="error"><%= error %></div><% } %>
+    <form method="POST" action="/login">
+      <div class="form-row">
+        <label>租户代码</label>
+        <input type="text" name="tenant_code" value="<%= tenantCode || '' %>" required autofocus>
+      </div>
+      <div class="form-row">
+        <label>用户名</label>
+        <input type="text" name="username" required>
+      </div>
+      <div class="form-row">
+        <label>密码</label>
+        <input type="password" name="password" required>
+      </div>
+      <button class="btn" type="submit" style="width:100%">登录</button>
+    </form>
+  </div>
+</div>
+</body>
+</html>

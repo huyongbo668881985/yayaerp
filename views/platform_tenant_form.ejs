@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>平台管理 - 开通新租户</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="topbar">
+  <div class="brand">🛠 平台管理后台</div>
+</div>
+<div class="container">
+  <h1>开通新租户</h1>
+  <div class="card" style="max-width:520px">
+    <% if (error) { %><div class="error"><%= error %></div><% } %>
+    <form method="POST" action="/platform-admin/tenants/new">
+      <div class="form-row">
+        <label>租户代码</label>
+        <input type="text" name="tenant_code" value="<%= form.tenant_code || '' %>" placeholder="字母数字下划线，登录时使用，之后不建议修改" required>
+      </div>
+      <div class="form-row">
+        <label>租户名称</label>
+        <input type="text" name="tenant_name" value="<%= form.tenant_name || '' %>" placeholder="例如：老王商贸有限公司" required>
+      </div>
+      <hr style="margin:16px 0;border:none;border-top:1px solid #eee">
+      <p class="muted" style="margin-bottom:10px">该租户的第一个管理员账号：</p>
+      <div class="form-row">
+        <label>管理员用户名</label>
+        <input type="text" name="admin_username" value="<%= form.admin_username || '' %>" required>
+      </div>
+      <div class="form-row">
+        <label>管理员姓名</label>
+        <input type="text" name="admin_name" value="<%= form.admin_name || '' %>" placeholder="默认：管理员">
+      </div>
+      <div class="form-row">
+        <label>管理员初始密码</label>
+        <input type="password" name="admin_password" minlength="6" required>
+      </div>
+      <div class="form-row">
+        <label>默认仓库名称</label>
+        <input type="text" name="warehouse_name" value="<%= form.warehouse_name || '' %>" placeholder="默认：总仓">
+      </div>
+      <hr style="margin:16px 0;border:none;border-top:1px solid #eee">
+      <p class="muted" style="margin-bottom:10px">配额限制（留空 = 不限）：</p>
+      <div class="form-row">
+        <label>服务到期日期</label>
+        <input type="date" name="expires_at" value="<%= form.expires_at || '' %>">
+      </div>
+      <div class="form-row">
+        <label>账号数上限</label>
+        <input type="number" name="max_users" min="1" value="<%= form.max_users || '' %>" placeholder="例如：5">
+      </div>
+      <button class="btn" type="submit" style="width:100%">开通</button>
+    </form>
+  </div>
+  <p style="margin-top:14px"><a href="/platform-admin">← 返回租户列表</a></p>
+</div>
+</body>
+</html>

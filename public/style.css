@@ -1,0 +1,264 @@
+:root {
+  --bg: #f4f5f7;
+  --card: #ffffff;
+  --primary: #2f6fed;
+  --primary-dark: #1e54c4;
+  --text: #1f2430;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --danger: #e5484d;
+  --success: #16a34a;
+  --warn: #f59e0b;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", Segoe UI, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.topbar {
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 56px;
+}
+.topbar .brand { font-weight: 700; font-size: 16px; }
+.topbar nav a {
+  margin-right: 16px;
+  color: var(--text);
+  font-size: 14px;
+}
+.topbar .userbox { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 10px; }
+.topbar .userbox form { display: inline; }
+
+.container {
+  max-width: 1080px;
+  margin: 24px auto;
+  padding: 0 16px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+h1 { font-size: 20px; margin: 0 0 16px; }
+h2 { font-size: 16px; margin: 0 0 12px; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+th, td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+th { color: var(--muted); font-weight: 600; background: #fafbfc; }
+tr:hover td { background: #fafbfc; }
+
+.btn {
+  display: inline-block;
+  padding: 7px 14px;
+  border-radius: 6px;
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+}
+.btn:hover { background: var(--primary-dark); text-decoration: none; }
+.btn-danger { background: var(--danger); }
+.btn-secondary { background: var(--muted); }
+.btn-sm { padding: 4px 10px; font-size: 13px; }
+
+.form-row { margin-bottom: 12px; }
+.form-row label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+input[type=text], input[type=password], input[type=number], input[type=date], select, textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+}
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+.badge-admin { background: #e0e7ff; color: #3730a3; }
+.badge-operator { background: #dcfce7; color: #166534; }
+.badge-low { background: #fee2e2; color: #991b1b; }
+
+.error { color: var(--danger); font-size: 13px; margin-bottom: 12px; }
+.success { color: var(--success); font-size: 13px; margin-bottom: 12px; }
+
+.stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+.stat-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+.stat-card .num { font-size: 26px; font-weight: 700; }
+.stat-card .label { font-size: 13px; color: var(--muted); }
+
+.login-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.login-card { width: 320px; }
+
+.item-row { display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 8px; margin-bottom: 8px; align-items: center; }
+.item-row-5 { grid-template-columns: 2fr 1fr 1fr 1fr auto; }
+.item-row-4 { grid-template-columns: 2fr 1fr 1fr auto; }
+.muted { color: var(--muted); font-size: 13px; }
+.right { text-align: right; }
+
+/* ===== 导航折叠按钮 & 移动端专属元素：桌面端默认隐藏 ===== */
+.nav-toggle { display: none; background: none; border: none; font-size: 22px; cursor: pointer; color: var(--text); padding: 4px 8px; }
+.nav-userbox { display: none; }
+.mobile-quick-actions { display: none; }
+.mobile-order-cards { display: none; }
+.table-wrap { width: 100%; }
+
+/* ===== 平板/手机（≤768px） ===== */
+@media (max-width: 768px) {
+  .topbar {
+    height: auto;
+    min-height: 52px;
+    flex-wrap: wrap;
+    padding: 10px 14px;
+    position: sticky;
+    top: 0;
+    z-index: 50;
+  }
+  .nav-toggle { display: block; }
+  .topbar .userbox { display: none; } /* 用折叠菜单里的账号区块代替 */
+
+  .topbar nav {
+    display: none;
+    flex-direction: column;
+    width: 100%;
+    order: 3;
+    margin-top: 10px;
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+  }
+  .topbar nav.open { display: flex; }
+  .topbar nav a {
+    padding: 12px 6px;
+    margin-right: 0;
+    font-size: 15px;
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-userbox {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+    padding-top: 8px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .container { margin: 12px auto; padding: 0 10px; }
+
+  .mobile-quick-actions {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .mobile-quick-actions .btn {
+    flex: 1;
+    text-align: center;
+    padding: 12px 8px;
+    font-size: 14px;
+  }
+
+  .card { padding: 14px; border-radius: 8px; }
+  h1 { font-size: 18px; }
+
+  /* 表单：网格改单列 */
+  .grid-2, .grid-3 { grid-template-columns: 1fr; }
+
+  /* 单据明细行：桌面多列网格 → 手机上堆叠成一张张小卡片 */
+  .item-row, .item-row-5, .item-row-4 {
+    grid-template-columns: 1fr !important;
+    gap: 6px;
+    background: #fafbfc;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 10px;
+  }
+  .item-row select, .item-row input,
+  .item-row-5 select, .item-row-5 input,
+  .item-row-4 select, .item-row-4 input {
+    font-size: 16px; /* 防止 iOS 自动放大页面 */
+  }
+  .item-row .btn-danger, .item-row-5 .btn-danger, .item-row-4 .btn-danger {
+    width: 100%;
+  }
+
+  /* 触摸目标放大 */
+  .btn { padding: 10px 16px; font-size: 15px; }
+  .btn-sm { padding: 8px 12px; }
+  input, select, textarea { padding: 10px; font-size: 16px; }
+
+  /* 表格：横向滚动而不是被压扁 */
+  .card { overflow-x: auto; }
+  table { min-width: 560px; font-size: 13px; }
+  th, td { padding: 8px 6px; }
+
+  .stat-grid { grid-template-columns: 1fr; gap: 8px; }
+  .stat-card .num { font-size: 22px; }
+
+  /* 销售单列表：手机上用卡片代替11列的表格，横向滚动太难读 */
+  .desktop-table-wrap { display: none; }
+  .mobile-order-cards { display: flex; flex-direction: column; gap: 10px; }
+  .order-card {
+    display: block;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    color: var(--text);
+    text-decoration: none;
+  }
+  .order-card:hover { text-decoration: none; }
+  .order-card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    font-weight: 600;
+  }
+  .order-card-id { font-size: 15px; }
+  .order-card-mid {
+    display: flex;
+    justify-content: space-between;
+    color: var(--muted);
+    font-size: 13px;
+    margin-bottom: 6px;
+  }
+  .order-card-bottom {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .order-card-amount { font-size: 18px; font-weight: 700; }
+  .order-card-debt {
+    margin-top: 6px;
+    font-size: 13px;
+    color: var(--danger);
+    font-weight: 600;
+  }
+}

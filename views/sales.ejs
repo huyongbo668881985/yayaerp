@@ -1,0 +1,103 @@
+<%- include('partials/header') %>
+<h1>销售出库</h1>
+<div style="margin-bottom:12px"><a class="btn" href="/sales/new">+ 新建销售单</a></div>
+
+<div class="card">
+  <form method="GET" action="/sales" style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap">
+    <div class="form-row" style="margin-bottom:0">
+      <label>开始日期</label>
+      <input type="date" name="start" value="<%= start %>">
+    </div>
+    <div class="form-row" style="margin-bottom:0">
+      <label>结束日期</label>
+      <input type="date" name="end" value="<%= end %>">
+    </div>
+    <div class="form-row" style="margin-bottom:0; flex-direction:row; align-items:center; gap:6px">
+      <input type="checkbox" name="unpaid" value="1" id="unpaidCheck" <%= unpaidOnly ? 'checked' : '' %> style="width:auto">
+      <label for="unpaidCheck" style="margin:0">只看未结清（欠款）</label>
+    </div>
+    <button type="submit" class="btn btn-secondary">筛选</button>
+    <a class="btn btn-secondary" href="/sales">清除</a>
+    <a class="btn" href="/sales/export?start=<%= start %>&end=<%= end %><%= unpaidOnly ? '&unpaid=1' : '' %>">导出CSV</a>
+  </form>
+</div>
+<div class="card desktop-table-wrap">
+  <table>
+    <tr>
+      <th>单号</th><th>日期</th><th>客户</th><th>仓库</th><th>金额</th><th>已收款</th><th>欠款</th>
+      <th>收款状态</th><th>审核状态</th><th>录入人</th><th>操作</th>
+    </tr>
+    <% orders.forEach(function(o) { %>
+      <tr>
+        <td><a href="/sales/<%= o.id %>">#<%= o.id %></a></td>
+        <td><%= o.order_date %></td>
+        <td><%= o.customer_name || '散客' %></td>
+        <td><%= o.warehouse_name %></td>
+        <td>¥<%= o.total_amount.toFixed(2) %></td>
+        <td>¥<%= (o.paid_amount || 0).toFixed(2) %></td>
+        <td>¥<%= (o.total_amount - (o.paid_amount || 0)).toFixed(2) %></td>
+        <td>
+          <% if (o.payment_status === 'paid') { %>
+            <span class="badge" style="background:#dcfce7;color:#166534">已收款</span>
+          <% } else if (o.payment_status === 'partial') { %>
+            <span class="badge" style="background:#fef3c7;color:#92400e">部分收款</span>
+          <% } else { %>
+            <span class="badge" style="background:#fee2e2;color:#991b1b">未收款</span>
+          <% } %>
+        </td>
+        <td>
+          <%
+            const statusMap = {
+              draft:     { text: '草稿',   bg: '#f3f4f6', fg: '#6b7280' },
+              submitted: { text: '待审核', bg: '#fef3c7', fg: '#92400e' },
+              approved:  { text: '已审核', bg: '#dbeafe', fg: '#1e40af' },
+              rejected:  { text: '已拒绝', bg: '#fee2e2', fg: '#991b1b' }
+            };
+            const st = statusMap[o.status] || { text: o.status, bg: '#f3f4f6', fg: '#6b7280' };
+          %>
+          <span class="badge" style="background:<%= st.bg %>;color:<%= st.fg %>"><%= st.text %></span>
+        </td>
+        <td><%= o.user_name %></td>
+        <td><a href="/sales/<%= o.id %>" class="btn btn-sm btn-secondary">详情</a></td>
+      </tr>
+    <% }) %>
+  </table>
+</div>
+
+<div class="mobile-order-cards">
+  <% const statusMap2 = {
+       draft:     { text: '草稿',   bg: '#f3f4f6', fg: '#6b7280' },
+       submitted: { text: '待审核', bg: '#fef3c7', fg: '#92400e' },
+       approved:  { text: '已审核', bg: '#dbeafe', fg: '#1e40af' },
+       rejected:  { text: '已拒绝', bg: '#fee2e2', fg: '#991b1b' }
+     };
+     const paymentMap2 = {
+       paid:    { text: '已收款',   bg: '#dcfce7', fg: '#166534' },
+       partial: { text: '部分收款', bg: '#fef3c7', fg: '#92400e' },
+       unpaid:  { text: '未收款',   bg: '#fee2e2', fg: '#991b1b' }
+     };
+  %>
+  <% orders.forEach(function(o) { %>
+    <% const st = statusMap2[o.status] || { text: o.status, bg: '#f3f4f6', fg: '#6b7280' }; %>
+    <% const pt = paymentMap2[o.payment_status] || { text: o.payment_status, bg: '#f3f4f6', fg: '#6b7280' }; %>
+    <a href="/sales/<%= o.id %>" class="order-card">
+      <div class="order-card-top">
+        <span class="order-card-id">#<%= o.id %> <%= o.customer_name || '散客' %></span>
+        <span class="badge" style="background:<%= st.bg %>;color:<%= st.fg %>"><%= st.text %></span>
+      </div>
+      <div class="order-card-mid">
+        <span><%= o.order_date %></span>
+        <span><%= o.warehouse_name %></span>
+      </div>
+      <div class="order-card-bottom">
+        <span class="order-card-amount">¥<%= o.total_amount.toFixed(2) %></span>
+        <span class="badge" style="background:<%= pt.bg %>;color:<%= pt.fg %>"><%= pt.text %></span>
+      </div>
+      <% if (o.total_amount - (o.paid_amount || 0) > 0) { %>
+        <div class="order-card-debt">欠款 ¥<%= (o.total_amount - (o.paid_amount || 0)).toFixed(2) %></div>
+      <% } %>
+    </a>
+  <% }) %>
+  <% if (orders.length === 0) { %><p class="muted">没有符合条件的订单</p><% } %>
+</div>
+<%- include('partials/footer') %>

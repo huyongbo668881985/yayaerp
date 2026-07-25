@@ -1,0 +1,105 @@
+<%- include('partials/header') %>
+<h1><%= order ? '编辑调拨单 #' + order.id : '新建调拨单' %></h1>
+<div class="card">
+  <% if (error) { %><div class="error"><%= error %></div><% } %>
+  <% if (order) { %><p class="muted">编辑后仍是草稿状态，保存后需要重新点"提交审核"。</p><% } %>
+  <form method="POST" action="<%= order ? '/transfers/' + order.id + '/edit' : '/transfers/new' %>">
+    <div class="grid-3">
+      <div class="form-row">
+        <label>调出仓库（从哪调出）*</label>
+        <select name="from_warehouse_id" required>
+          <option value="">-- 请选择 --</option>
+          <% warehouses.forEach(function(w) { %><option value="<%= w.id %>" <%= order && order.from_warehouse_id === w.id ? 'selected' : '' %>><%= w.name %></option><% }) %>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>调入仓库（调到哪去）*</label>
+        <select name="to_warehouse_id" required>
+          <option value="">-- 请选择 --</option>
+          <% warehouses.forEach(function(w) { %><option value="<%= w.id %>" <%= order && order.to_warehouse_id === w.id ? 'selected' : '' %>><%= w.name %></option><% }) %>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>日期</label>
+        <input type="date" name="order_date" value="<%= order ? order.order_date : new Date().toISOString().slice(0,10) %>">
+      </div>
+    </div>
+
+    <h2>调拨商品明细</h2>
+    <div id="items"></div>
+    <button type="button" class="btn btn-secondary btn-sm" onclick="addRow()">+ 添加一行</button>
+
+    <div class="form-row" style="margin-top:16px">
+      <label>备注</label>
+      <textarea name="note" rows="2" placeholder="比如：车1 今日出车装货"><%= order ? (order.note || '') : '' %></textarea>
+    </div>
+
+    <div style="margin-top:16px">
+      <button class="btn" type="submit"><%= order ? '保存修改' : '提交调拨' %></button>
+      <a class="btn btn-secondary" href="<%= order ? '/transfers/' + order.id : '/transfers' %>">取消</a>
+    </div>
+  </form>
+</div>
+
+<script>
+  const PRODUCTS = <%- JSON.stringify(products) %>;
+  const EXISTING_ITEMS = <%- JSON.stringify((typeof existingItems !== 'undefined' ? existingItems : []).map(function(it) {
+    const p = products.find(function(pr) { return pr.id === it.product_id; });
+    const isPack = p && p.pack_unit && it.unit_label === p.pack_unit;
+    return { id: it.product_id, quantity: it.quantity, unit_choice: isPack ? 'pack' : 'base' };
+  })) %>;
+
+  function addRow(initial) {
+    const container = document.getElementById('items');
+    const div = document.createElement('div');
+    div.className = 'item-row';
+    div.style.gridTemplateColumns = '2fr 1fr 1fr auto';
+    const options = PRODUCTS.map(p => `<option value="${p.id}" data-unit="${p.unit}" data-pack-unit="${p.pack_unit || ''}">${p.name}${p.spec ? ' ('+p.spec+')' : ''}</option>`).join('');
+    div.innerHTML = `
+      <select name="product_id" onchange="onProductChange(this)" required>
+        <option value="">-- 选择商品 --</option>
+        ${options}
+      </select>
+      <select name="unit_choice" class="unit-select">
+        <option value="base">（先选商品）</option>
+      </select>
+      <input type="number" name="quantity" placeholder="数量" min="1" required>
+      <button type="button" class="btn btn-danger btn-sm" onclick="this.parentElement.remove()">删除</button>
+    `;
+    container.appendChild(div);
+
+    if (initial) {
+      const productSelect = div.querySelector('select[name=product_id]');
+      productSelect.value = initial.id;
+      onProductChange(productSelect);
+      div.querySelector('select[name=unit_choice]').value = initial.unit_choice;
+      div.querySelector('input[name=quantity]').value = initial.quantity;
+    }
+  }
+
+  function onProductChange(select) {
+    const row = select.parentElement;
+    const opt = select.options[select.selectedIndex];
+    const unit = opt.getAttribute('data-unit');
+    const packUnit = opt.getAttribute('data-pack-unit');
+    const unitSelect = row.querySelector('select[name=unit_choice]');
+    unitSelect.innerHTML = '';
+    const baseOpt = document.createElement('option');
+    baseOpt.value = 'base';
+    baseOpt.textContent = unit || '基本单位';
+    unitSelect.appendChild(baseOpt);
+    if (packUnit) {
+      const packOpt = document.createElement('option');
+      packOpt.value = 'pack';
+      packOpt.textContent = packUnit;
+      unitSelect.appendChild(packOpt);
+    }
+  }
+
+  if (EXISTING_ITEMS.length > 0) {
+    EXISTING_ITEMS.forEach(function(it) { addRow(it); });
+  } else {
+    addRow();
+  }
+</script>
+<%- include('partials/footer') %>

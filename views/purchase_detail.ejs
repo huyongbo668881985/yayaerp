@@ -1,0 +1,25 @@
+<%- include('partials/header') %>
+<h1>采购单 #<%= order.id %></h1>
+<div class="card">
+  <p><strong>日期：</strong><%= order.order_date %> &nbsp; <strong>供应商：</strong><%= order.supplier_name || '-' %> &nbsp; <strong>仓库：</strong><%= order.warehouse_name %></p>
+  <p><strong>录入人：</strong><%= order.user_name %> &nbsp; <strong>备注：</strong><%= order.note || '-' %></p>
+  <table>
+    <tr><th>商品</th><th>数量</th><th>单价</th><th>小计</th></tr>
+    <% items.forEach(function(it) { %>
+      <tr>
+        <td><%= it.product_name %></td>
+        <td><%= it.quantity %> <%= it.unit_label %></td>
+        <td>¥<%= it.unit_price.toFixed(2) %></td>
+        <td>¥<%= (it.quantity * it.unit_price).toFixed(2) %></td>
+      </tr>
+    <% }) %>
+  </table>
+  <p class="right"><strong>总计：¥<%= order.total_amount.toFixed(2) %></strong></p>
+  <div style="display:flex; gap:8px; margin-top:16px">
+    <a class="btn btn-secondary" href="/purchases">返回列表</a>
+    <form action="/purchases/<%= order.id %>/delete" method="POST" onsubmit="return confirm('确认删除这张采购单？会把对应入库的库存扣回去。')">
+      <button type="submit" class="btn btn-danger">删除此单</button>
+    </form>
+  </div>
+</div>
+<%- include('partials/footer') %>

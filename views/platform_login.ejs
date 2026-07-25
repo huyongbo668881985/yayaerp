@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>平台管理 - 登录</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="card login-card">
+    <h1>🛠 平台管理后台</h1>
+    <% if (error) { %><div class="error"><%= error %></div><% } %>
+    <form method="POST" action="/platform-admin/login">
+      <div class="form-row">
+        <label>用户名</label>
+        <input type="text" name="username" required autofocus>
+      </div>
+      <div class="form-row">
+        <label>密码</label>
+        <input type="password" name="password" required>
+      </div>
+      <button class="btn" type="submit" style="width:100%">登录</button>
+    </form>
+    <p class="muted" style="margin-top:14px">这里是平台管理入口，租户用户请从 <a href="/login">普通登录页</a> 进入。</p>
+  </div>
+</div>
+</body>
+</html>

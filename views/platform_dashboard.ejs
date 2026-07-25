@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>平台管理 - 租户列表</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="topbar">
+  <div class="brand">🛠 平台管理后台</div>
+  <div class="userbox">
+    <span><%= currentPlatformAdmin.name %></span>
+    <a href="/platform-admin/change-password" class="btn btn-secondary btn-sm">修改密码</a>
+    <form method="POST" action="/platform-admin/logout"><button class="btn btn-secondary btn-sm" type="submit">退出</button></form>
+  </div>
+</div>
+<div class="container">
+  <h1>租户列表</h1>
+  <div style="margin-bottom:14px">
+    <a href="/platform-admin/tenants/new" class="btn">+ 开通新租户</a>
+  </div>
+
+  <div class="card desktop-table-wrap">
+    <table>
+      <tr><th>租户代码</th><th>名称</th><th>状态</th><th>到期日期</th><th>账号数</th><th>创建时间</th><th>操作</th></tr>
+      <% tenants.forEach(function(t) { %>
+        <tr>
+          <td><%= t.tenant_code %></td>
+          <td><%= t.name %></td>
+          <td>
+            <% if (t.status !== 'active') { %>
+              <span class="badge badge-low">已暂停</span>
+            <% } else if (t.isExpired) { %>
+              <span class="badge badge-low">已到期</span>
+            <% } else { %>
+              <span class="badge badge-operator">运行中</span>
+            <% } %>
+          </td>
+          <td><%= t.expires_at || '不限' %></td>
+          <td><%= t.userCount === null ? '-' : t.userCount %> / <%= t.max_users || '不限' %></td>
+          <td><%= t.created_at %></td>
+          <td>
+            <a href="/platform-admin/tenants/<%= t.id %>/edit" class="btn btn-sm btn-secondary">编辑</a>
+            <form action="/platform-admin/tenants/<%= t.id %>/toggle" method="POST" style="display:inline" onsubmit="return confirm('<%= t.status === 'active' ? '确认暂停该租户？暂停后该租户所有用户都无法登录。' : '确认恢复该租户的访问？' %>')">
+              <button type="submit" class="btn btn-sm <%= t.status === 'active' ? 'btn-danger' : 'btn-secondary' %>">
+                <%= t.status === 'active' ? '暂停' : '恢复' %>
+              </button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+    </table>
+  </div>
+
+  <div class="mobile-order-cards">
+    <% tenants.forEach(function(t) { %>
+      <div class="order-card">
+        <div class="order-card-top">
+          <span class="order-card-id"><%= t.name %></span>
+          <% if (t.status !== 'active') { %>
+            <span class="badge badge-low">已暂停</span>
+          <% } else if (t.isExpired) { %>
+            <span class="badge badge-low">已到期</span>
+          <% } else { %>
+            <span class="badge badge-operator">运行中</span>
+          <% } %>
+        </div>
+        <div class="order-card-mid">
+          <span>代码：<%= t.tenant_code %></span>
+          <span>到期：<%= t.expires_at || '不限' %></span>
+        </div>
+        <div class="order-card-bottom">
+          <span class="muted">账号 <%= t.userCount === null ? '-' : t.userCount %> / <%= t.max_users || '不限' %></span>
+          <span class="muted"><%= t.created_at %></span>
+        </div>
+        <div style="display:flex; gap:8px; margin-top:10px">
+          <a href="/platform-admin/tenants/<%= t.id %>/edit" class="btn btn-sm btn-secondary" style="flex:1; text-align:center">编辑</a>
+          <form action="/platform-admin/tenants/<%= t.id %>/toggle" method="POST" style="flex:1" onsubmit="return confirm('<%= t.status === 'active' ? '确认暂停该租户？暂停后该租户所有用户都无法登录。' : '确认恢复该租户的访问？' %>')">
+            <button type="submit" class="btn btn-sm <%= t.status === 'active' ? 'btn-danger' : 'btn-secondary' %>" style="width:100%">
+              <%= t.status === 'active' ? '暂停' : '恢复' %>
+            </button>
+          </form>
+        </div>
+      </div>
+    <% }) %>
+    <% if (tenants.length === 0) { %><p class="muted">还没有开通任何租户</p><% } %>
+  </div>
+</div>
+</body>
+</html>

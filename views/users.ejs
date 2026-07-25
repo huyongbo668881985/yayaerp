@@ -1,0 +1,98 @@
+<%- include('partials/header') %>
+<h1>账号管理</h1>
+<% if (maxUsers) { %>
+  <p class="muted" style="margin-bottom:10px">
+    当前 <%= users.length %> / <%= maxUsers %> 个账号
+    <% if (users.length >= maxUsers) { %>（已达上限，如需更多请联系平台管理员）<% } %>
+  </p>
+<% } %>
+<div class="card">
+  <h2>新增账号</h2>
+  <% if (error) { %><div class="error"><%= error %></div><% } %>
+  <form method="POST" action="/users/new" class="grid-3">
+    <div class="form-row"><label>用户名</label><input type="text" name="username" required></div>
+    <div class="form-row"><label>姓名</label><input type="text" name="name" required></div>
+    <div class="form-row">
+      <label>角色</label>
+      <select name="role">
+        <option value="operator">操作员</option>
+        <option value="admin">管理员</option>
+      </select>
+    </div>
+    <div class="form-row"><label>初始密码</label><input type="password" name="password" required minlength="6"></div>
+    <div><button class="btn" type="submit" <%= (maxUsers && users.length >= maxUsers) ? 'disabled' : '' %>>新增</button></div>
+  </form>
+</div>
+<div class="card desktop-table-wrap">
+  <table>
+    <tr><th>用户名</th><th>姓名</th><th>角色</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
+    <% users.forEach(function(u) { %>
+      <tr>
+        <td><%= u.username %></td>
+        <td><%= u.name %></td>
+        <td><span class="badge <%= u.role === 'admin' ? 'badge-admin' : 'badge-operator' %>"><%= u.role === 'admin' ? '管理员' : '操作员' %></span></td>
+        <td>
+          <% if (u.active) { %>
+            <span class="badge badge-operator">正常</span>
+          <% } else { %>
+            <span class="badge badge-low">已禁用</span>
+          <% } %>
+        </td>
+        <td><%= u.created_at %></td>
+        <td>
+          <form method="POST" action="/users/<%= u.id %>/reset-password" style="display:inline-flex; gap:4px" onsubmit="return confirm('确认重置该账号密码？')">
+            <input type="password" name="new_password" placeholder="新密码" minlength="6" required style="width:110px">
+            <button type="submit" class="btn btn-secondary btn-sm">重置密码</button>
+          </form>
+          <% if (u.id !== currentUser.id) { %>
+            <form method="POST" action="/users/<%= u.id %>/toggle-active" style="display:inline" onsubmit="return confirm('<%= u.active ? '确认禁用该账号？禁用后该账号会立刻无法继续操作（包括正在登录中的会话）。' : '确认恢复该账号？' %>')">
+              <button type="submit" class="btn btn-secondary btn-sm" style="margin-left:8px"><%= u.active ? '禁用' : '启用' %></button>
+            </form>
+            <form method="POST" action="/users/<%= u.id %>/delete" style="display:inline" onsubmit="return confirm('确认删除该账号？如果该账号有历史单据会删除失败，建议改用禁用。')">
+              <button type="submit" style="background:none;border:none;color:#e5484d;cursor:pointer;padding:0;margin-left:8px">删除</button>
+            </form>
+          <% } else { %>
+            <span class="muted" style="margin-left:8px">（当前登录账号）</span>
+          <% } %>
+        </td>
+      </tr>
+    <% }) %>
+  </table>
+</div>
+
+<div class="mobile-order-cards">
+  <% users.forEach(function(u) { %>
+    <div class="order-card">
+      <div class="order-card-top">
+        <span class="order-card-id"><%= u.name %>（<%= u.username %>）</span>
+        <span class="badge <%= u.role === 'admin' ? 'badge-admin' : 'badge-operator' %>"><%= u.role === 'admin' ? '管理员' : '操作员' %></span>
+      </div>
+      <div class="order-card-mid">
+        <span class="muted">创建于 <%= u.created_at %></span>
+        <% if (u.active) { %>
+          <span class="badge badge-operator">正常</span>
+        <% } else { %>
+          <span class="badge badge-low">已禁用</span>
+        <% } %>
+      </div>
+      <form method="POST" action="/users/<%= u.id %>/reset-password" style="display:flex; gap:8px; margin-top:8px" onsubmit="return confirm('确认重置该账号密码？')">
+        <input type="password" name="new_password" placeholder="新密码" minlength="6" required style="flex:1">
+        <button type="submit" class="btn btn-secondary btn-sm">重置</button>
+      </form>
+      <% if (u.id !== currentUser.id) { %>
+        <div style="display:flex; gap:8px; margin-top:8px">
+          <form method="POST" action="/users/<%= u.id %>/toggle-active" style="flex:1" onsubmit="return confirm('<%= u.active ? '确认禁用该账号？禁用后该账号会立刻无法继续操作（包括正在登录中的会话）。' : '确认恢复该账号？' %>')">
+            <button type="submit" class="btn btn-secondary btn-sm" style="width:100%"><%= u.active ? '禁用' : '启用' %></button>
+          </form>
+          <form method="POST" action="/users/<%= u.id %>/delete" style="flex:1" onsubmit="return confirm('确认删除该账号？如果该账号有历史单据会删除失败，建议改用禁用。')">
+            <button type="submit" class="btn btn-sm btn-danger" style="width:100%">删除</button>
+          </form>
+        </div>
+      <% } else { %>
+        <p class="muted" style="margin-top:8px">（当前登录账号）</p>
+      <% } %>
+    </div>
+  <% }) %>
+  <% if (users.length === 0) { %><p class="muted">暂无账号</p><% } %>
+</div>
+<%- include('partials/footer') %>

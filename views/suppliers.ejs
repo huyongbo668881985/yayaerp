@@ -1,0 +1,47 @@
+<%- include('partials/header') %>
+<h1>供应商管理</h1>
+<div class="card">
+  <h2>新增供应商</h2>
+  <form method="POST" action="/suppliers/new" class="grid-3">
+    <div class="form-row"><label>名称</label><input type="text" name="name" required></div>
+    <div class="form-row"><label>联系人</label><input type="text" name="contact"></div>
+    <div class="form-row"><label>电话</label><input type="text" name="phone"></div>
+    <div><button class="btn" type="submit">新增</button></div>
+  </form>
+</div>
+<div class="card desktop-table-wrap">
+  <table>
+    <tr><th>名称</th><th>联系人</th><th>电话</th><th>操作</th></tr>
+    <% suppliers.forEach(function(s) { %>
+      <tr>
+        <td><%= s.name %></td>
+        <td><%= s.contact || '-' %></td>
+        <td><%= s.phone || '-' %></td>
+        <td>
+          <form method="POST" action="/suppliers/<%= s.id %>/delete" style="display:inline" onsubmit="return confirm('确认删除？')">
+            <button type="submit" style="background:none;border:none;color:#e5484d;cursor:pointer;padding:0">删除</button>
+          </form>
+        </td>
+      </tr>
+    <% }) %>
+  </table>
+</div>
+
+<div class="mobile-order-cards">
+  <% suppliers.forEach(function(s) { %>
+    <div class="order-card">
+      <div class="order-card-top">
+        <span class="order-card-id"><%= s.name %></span>
+      </div>
+      <div class="order-card-mid">
+        <span><%= s.contact || '-' %></span>
+        <span><%= s.phone || '-' %></span>
+      </div>
+      <form method="POST" action="/suppliers/<%= s.id %>/delete" style="margin-top:8px" onsubmit="return confirm('确认删除？')">
+        <button type="submit" class="btn btn-sm btn-danger" style="width:100%">删除</button>
+      </form>
+    </div>
+  <% }) %>
+  <% if (suppliers.length === 0) { %><p class="muted">暂无供应商</p><% } %>
+</div>
+<%- include('partials/footer') %>

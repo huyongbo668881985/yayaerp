@@ -1,0 +1,13 @@
+services:
+  jxc:
+    build: .
+    container_name: jxc-app
+    restart: unless-stopped
+    environment:
+      - PORT=3000
+      - SESSION_SECRET=${SESSION_SECRET:-please-change-this-secret}
+    volumes:
+      - ./data:/app/data
+    ports:
+      # 只绑定到本机，交给 Nginx Proxy Manager 反代（与你现有服务保持一致）
+      - "3000:3000"

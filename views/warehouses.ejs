@@ -1,0 +1,50 @@
+<%- include('partials/header') %>
+<h1>仓库管理</h1>
+
+<% if (isAdmin) { %>
+<div class="card">
+  <h2>新增仓库</h2>
+  <form method="POST" action="/warehouses/new" class="grid-2">
+    <div class="form-row"><label>仓库名称</label><input type="text" name="name" required></div>
+    <div class="form-row"><label>地址（可选）</label><input type="text" name="address"></div>
+    <div><button class="btn" type="submit">新增</button></div>
+  </form>
+</div>
+<% } %>
+
+<div class="card desktop-table-wrap">
+  <table>
+    <tr><th>名称</th><th>地址</th><% if (isAdmin) { %><th>操作</th><% } %></tr>
+    <% warehouses.forEach(function(w) { %>
+      <tr>
+        <td><%= w.name %></td>
+        <td><%= w.address || '-' %></td>
+        <% if (isAdmin) { %>
+          <td>
+            <form method="POST" action="/warehouses/<%= w.id %>/delete" style="display:inline" onsubmit="return confirm('确认删除？若该仓库仍有库存将无法删除')">
+              <button type="submit" style="background:none;border:none;color:#e5484d;cursor:pointer;padding:0">删除</button>
+            </form>
+          </td>
+        <% } %>
+      </tr>
+    <% }) %>
+  </table>
+</div>
+
+<div class="mobile-order-cards">
+  <% warehouses.forEach(function(w) { %>
+    <div class="order-card">
+      <div class="order-card-top">
+        <span class="order-card-id"><%= w.name %></span>
+      </div>
+      <% if (w.address) { %><div class="muted" style="margin-bottom:<%= isAdmin ? '8px' : '0' %>"><%= w.address %></div><% } %>
+      <% if (isAdmin) { %>
+        <form method="POST" action="/warehouses/<%= w.id %>/delete" onsubmit="return confirm('确认删除？若该仓库仍有库存将无法删除')">
+          <button type="submit" class="btn btn-sm btn-danger" style="width:100%">删除</button>
+        </form>
+      <% } %>
+    </div>
+  <% }) %>
+  <% if (warehouses.length === 0) { %><p class="muted">暂无仓库</p><% } %>
+</div>
+<%- include('partials/footer') %>

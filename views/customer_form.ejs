@@ -1,0 +1,25 @@
+<%- include('partials/header') %>
+<h1>编辑客户</h1>
+<div class="card" style="max-width:520px">
+  <% if (error) { %><div class="error"><%= error %></div><% } %>
+  <form method="POST" action="/customers/<%= customer.id %>/edit">
+    <div class="form-row"><label>名称 *</label><input type="text" name="name" required value="<%= customer.name %>"></div>
+    <div class="form-row"><label>联系人</label><input type="text" name="contact" value="<%= customer.contact || '' %>"></div>
+    <div class="form-row"><label>电话</label><input type="text" name="phone" value="<%= customer.phone || '' %>"></div>
+    <div class="form-row"><label>地址</label><input type="text" name="address" placeholder="送货地址" value="<%= customer.address || '' %>"></div>
+    <% if (isAdmin) { %>
+      <div class="form-row">
+        <label>归属业务员</label>
+        <select name="operator_id">
+          <option value="">-- 不指定 --</option>
+          <% users.forEach(function(u) { %>
+            <option value="<%= u.id %>" <%= customer.operator_id === u.id ? 'selected' : '' %>><%= u.name %>（<%= u.role === 'admin' ? '管理员' : '操作员' %>）</option>
+          <% }) %>
+        </select>
+      </div>
+    <% } %>
+    <button class="btn" type="submit">保存</button>
+    <a class="btn btn-secondary" href="/customers">取消</a>
+  </form>
+</div>
+<%- include('partials/footer') %>

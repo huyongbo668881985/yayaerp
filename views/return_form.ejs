@@ -1,0 +1,182 @@
+<%- include('partials/header') %>
+<h1><%= order ? '编辑退货单 #' + order.id : '新建退货单' %></h1>
+<div class="card">
+  <% if (error) { %><div class="error"><%= error %></div><% } %>
+  <% if (order) { %><p class="muted">编辑后仍是草稿状态，保存后需要重新点"提交审核"。</p><% } %>
+  <form method="POST" action="<%= order ? '/returns/' + order.id + '/edit' : '/returns/new' %>" id="returnForm">
+    <div class="grid-3">
+      <div class="form-row">
+        <label>客户（可选）</label>
+        <select name="customer_id">
+          <option value="">-- 散客 --</option>
+          <% customers.forEach(function(c) { %><option value="<%= c.id %>" <%= order && order.customer_id === c.id ? 'selected' : '' %>><%= c.name %></option><% }) %>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>退回仓库 *</label>
+        <select name="warehouse_id" required>
+          <% warehouses.forEach(function(w) { %><option value="<%= w.id %>" <%= order && order.warehouse_id === w.id ? 'selected' : '' %>><%= w.name %></option><% }) %>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>日期</label>
+        <input type="date" name="order_date" value="<%= order ? order.order_date : new Date().toISOString().slice(0,10) %>">
+      </div>
+    </div>
+
+    <div class="grid-3">
+      <div class="form-row">
+        <label>已退现金金额</label>
+        <input type="number" name="refunded_amount" placeholder="本次退款金额" step="0.01" min="0" value="<%= order ? (order.refunded_amount || 0) : 0 %>">
+      </div>
+      <div class="form-row">
+        <label>备注</label>
+        <input type="text" name="remarks" placeholder="备注信息" value="<%= order ? (order.remarks || '') : '' %>">
+      </div>
+    </div>
+
+    <h2>退货商品明细</h2>
+    <div id="items"></div>
+    <button type="button" class="btn btn-secondary btn-sm" onclick="addRow()">+ 添加一行</button>
+    <p style="margin-top:10px;font-size:16px"><strong>退货合计：¥<span id="itemsTotal">0.00</span></strong></p>
+
+    <div class="form-row" style="margin-top:16px">
+      <label>内部备注（退货原因等）</label>
+      <textarea name="note" rows="2"><%= order ? (order.note || '') : '' %></textarea>
+    </div>
+
+    <input type="hidden" name="items_json" id="itemsJson">
+
+    <div style="margin-top:16px">
+      <button class="btn" type="submit"><%= order ? '保存修改' : '提交退货' %></button>
+      <a class="btn btn-secondary" href="<%= order ? '/returns/' + order.id : '/returns' %>">取消</a>
+    </div>
+  </form>
+</div>
+
+<script>
+  const PRODUCTS = <%- JSON.stringify(products) %>;
+  const EXISTING_ITEMS = <%- JSON.stringify((typeof existingItems !== 'undefined' ? existingItems : []).map(function(it) {
+    const p = products.find(function(pr) { return pr.id === it.product_id; });
+    const isPack = p && p.pack_unit && it.unit_label === p.pack_unit;
+    return {
+      id: it.product_id,
+      quantity: it.quantity,
+      price: it.unit_price,
+      unit_choice: isPack ? 'pack' : 'base'
+    };
+  })) %>;
+
+  function addRow(initial) {
+    const container = document.getElementById('items');
+    const div = document.createElement('div');
+    div.className = 'item-row';
+    div.style.gridTemplateColumns = '2fr 1fr 1fr 1fr auto';
+    const options = PRODUCTS.map(p => `<option value="${p.id}" data-price="${p.sale_price}" data-unit="${p.unit}" data-pack-unit="${p.pack_unit || ''}" data-pack-size="${p.pack_size || 1}">${p.name}${p.spec ? ' ('+p.spec+')' : ''}</option>`).join('');
+    div.innerHTML = `
+      <select name="product_id" onchange="onProductChange(this)" required>
+        <option value="">-- 选择商品 --</option>
+        ${options}
+      </select>
+      <select name="unit_choice" class="unit-select" onchange="fillPrice(this.parentElement.querySelector('select[name=product_id]'))">
+        <option value="base">（先选商品）</option>
+      </select>
+      <input type="number" name="quantity" placeholder="退货数量" min="1" required>
+      <input type="number" name="unit_price" placeholder="退货单价" step="0.01" required>
+      <button type="button" class="btn btn-danger btn-sm" onclick="this.parentElement.remove(); recalcTotal();">删除</button>
+    `;
+    container.appendChild(div);
+
+    if (initial) {
+      const productSelect = div.querySelector('select[name=product_id]');
+      productSelect.value = initial.id;
+      onProductChange(productSelect);
+      const unitSelect = div.querySelector('select[name=unit_choice]');
+      unitSelect.value = initial.unit_choice;
+      div.querySelector('input[name=quantity]').value = initial.quantity;
+      div.querySelector('input[name=unit_price]').value = initial.price;
+    }
+    recalcTotal();
+  }
+
+  function onProductChange(select) {
+    const row = select.parentElement;
+    const opt = select.options[select.selectedIndex];
+    const unit = opt.getAttribute('data-unit');
+    const packUnit = opt.getAttribute('data-pack-unit');
+    const unitSelect = row.querySelector('select[name=unit_choice]');
+    unitSelect.innerHTML = '';
+    const baseOpt = document.createElement('option');
+    baseOpt.value = 'base';
+    baseOpt.textContent = unit || '基本单位';
+    unitSelect.appendChild(baseOpt);
+    if (packUnit) {
+      const packOpt = document.createElement('option');
+      packOpt.value = 'pack';
+      packOpt.textContent = packUnit;
+      unitSelect.appendChild(packOpt);
+    }
+    fillPrice(select);
+  }
+
+  function fillPrice(select) {
+    const row = select.parentElement;
+    const opt = select.options[select.selectedIndex];
+    const basePrice = Number(opt.getAttribute('data-price')) || 0;
+    const packSize = Number(opt.getAttribute('data-pack-size')) || 1;
+    const unitChoice = row.querySelector('select[name=unit_choice]').value;
+    const priceInput = row.querySelector('input[name=unit_price]');
+    const suggested = unitChoice === 'pack' ? basePrice * packSize : basePrice;
+    priceInput.value = suggested || '';
+  }
+
+  function recalcTotal() {
+    const rows = document.querySelectorAll('#items .item-row');
+    let total = 0;
+    rows.forEach(function(row) {
+      const qtyInput = row.querySelector('input[name=quantity]');
+      const priceInput = row.querySelector('input[name=unit_price]');
+      const qty = parseFloat(qtyInput.value) || 0;
+      const price = parseFloat(priceInput.value) || 0;
+      total += qty * price;
+    });
+    const el = document.getElementById('itemsTotal');
+    if (el) el.textContent = total.toFixed(2);
+  }
+  document.getElementById('items').addEventListener('input', recalcTotal);
+  document.getElementById('items').addEventListener('change', recalcTotal);
+
+  if (EXISTING_ITEMS.length > 0) {
+    EXISTING_ITEMS.forEach(function(it) { addRow(it); });
+  } else {
+    addRow();
+  }
+
+  document.getElementById('returnForm').addEventListener('submit', function(e) {
+    const rows = document.querySelectorAll('#items .item-row');
+    const items = [];
+    rows.forEach(function(row) {
+      const productSelect = row.querySelector('select[name=product_id]');
+      const qtyInput = row.querySelector('input[name=quantity]');
+      const priceInput = row.querySelector('input[name=unit_price]');
+      const unitChoiceSelect = row.querySelector('select[name=unit_choice]');
+      if (!productSelect.value || !qtyInput.value) return;
+      items.push({
+        id: parseInt(productSelect.value),
+        quantity: parseInt(qtyInput.value),
+        price: parseFloat(priceInput.value) || 0,
+        unit_choice: unitChoiceSelect ? unitChoiceSelect.value : 'base'
+      });
+    });
+    let hidden = document.getElementById('itemsJson');
+    if (!hidden) {
+      hidden = document.createElement('input');
+      hidden.type = 'hidden';
+      hidden.name = 'items_json';
+      hidden.id = 'itemsJson';
+      this.appendChild(hidden);
+    }
+    hidden.value = JSON.stringify(items);
+  });
+</script>
+<%- include('partials/footer') %>

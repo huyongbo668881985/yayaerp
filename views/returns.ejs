@@ -1,0 +1,92 @@
+<%- include('partials/header') %>
+<h1>退货管理</h1>
+<div style="margin-bottom:12px"><a class="btn" href="/returns/new">+ 新建退货单</a></div>
+
+<div class="card">
+  <form method="GET" action="/returns" style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap">
+    <div class="form-row" style="margin-bottom:0">
+      <label>开始日期</label>
+      <input type="date" name="start" value="<%= start %>">
+    </div>
+    <div class="form-row" style="margin-bottom:0">
+      <label>结束日期</label>
+      <input type="date" name="end" value="<%= end %>">
+    </div>
+    <button type="submit" class="btn btn-secondary">筛选</button>
+    <a class="btn btn-secondary" href="/returns">清除</a>
+    <a class="btn" href="/returns/export?start=<%= start %>&end=<%= end %>">导出CSV</a>
+  </form>
+</div>
+
+<div class="card desktop-table-wrap">
+  <table>
+    <tr><th>单号</th><th>日期</th><th>客户</th><th>退回仓库</th><th>金额</th><th>退款状态</th><th>审核状态</th><th>录入人</th></tr>
+    <% orders.forEach(function(o) { %>
+      <tr>
+        <td><a href="/returns/<%= o.id %>">#<%= o.id %></a></td>
+        <td><%= o.order_date %></td>
+        <td><%= o.customer_name || '散客' %></td>
+        <td><%= o.warehouse_name %></td>
+        <td>¥<%= o.total_amount.toFixed(2) %></td>
+        <td>
+          <% if (o.refund_status === 'refunded') { %>
+            <span class="badge" style="background:#dcfce7;color:#166534">已退款</span>
+          <% } else if (o.refund_status === 'partial') { %>
+            <span class="badge" style="background:#fef3c7;color:#92400e">部分退款</span>
+          <% } else { %>
+            <span class="badge" style="background:#fee2e2;color:#991b1b">未退款</span>
+          <% } %>
+        </td>
+        <td>
+          <%
+            const statusMap = {
+              draft:     { text: '草稿',   bg: '#f3f4f6', fg: '#6b7280' },
+              submitted: { text: '待审核', bg: '#fef3c7', fg: '#92400e' },
+              approved:  { text: '已审核', bg: '#dbeafe', fg: '#1e40af' },
+              rejected:  { text: '已拒绝', bg: '#fee2e2', fg: '#991b1b' }
+            };
+            const st = statusMap[o.status] || { text: o.status, bg: '#f3f4f6', fg: '#6b7280' };
+          %>
+          <span class="badge" style="background:<%= st.bg %>;color:<%= st.fg %>"><%= st.text %></span>
+        </td>
+        <td><%= o.user_name %></td>
+      </tr>
+    <% }) %>
+  </table>
+  <% if (orders.length === 0) { %><p class="muted">暂无退货单</p><% } %>
+</div>
+
+<div class="mobile-order-cards">
+  <% orders.forEach(function(o) { %>
+    <% const statusMap2 = {
+         draft:     { text: '草稿',   bg: '#f3f4f6', fg: '#6b7280' },
+         submitted: { text: '待审核', bg: '#fef3c7', fg: '#92400e' },
+         approved:  { text: '已审核', bg: '#dbeafe', fg: '#1e40af' },
+         rejected:  { text: '已拒绝', bg: '#fee2e2', fg: '#991b1b' }
+       };
+       const st2 = statusMap2[o.status] || { text: o.status, bg: '#f3f4f6', fg: '#6b7280' };
+    %>
+    <a href="/returns/<%= o.id %>" class="order-card">
+      <div class="order-card-top">
+        <span class="order-card-id">#<%= o.id %> <%= o.customer_name || '散客' %></span>
+        <span class="badge" style="background:<%= st2.bg %>;color:<%= st2.fg %>"><%= st2.text %></span>
+      </div>
+      <div class="order-card-mid">
+        <span><%= o.order_date %></span>
+        <span><%= o.warehouse_name %></span>
+      </div>
+      <div class="order-card-bottom">
+        <span class="order-card-amount">¥<%= o.total_amount.toFixed(2) %></span>
+        <% if (o.refund_status === 'refunded') { %>
+          <span class="badge" style="background:#dcfce7;color:#166534">已退款</span>
+        <% } else if (o.refund_status === 'partial') { %>
+          <span class="badge" style="background:#fef3c7;color:#92400e">部分退款</span>
+        <% } else { %>
+          <span class="badge" style="background:#fee2e2;color:#991b1b">未退款</span>
+        <% } %>
+      </div>
+    </a>
+  <% }) %>
+  <% if (orders.length === 0) { %><p class="muted">暂无退货单</p><% } %>
+</div>
+<%- include('partials/footer') %>

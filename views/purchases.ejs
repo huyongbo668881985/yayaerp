@@ -1,0 +1,52 @@
+<%- include('partials/header') %>
+<h1>采购入库</h1>
+<div style="margin-bottom:12px"><a class="btn" href="/purchases/new">+ 新建采购单</a></div>
+<div class="card desktop-table-wrap">
+  <table>
+    <tr><th>单号</th><th>日期</th><th>供应商</th><th>仓库</th><th>金额</th><th>录入人</th><th>操作</th></tr>
+    <% orders.forEach(function(o) { %>
+      <tr>
+        <td><a href="/purchases/<%= o.id %>">#<%= o.id %></a></td>
+        <td><%= o.order_date %></td>
+        <td><%= o.supplier_name || '-' %></td>
+        <td><%= o.warehouse_name %></td>
+        <td>¥<%= o.total_amount.toFixed(2) %></td>
+        <td><%= o.user_name %></td>
+        <td>
+          <a href="/purchases/<%= o.id %>" class="btn btn-sm btn-secondary">详情</a>
+          <form action="/purchases/<%= o.id %>/delete" method="POST" style="display:inline" onsubmit="return confirm('确认删除这张采购单？会把对应入库的库存扣回去。')">
+            <button type="submit" class="btn btn-sm btn-danger">删除</button>
+          </form>
+        </td>
+      </tr>
+    <% }) %>
+  </table>
+</div>
+
+<div class="mobile-order-cards">
+  <% orders.forEach(function(o) { %>
+    <div class="order-card">
+      <a href="/purchases/<%= o.id %>" style="color:inherit;text-decoration:none">
+        <div class="order-card-top">
+          <span class="order-card-id">#<%= o.id %> <%= o.supplier_name || '-' %></span>
+        </div>
+        <div class="order-card-mid">
+          <span><%= o.order_date %></span>
+          <span><%= o.warehouse_name %></span>
+        </div>
+        <div class="order-card-bottom">
+          <span class="order-card-amount">¥<%= o.total_amount.toFixed(2) %></span>
+          <span class="muted"><%= o.user_name %></span>
+        </div>
+      </a>
+      <div style="display:flex; gap:8px; margin-top:10px">
+        <a href="/purchases/<%= o.id %>" class="btn btn-sm btn-secondary" style="flex:1; text-align:center">详情</a>
+        <form action="/purchases/<%= o.id %>/delete" method="POST" style="flex:1" onsubmit="return confirm('确认删除这张采购单？会把对应入库的库存扣回去。')">
+          <button type="submit" class="btn btn-sm btn-danger" style="width:100%">删除</button>
+        </form>
+      </div>
+    </div>
+  <% }) %>
+  <% if (orders.length === 0) { %><p class="muted">暂无采购单</p><% } %>
+</div>
+<%- include('partials/footer') %>

@@ -1,0 +1,55 @@
+<%- include('partials/header') %>
+<h1>库存查询</h1>
+<div class="card">
+  <form method="GET" action="/inventory" class="form-row" style="max-width:260px">
+    <label>按仓库筛选</label>
+    <select name="warehouse_id" onchange="this.form.submit()">
+      <option value="">-- 全部仓库 --</option>
+      <% warehouses.forEach(function(w) { %>
+        <option value="<%= w.id %>" <%= String(warehouseId) === String(w.id) ? 'selected' : '' %>><%= w.name %></option>
+      <% }) %>
+    </select>
+  </form>
+</div>
+<div class="card desktop-table-wrap">
+  <table>
+    <tr><th>商品</th><th>规格</th><th>仓库</th><th>库存数量</th></tr>
+    <% rows.forEach(function(r) { %>
+      <tr>
+        <td><%= r.name %></td>
+        <td><%= r.spec || '-' %></td>
+        <td><%= r.warehouse_name %></td>
+        <td>
+          <% const qtyText = r.quantity + ' ' + r.unit + (r.pack_unit ? ' (≈' + Math.floor(r.quantity / r.pack_size) + r.pack_unit + (r.quantity % r.pack_size ? '余' + (r.quantity % r.pack_size) + r.unit : '') + ')' : ''); %>
+          <% if (r.low_stock_threshold > 0 && r.quantity <= r.low_stock_threshold) { %>
+            <span class="badge badge-low"><%= qtyText %></span>
+          <% } else { %>
+            <%= qtyText %>
+          <% } %>
+        </td>
+      </tr>
+    <% }) %>
+  </table>
+</div>
+
+<div class="mobile-order-cards">
+  <% rows.forEach(function(r) { %>
+    <% const qtyText = r.quantity + ' ' + r.unit + (r.pack_unit ? ' (≈' + Math.floor(r.quantity / r.pack_size) + r.pack_unit + (r.quantity % r.pack_size ? '余' + (r.quantity % r.pack_size) + r.unit : '') + ')' : ''); %>
+    <% const isLow = r.low_stock_threshold > 0 && r.quantity <= r.low_stock_threshold; %>
+    <div class="order-card">
+      <div class="order-card-top">
+        <span class="order-card-id"><%= r.name %></span>
+        <% if (isLow) { %><span class="badge badge-low">库存偏低</span><% } %>
+      </div>
+      <div class="order-card-mid">
+        <span><%= r.spec || '-' %></span>
+        <span><%= r.warehouse_name %></span>
+      </div>
+      <div class="order-card-bottom">
+        <span class="order-card-amount" style="<%= isLow ? 'color:#e5484d' : '' %>"><%= qtyText %></span>
+      </div>
+    </div>
+  <% }) %>
+  <% if (rows.length === 0) { %><p class="muted">暂无库存数据</p><% } %>
+</div>
+<%- include('partials/footer') %>

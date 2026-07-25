@@ -1,0 +1,95 @@
+<%- include('partials/header') %>
+<h1>客户管理</h1>
+<div class="card">
+  <h2>新增客户</h2>
+  <form method="POST" action="/customers/new" class="grid-3">
+    <div class="form-row"><label>名称 *</label><input type="text" name="name" required></div>
+    <div class="form-row"><label>联系人</label><input type="text" name="contact"></div>
+    <div class="form-row"><label>电话</label><input type="text" name="phone"></div>
+    <div class="form-row" style="grid-column: 1 / -1"><label>地址</label><input type="text" name="address" placeholder="送货地址"></div>
+    <% if (isAdmin) { %>
+      <div class="form-row">
+        <label>归属业务员</label>
+        <select name="operator_id">
+          <option value="">-- 不指定 --</option>
+          <% users.forEach(function(u) { %><option value="<%= u.id %>"><%= u.name %>（<%= u.role === 'admin' ? '管理员' : '操作员' %>）</option><% }) %>
+        </select>
+      </div>
+    <% } else { %>
+      <p class="muted" style="grid-column: 1 / -1">新增的客户会自动归到你名下</p>
+    <% } %>
+    <div><button class="btn" type="submit">新增</button></div>
+  </form>
+</div>
+
+<% if (isAdmin) { %>
+<div class="card">
+  <h2>批量转移客户归属</h2>
+  <p class="muted">业务员离职或换岗时，一次性把他名下所有客户转给接手的人，不用一个个改。</p>
+  <form method="POST" action="/customers/reassign" style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap" onsubmit="return confirm('确认要把这些客户全部转移吗？')">
+    <div class="form-row" style="margin-bottom:0">
+      <label>原业务员</label>
+      <select name="from_user_id" required>
+        <option value="">-- 请选择 --</option>
+        <% users.forEach(function(u) { %><option value="<%= u.id %>"><%= u.name %></option><% }) %>
+      </select>
+    </div>
+    <div class="form-row" style="margin-bottom:0">
+      <label>转给</label>
+      <select name="to_user_id" required>
+        <option value="">-- 请选择 --</option>
+        <% users.forEach(function(u) { %><option value="<%= u.id %>"><%= u.name %></option><% }) %>
+      </select>
+    </div>
+    <button type="submit" class="btn">批量转移</button>
+  </form>
+</div>
+<% } %>
+
+<div class="card desktop-table-wrap">
+  <table>
+    <tr><th>名称</th><th>联系人</th><th>电话</th><th>地址</th><th>归属业务员</th><th>操作</th></tr>
+    <% customers.forEach(function(c) { %>
+      <tr>
+        <td><%= c.name %></td>
+        <td><%= c.contact || '-' %></td>
+        <td><%= c.phone || '-' %></td>
+        <td><%= c.address || '-' %></td>
+        <td><%= c.operator_name || '-' %></td>
+        <td>
+          <a href="/customers/<%= c.id %>/edit" class="btn btn-sm btn-secondary">编辑</a>
+          <% if (isAdmin) { %>
+            <form method="POST" action="/customers/<%= c.id %>/delete" style="display:inline" onsubmit="return confirm('确认删除？如果该客户有历史订单会删除失败。')">
+              <button type="submit" style="background:none;border:none;color:#e5484d;cursor:pointer;padding:0;margin-left:6px">删除</button>
+            </form>
+          <% } %>
+        </td>
+      </tr>
+    <% }) %>
+  </table>
+</div>
+
+<div class="mobile-order-cards">
+  <% customers.forEach(function(c) { %>
+    <div class="order-card">
+      <div class="order-card-top">
+        <span class="order-card-id"><%= c.name %></span>
+      </div>
+      <div class="order-card-mid">
+        <span><%= c.contact || '-' %><% if (c.phone) { %> · <%= c.phone %><% } %></span>
+        <span><%= c.operator_name || '未指定业务员' %></span>
+      </div>
+      <% if (c.address) { %><div class="muted" style="margin-bottom:8px"><%= c.address %></div><% } %>
+      <div style="display:flex; gap:8px">
+        <a href="/customers/<%= c.id %>/edit" class="btn btn-sm btn-secondary" style="flex:1; text-align:center">编辑</a>
+        <% if (isAdmin) { %>
+          <form method="POST" action="/customers/<%= c.id %>/delete" style="flex:1" onsubmit="return confirm('确认删除？如果该客户有历史订单会删除失败。')">
+            <button type="submit" class="btn btn-sm btn-danger" style="width:100%">删除</button>
+          </form>
+        <% } %>
+      </div>
+    </div>
+  <% }) %>
+  <% if (customers.length === 0) { %><p class="muted">暂无客户</p><% } %>
+</div>
+<%- include('partials/footer') %>
