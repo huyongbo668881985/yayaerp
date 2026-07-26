@@ -58,9 +58,27 @@ function buildItemsFromRequest(db, body) {
 }
 
 // 按当前用户权限范围 + 可选日期范围，查询销售单列表（列表页和导出共用）
+// 计算"有效"欠款和收款状态：原始金额、原始已收款字段完全不动（保留真实历史记录），
+// 只是在读取展示的时候，把关联到这张单、已审核的退货金额顺带减掉。
+// 这样退货金额=0也不影响没有关联退货的普通订单，是老逻辑的自然扩展，不是另一套逻辑。
+function attachEffectivePayment(order) {
+  const returned = order.returned_amount || 0;
+  const effectiveTotal = order.total_amount - returned;
+  const effectiveDebt = effectiveTotal - order.paid_amount;
+  let effectiveStatus = 'unpaid';
+  if (effectiveDebt <= 0.001) effectiveStatus = 'paid';
+  else if (order.paid_amount > 0 || returned > 0) effectiveStatus = 'partial';
+  order.returned_amount = returned;
+  order.effective_total = effectiveTotal;
+  order.effective_debt = Math.max(0, effectiveDebt);
+  order.effective_status = effectiveStatus;
+  return order;
+}
+
 function queryOrders(db, user, start, end, unpaidOnly) {
   let sql = `
-    SELECT so.*, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name
+    SELECT so.*, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name,
+           COALESCE((SELECT SUM(total_amount) FROM return_orders WHERE related_sales_order_id = so.id AND status = 'approved'), 0) AS returned_amount
     FROM sales_orders so
     LEFT JOIN customers c ON c.id = so.customer_id
     LEFT JOIN warehouses w ON w.id = so.warehouse_id
@@ -74,9 +92,10 @@ function queryOrders(db, user, start, end, unpaidOnly) {
   }
   if (start) { sql += ' AND so.order_date >= ?'; params.push(start); }
   if (end) { sql += ' AND so.order_date <= ?'; params.push(end); }
-  if (unpaidOnly) { sql += " AND so.payment_status != 'paid'"; }
   sql += ' ORDER BY so.id DESC';
-  return db.prepare(sql).all(...params);
+  let orders = db.prepare(sql).all(...params).map(attachEffectivePayment);
+  if (unpaidOnly) orders = orders.filter(o => o.effective_status !== 'paid');
+  return orders;
 }
 
 // 销售单列表 - 管理员看全部，操作员看自己的；支持 ?start=&end= 按日期范围筛选，?unpaid=1 只看未结清
@@ -97,7 +116,9 @@ router.get('/sales/export', requireLogin, (req, res) => {
   const unpaidOnly = req.query.unpaid === '1';
 
   let sql = `
-    SELECT so.id AS order_id, so.order_date, so.warehouse_id, so.payment_status, so.status,
+    SELECT so.id AS order_id, so.order_date, so.warehouse_id, so.status,
+           so.total_amount, so.paid_amount,
+           COALESCE((SELECT SUM(total_amount) FROM return_orders WHERE related_sales_order_id = so.id AND status = 'approved'), 0) AS returned_amount,
            so.remarks, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name,
            soi.quantity, soi.unit_label, soi.unit_price, soi.is_gift, p.name AS product_name
     FROM sales_orders so
@@ -112,9 +133,14 @@ router.get('/sales/export', requireLogin, (req, res) => {
   if (user.role !== 'admin') { sql += ' AND so.user_id = ?'; params.push(user.id); }
   if (start) { sql += ' AND so.order_date >= ?'; params.push(start); }
   if (end) { sql += ' AND so.order_date <= ?'; params.push(end); }
-  if (unpaidOnly) { sql += " AND so.payment_status != 'paid'"; }
   sql += ' ORDER BY so.id DESC';
-  const rows_raw = db.prepare(sql).all(...params);
+  let rows_raw = db.prepare(sql).all(...params).map(r => {
+    const effectiveTotal = r.total_amount - r.returned_amount;
+    const effectiveDebt = effectiveTotal - r.paid_amount;
+    r.effective_status = effectiveDebt <= 0.001 ? 'paid' : ((r.paid_amount > 0 || r.returned_amount > 0) ? 'partial' : 'unpaid');
+    return r;
+  });
+  if (unpaidOnly) rows_raw = rows_raw.filter(r => r.effective_status !== 'paid');
 
   const statusText = { draft: '草稿', submitted: '待审核', approved: '已审核', rejected: '已拒绝' };
   const paymentText = { paid: '已收款', partial: '部分收款', unpaid: '未收款' };
@@ -131,7 +157,7 @@ router.get('/sales/export', requireLogin, (req, res) => {
     r.unit_price.toFixed(2),
     (r.quantity * r.unit_price).toFixed(2),
     r.is_gift ? '赠品' : '',
-    paymentText[r.payment_status] || r.payment_status,
+    paymentText[r.effective_status] || r.effective_status,
     statusText[r.status] || r.status,
     r.user_name,
     r.remarks || ''
@@ -349,10 +375,26 @@ router.post('/sales/unapprove/:id', requireLogin, (req, res) => {
   res.redirect('/sales/' + order.id);
 });
 
+// 记录收款：客户分批还钱、或者退货冲抵之后补齐尾款，都用这个。
+// 只加 paid_amount，不碰审核状态、不碰库存、不碰商品明细——跟"审核"是完全独立的两件事。
+router.post('/sales/:id/record-payment', requireLogin, (req, res) => {
+  const db = req.tenantDb;
+  if (req.session.user.role !== 'admin') return res.status(403).send('无权限，只有管理员能记录收款');
+  const order = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(req.params.id);
+  if (!order) return res.status(404).send('单据不存在');
+
+  const amount = parseFloat(req.body.amount);
+  if (!(amount > 0)) return res.status(400).send('收款金额必须大于0');
+
+  db.prepare('UPDATE sales_orders SET paid_amount = paid_amount + ? WHERE id = ?').run(amount, order.id);
+  res.redirect('/sales/' + order.id);
+});
+
 router.get('/sales/:id', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const order = db.prepare(`
-    SELECT so.*, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name
+    SELECT so.*, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name,
+           COALESCE((SELECT SUM(total_amount) FROM return_orders WHERE related_sales_order_id = so.id AND status = 'approved'), 0) AS returned_amount
     FROM sales_orders so
     LEFT JOIN customers c ON c.id = so.customer_id
     LEFT JOIN warehouses w ON w.id = so.warehouse_id
@@ -360,13 +402,18 @@ router.get('/sales/:id', requireLogin, (req, res) => {
     WHERE so.id = ?
   `).get(req.params.id);
   if (!order) return res.status(404).send('单据不存在');
+  attachEffectivePayment(order);
   const items = db.prepare(`
     SELECT soi.*, p.name AS product_name
     FROM sales_order_items soi
     JOIN products p ON p.id = soi.product_id
     WHERE soi.sales_order_id = ?
   `).all(req.params.id);
-  res.render('sale_detail', { order, items, canManage: canEditOrWithdraw(order, req.session.user) });
+  const relatedReturns = db.prepare(`
+    SELECT id, order_date, total_amount, refund_status, status
+    FROM return_orders WHERE related_sales_order_id = ? ORDER BY id DESC
+  `).all(req.params.id);
+  res.render('sale_detail', { order, items, relatedReturns, canManage: canEditOrWithdraw(order, req.session.user) });
 });
 
 module.exports = router;

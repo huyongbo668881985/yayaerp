@@ -120,7 +120,7 @@ router.get('/returns/new', requireLogin, (req, res) => {
 
 router.post('/returns/new', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  const { customer_id, warehouse_id, order_date, note, refunded_amount, remarks } = req.body;
+  const { customer_id, warehouse_id, order_date, note, refunded_amount, remarks, related_sales_order_id } = req.body;
 
   const renderError = (msg) => {
     const customers = db.prepare('SELECT * FROM customers ORDER BY name').all();
@@ -128,6 +128,13 @@ router.post('/returns/new', requireLogin, (req, res) => {
     const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price FROM products ORDER BY name').all();
     return res.render('return_form', { customers, warehouses, products, error: msg, order: null, existingItems: [] });
   };
+
+  let relatedId = null;
+  if (related_sales_order_id && related_sales_order_id.trim()) {
+    const related = db.prepare('SELECT id FROM sales_orders WHERE id = ?').get(related_sales_order_id.trim());
+    if (!related) return renderError(`关联的销售单号 #${related_sales_order_id} 不存在，请检查单号是否正确`);
+    relatedId = related.id;
+  }
 
   const items = buildItemsFromRequest(db, req.body);
   if (!warehouse_id || items.length === 0) {
@@ -142,9 +149,9 @@ router.post('/returns/new', requireLogin, (req, res) => {
 
   const tx = db.transaction(() => {
     const info = db.prepare(
-      `INSERT INTO return_orders (customer_id, warehouse_id, user_id, order_date, total_amount, refunded_amount, refund_status, status, note, remarks)
-       VALUES (?,?,?,?,?,?,?,'submitted',?,?)`
-    ).run(customer_id || null, warehouse_id, req.session.user.id, order_date || new Date().toISOString().slice(0,10), total, refunded, refundStatus, note || '', remarks || '');
+      `INSERT INTO return_orders (customer_id, warehouse_id, user_id, related_sales_order_id, order_date, total_amount, refunded_amount, refund_status, status, note, remarks)
+       VALUES (?,?,?,?,?,?,?,?,'submitted',?,?)`
+    ).run(customer_id || null, warehouse_id, req.session.user.id, relatedId, order_date || new Date().toISOString().slice(0,10), total, refunded, refundStatus, note || '', remarks || '');
     const roId = info.lastInsertRowid;
     const insertItem = db.prepare('INSERT INTO return_order_items (return_order_id, product_id, quantity, unit_label, base_quantity, unit_price) VALUES (?,?,?,?,?,?)');
     for (const it of items) {
@@ -177,7 +184,7 @@ router.post('/returns/:id/edit', requireLogin, (req, res) => {
   if (order.status !== 'draft') return res.status(400).send('只有草稿状态的退货单可以编辑，请先撤回');
   if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限编辑他人的退货单');
 
-  const { customer_id, warehouse_id, order_date, note, refunded_amount, remarks } = req.body;
+  const { customer_id, warehouse_id, order_date, note, refunded_amount, remarks, related_sales_order_id } = req.body;
 
   const renderError = (msg) => {
     const customers = db.prepare('SELECT * FROM customers ORDER BY name').all();
@@ -186,6 +193,13 @@ router.post('/returns/:id/edit', requireLogin, (req, res) => {
     const existingItems = db.prepare('SELECT * FROM return_order_items WHERE return_order_id = ?').all(order.id);
     return res.render('return_form', { customers, warehouses, products, error: msg, order, existingItems });
   };
+
+  let relatedId = null;
+  if (related_sales_order_id && related_sales_order_id.trim()) {
+    const related = db.prepare('SELECT id FROM sales_orders WHERE id = ?').get(related_sales_order_id.trim());
+    if (!related) return renderError(`关联的销售单号 #${related_sales_order_id} 不存在，请检查单号是否正确`);
+    relatedId = related.id;
+  }
 
   const items = buildItemsFromRequest(db, req.body);
   if (!warehouse_id || items.length === 0) {
@@ -200,8 +214,8 @@ router.post('/returns/:id/edit', requireLogin, (req, res) => {
 
   const tx = db.transaction(() => {
     db.prepare(
-      `UPDATE return_orders SET customer_id=?, warehouse_id=?, order_date=?, total_amount=?, refunded_amount=?, refund_status=?, note=?, remarks=? WHERE id=?`
-    ).run(customer_id || null, warehouse_id, order_date || order.order_date, total, refunded, refundStatus, note || '', remarks || '', order.id);
+      `UPDATE return_orders SET customer_id=?, warehouse_id=?, related_sales_order_id=?, order_date=?, total_amount=?, refunded_amount=?, refund_status=?, note=?, remarks=? WHERE id=?`
+    ).run(customer_id || null, warehouse_id, relatedId, order_date || order.order_date, total, refunded, refundStatus, note || '', remarks || '', order.id);
     db.prepare('DELETE FROM return_order_items WHERE return_order_id = ?').run(order.id);
     const insertItem = db.prepare('INSERT INTO return_order_items (return_order_id, product_id, quantity, unit_label, base_quantity, unit_price) VALUES (?,?,?,?,?,?)');
     for (const it of items) {

@@ -35,11 +35,11 @@
         <td><%= o.warehouse_name %></td>
         <td>¥<%= o.total_amount.toFixed(2) %></td>
         <td>¥<%= (o.paid_amount || 0).toFixed(2) %></td>
-        <td>¥<%= (o.total_amount - (o.paid_amount || 0)).toFixed(2) %></td>
+        <td>¥<%= o.effective_debt.toFixed(2) %><% if (o.returned_amount > 0) { %><span class="muted" style="font-size:11px">（已扣退货¥<%= o.returned_amount.toFixed(2) %>）</span><% } %></td>
         <td>
-          <% if (o.payment_status === 'paid') { %>
+          <% if (o.effective_status === 'paid') { %>
             <span class="badge" style="background:#dcfce7;color:#166534">已收款</span>
-          <% } else if (o.payment_status === 'partial') { %>
+          <% } else if (o.effective_status === 'partial') { %>
             <span class="badge" style="background:#fef3c7;color:#92400e">部分收款</span>
           <% } else { %>
             <span class="badge" style="background:#fee2e2;color:#991b1b">未收款</span>
@@ -79,7 +79,7 @@
   %>
   <% orders.forEach(function(o) { %>
     <% const st = statusMap2[o.status] || { text: o.status, bg: '#f3f4f6', fg: '#6b7280' }; %>
-    <% const pt = paymentMap2[o.payment_status] || { text: o.payment_status, bg: '#f3f4f6', fg: '#6b7280' }; %>
+    <% const pt = paymentMap2[o.effective_status] || { text: o.effective_status, bg: '#f3f4f6', fg: '#6b7280' }; %>
     <a href="/sales/<%= o.id %>" class="order-card">
       <div class="order-card-top">
         <span class="order-card-id">#<%= o.id %> <%= o.customer_name || '散客' %></span>
@@ -93,8 +93,8 @@
         <span class="order-card-amount">¥<%= o.total_amount.toFixed(2) %></span>
         <span class="badge" style="background:<%= pt.bg %>;color:<%= pt.fg %>"><%= pt.text %></span>
       </div>
-      <% if (o.total_amount - (o.paid_amount || 0) > 0) { %>
-        <div class="order-card-debt">欠款 ¥<%= (o.total_amount - (o.paid_amount || 0)).toFixed(2) %></div>
+      <% if (o.effective_debt > 0) { %>
+        <div class="order-card-debt">欠款 ¥<%= o.effective_debt.toFixed(2) %></div>
       <% } %>
     </a>
   <% }) %>

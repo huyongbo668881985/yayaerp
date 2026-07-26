@@ -10,6 +10,9 @@
     <strong>录入人：</strong><%= order.user_name %> &nbsp;
     <strong>备注：</strong><%= order.note || '-' %>
   </p>
+  <% if (order.related_sales_order_id) { %>
+    <p><strong>关联销售单：</strong><a href="/sales/<%= order.related_sales_order_id %>">#<%= order.related_sales_order_id %></a>（该单的应收金额已自动扣掉这次退货）</p>
+  <% } %>
   <p>
     <strong>退款状态：</strong>
     <% if (order.refund_status === 'refunded') { %>

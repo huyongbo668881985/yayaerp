@@ -10,4 +10,4 @@ services:
       - ./data:/app/data
     ports:
       # 只绑定到本机，交给 Nginx Proxy Manager 反代（与你现有服务保持一致）
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"

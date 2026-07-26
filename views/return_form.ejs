@@ -26,6 +26,11 @@
 
     <div class="grid-3">
       <div class="form-row">
+        <label>关联销售单号（可选）</label>
+        <input type="number" name="related_sales_order_id" placeholder="例如 12，不知道可以留空" value="<%= order && order.related_sales_order_id ? order.related_sales_order_id : '' %>">
+        <span class="muted" style="font-size:12px">填了之后，这张原销售单的应收金额会自动扣掉这次退货，不用再手动改原单</span>
+      </div>
+      <div class="form-row">
         <label>已退现金金额</label>
         <input type="number" name="refunded_amount" placeholder="本次退款金额" step="0.01" min="0" value="<%= order ? (order.refunded_amount || 0) : 0 %>">
       </div>
