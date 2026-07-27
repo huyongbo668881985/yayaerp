@@ -1,6 +1,3 @@
-cd /home/ubuntu/yayaerp
-
-cat > routes/platformAdmin.js << 'ENDOFFILE'
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const router = express.Router();
@@ -24,6 +21,8 @@ const platformLoginLimiter = createLoginLimiter({ windowMs: 15 * 60 * 1000, max:
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+// 校验并规整"到期日期"和"账号数上限"这两个可选配额字段
+// 返回 { error } 或 { expiresAt, maxUsers }
 function parseQuotaFields(body) {
   let expiresAt = null;
   if (body.expires_at && body.expires_at.trim()) {
@@ -120,6 +119,7 @@ router.post('/platform-admin/tenants/new', requireSuperAdmin, (req, res) => {
     return res.render('platform_tenant_form', { error: e.message, form: req.body });
   }
 
+  // 新建租户 db 文件并跑初始化 + 建第一个管理员账号
   const db = openTenantDbByPath(tenant.db_path);
   bootstrapTenant(db, {
     adminUsername: admin_username.trim(),
@@ -143,6 +143,8 @@ router.get('/platform-admin/tenants/:id/edit', requireSuperAdmin, (req, res) => 
   const tenant = getTenantById(Number(req.params.id));
   if (!tenant) return res.status(404).send('租户不存在');
 
+  // 特意不走 getTenantDb（那个会因为租户被暂停/过期而拒绝打开），
+  // 超管应该无论租户是什么状态都能重置密码，这也是这次要修的问题本身。
   res.render('platform_tenant_edit', { error: null, tenant, tenantUsers: getTenantUsersSafe(tenant), pwError: null });
 });
 
@@ -167,6 +169,8 @@ router.post('/platform-admin/tenants/:id/edit', requireSuperAdmin, (req, res) =>
   res.redirect('/platform-admin');
 });
 
+// 超管重置某个租户下指定账号的密码（不需要先登录进那个租户，也不管租户当前是否被暂停/已到期，
+// 这就是专门用来解决"租户管理员忘了密码、又没有别的管理员账号能帮他重置"这种死锁场景的）
 router.post('/platform-admin/tenants/:id/users/:userId/reset-password', requireSuperAdmin, (req, res) => {
   const tenant = getTenantById(Number(req.params.id));
   if (!tenant) return res.status(404).send('租户不存在');
@@ -202,6 +206,7 @@ router.post('/platform-admin/tenants/:id/users/:userId/reset-password', requireS
   res.redirect(`/platform-admin/tenants/${tenant.id}/edit`);
 });
 
+// 供上面几个 render 分支复用：读取某租户的账号列表，读取失败就返回空数组，不让页面崩掉
 function getTenantUsersSafe(tenant) {
   try {
     const db = openTenantDbByPath(tenant.db_path);
