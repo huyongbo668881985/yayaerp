@@ -15,7 +15,8 @@ const LOGIN_ERRORS = {
 router.get('/login', (req, res) => {
   if (req.session.user && req.tenantDb) return res.redirect('/');
   const queryError = LOGIN_ERRORS[req.query.error] || null;
-  res.render('login', { error: queryError, tenantCode: '' });
+  const tenantCode = typeof req.query.tenant_code === 'string' ? req.query.tenant_code : '';
+  res.render('login', { error: queryError, tenantCode });
 });
 
 router.post('/login', loginLimiter, (req, res) => {

@@ -23,6 +23,11 @@ app.set('views', path.join(__dirname, 'views'));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// 产品介绍主页（含试用注册），挂在独立路径下，不占用 "/"
+// "/" 留给已有客户的登录后台，两者不冲突。
+// 访问地址：https://erp.yayaagent.com/welcome/
+app.use('/welcome', express.static(path.join(__dirname, 'public-site')));
+
 app.use(session({
   store: new SqliteSessionStore(path.join(DATA_DIR, 'sessions.db')),
   secret: process.env.SESSION_SECRET || 'change-this-secret-in-env',
@@ -49,6 +54,9 @@ app.use((req, res, next) => {
 
 // 平台管理后台（独立于租户体系，单独的登录入口和权限）
 app.use(require('./routes/platformAdmin'));
+
+// 官网试用自助注册（手机号验证码 -> 立即开通租户），同样独立于租户体系
+app.use(require('./routes/trialAuth'));
 
 app.use(require('./routes/auth'));
 app.use(require('./routes/dashboard'));
