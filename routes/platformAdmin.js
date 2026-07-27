@@ -1,3 +1,6 @@
+cd /home/ubuntu/yayaerp
+
+cat > routes/platformAdmin.js << 'ENDOFFILE'
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const router = express.Router();
@@ -21,8 +24,6 @@ const platformLoginLimiter = createLoginLimiter({ windowMs: 15 * 60 * 1000, max:
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-// 校验并规整"到期日期"和"账号数上限"这两个可选配额字段
-// 返回 { error } 或 { expiresAt, maxUsers }
 function parseQuotaFields(body) {
   let expiresAt = null;
   if (body.expires_at && body.expires_at.trim()) {
@@ -119,7 +120,6 @@ router.post('/platform-admin/tenants/new', requireSuperAdmin, (req, res) => {
     return res.render('platform_tenant_form', { error: e.message, form: req.body });
   }
 
-  // 新建租户 db 文件并跑初始化 + 建第一个管理员账号
   const db = openTenantDbByPath(tenant.db_path);
   bootstrapTenant(db, {
     adminUsername: admin_username.trim(),
@@ -142,7 +142,8 @@ router.post('/platform-admin/tenants/:id/toggle', requireSuperAdmin, (req, res) 
 router.get('/platform-admin/tenants/:id/edit', requireSuperAdmin, (req, res) => {
   const tenant = getTenantById(Number(req.params.id));
   if (!tenant) return res.status(404).send('租户不存在');
-  res.render('platform_tenant_edit', { error: null, tenant });
+
+  res.render('platform_tenant_edit', { error: null, tenant, tenantUsers: getTenantUsersSafe(tenant), pwError: null });
 });
 
 router.post('/platform-admin/tenants/:id/edit', requireSuperAdmin, (req, res) => {
@@ -151,15 +152,70 @@ router.post('/platform-admin/tenants/:id/edit', requireSuperAdmin, (req, res) =>
 
   const { tenant_name } = req.body;
   if (!tenant_name || !tenant_name.trim()) {
-    return res.render('platform_tenant_edit', { error: '租户名称不能为空', tenant: { ...tenant, ...req.body } });
+    return res.render('platform_tenant_edit', {
+      error: '租户名称不能为空', tenant: { ...tenant, ...req.body }, tenantUsers: getTenantUsersSafe(tenant), pwError: null
+    });
   }
   const quota = parseQuotaFields(req.body);
   if (quota.error) {
-    return res.render('platform_tenant_edit', { error: quota.error, tenant: { ...tenant, ...req.body } });
+    return res.render('platform_tenant_edit', {
+      error: quota.error, tenant: { ...tenant, ...req.body }, tenantUsers: getTenantUsersSafe(tenant), pwError: null
+    });
   }
 
   updateTenantLimits(tenant.id, { name: tenant_name.trim(), expiresAt: quota.expiresAt, maxUsers: quota.maxUsers });
   res.redirect('/platform-admin');
 });
 
+router.post('/platform-admin/tenants/:id/users/:userId/reset-password', requireSuperAdmin, (req, res) => {
+  const tenant = getTenantById(Number(req.params.id));
+  if (!tenant) return res.status(404).send('租户不存在');
+
+  const { new_password } = req.body;
+  const renderWithError = (error) => {
+    res.render('platform_tenant_edit', {
+      error: null, tenant, tenantUsers: getTenantUsersSafe(tenant), pwError: error
+    });
+  };
+
+  if (!new_password || new_password.length < 6) {
+    return renderWithError('新密码至少6位');
+  }
+
+  let db;
+  try {
+    db = openTenantDbByPath(tenant.db_path);
+    const user = db.prepare('SELECT id FROM users WHERE id = ?').get(Number(req.params.userId));
+    if (!user) {
+      db.close();
+      return renderWithError('账号不存在');
+    }
+    const hash = bcrypt.hashSync(new_password, 10);
+    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, user.id);
+    db.close();
+  } catch (e) {
+    console.error('超管重置租户账号密码失败:', e);
+    if (db) { try { db.close(); } catch (_) { /* 忽略 */ } }
+    return renderWithError('重置失败，请稍后重试');
+  }
+
+  res.redirect(`/platform-admin/tenants/${tenant.id}/edit`);
+});
+
+function getTenantUsersSafe(tenant) {
+  try {
+    const db = openTenantDbByPath(tenant.db_path);
+    const users = db.prepare('SELECT id, username, name, role, active FROM users ORDER BY id').all();
+    db.close();
+    return users;
+  } catch (e) {
+    console.error('读取租户账号列表失败:', e);
+    return [];
+  }
+}
+
 module.exports = router;
+ENDOFFILE
+
+echo "写入完成，校验语法："
+node --check routes/platformAdmin.js && echo "语法OK"
