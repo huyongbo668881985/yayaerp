@@ -215,7 +215,3 @@ function getTenantUsersSafe(tenant) {
 }
 
 module.exports = router;
-ENDOFFILE
-
-echo "写入完成，校验语法："
-node --check routes/platformAdmin.js && echo "语法OK"
