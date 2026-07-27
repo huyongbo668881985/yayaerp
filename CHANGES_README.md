@@ -1,46 +1,62 @@
-# 超管重置租户账号密码 —— 改动说明
+# 导航栏精简 + 页面合并 —— 改动说明
 
-只改了 2 个文件，都是完整文件，直接覆盖到你项目对应位置即可：
+10 个文件，全部是完整文件直接覆盖，路由/后端逻辑一行没动。
 
 ```
-routes/platformAdmin.js
-views/platform_tenant_edit.ejs
+views/partials/header.ejs   导航栏本体：品牌名、顺序、移除顶部到期时间
+views/sales.ejs             加"销售/退货" tab
+views/returns.ejs           加"销售/退货" tab
+views/purchases.ejs         加"采购单/供应商" tab
+views/suppliers.ejs         加"采购单/供应商" tab
+views/report.ejs            加"经营报表/出入库流水" tab
+views/stock_log.ejs         加"经营报表/出入库流水" tab
+views/products.ejs          加"商品/仓库" tab（即"基础信息"入口）
+views/warehouses.ejs        加"商品/仓库" tab
+views/users.ejs             加服务到期时间显示
+public/style.css            加 .tabbar 样式
 ```
 
-## 改了什么
+## 现在的导航顺序
 
-在"编辑租户"页面（`/platform-admin/tenants/:id/edit`）里加了一块
-"租户账号 · 重置密码"，列出这个租户下所有账号（用户名/姓名/角色/状态），
-每一行有个独立的密码输入框，填新密码点"重置"就直接改掉，不需要先
-登录进那个租户。
+首页 → 销售退货（入口是 /sales）→ 库存 → 客户 → 调拨 → 采购（入口是
+/purchases）→ 经营报表（入口是 /reports）→ 基础信息（入口是 /products）
+→ 账号
 
-**特意做了这个设计**：重置操作走的是 `openTenantDbByPath()` 直接开库，
-不走 `getTenantDb()`——后者会因为租户被暂停或已到期而拒绝打开。
-超管应该在任何情况下都能帮忙重置密码，这正是要修的问题本身
-（原来的死锁场景：租户管理员忘了密码，又没有别的管理员账号能帮他
-重置，谁也进不去）。
+点进"销售退货"能看到顶部有"销售 / 退货"两个 tab 按钮切换，其余三组
+（采购/供应商、报表/流水、商品/仓库）同理。URL 还是原来那几个
+（`/sales`、`/returns`、`/purchases`、`/suppliers`、`/reports`、
+`/stock-log`、`/products`、`/warehouses`），只是从导航栏收起来了，
+用 tab 的方式呈现，所以之前有没有收藏这些链接、有没有别的地方引用
+这些 URL，都不受影响。
 
 ## 我怎么验证的
 
-用 `ejs.render()` 实际渲染了这个模板三次（正常有数据 / 账号列表读取
-失败时的空状态 / 重置密码报错时的提示），确认了不会因为缺变量或
-模板语法问题崩掉。路由文件也过了 `node --check` 语法检查。因为你的
-项目依赖 `better-sqlite3` 没法在我这边完整跑起来（涉及原生编译），
-没能端到端跑一次真实的开通-重置流程，建议你部署后手动点一遍：
+用 `ejs.compile()` 把这 10 个模板全部过了一遍语法检查，还完整渲染了
+首页和账号页两个真实场景（假数据），确认：
+- 品牌名正确显示"鸭鸭进销存"
+- 导航项顺序跟你要的一致
+- 顶部不再显示到期时间
+- 账号页正确显示"服务到期时间：xxxx-xx-xx"
 
-1. 打开某个租户的"编辑" (`/platform-admin/tenants/:id/edit`)
-2. 确认账号列表正常显示
-3. 随便挑一个账号，填个 6 位以上的新密码点"重置"
-4. 用这个账号 + 新密码去登录页试一下能不能登进去
-5. 顺手试一下密码填 5 位以下，确认会正确报错而不是崩溃
+没能对着真实数据库跑一遍（原因跟之前一样，`better-sqlite3` 涉及原生
+编译，这边环境跑不起来），部署后建议你手动点一遍这几个 tab 切换，
+确认样式和跳转都正常，尤其留意手机端（导航栏在手机上是通过
+`.nav-toggle` 那个汉堡菜单展开的，没改这部分逻辑，理论上不受影响，
+但建议还是看一眼）。
 
 ## 部署
 
-跟之前一样，覆盖文件后：
+跟之前"密码重置"那次一样，只是页面模板改动，没加依赖：
+
 ```bash
-git add .
-git commit -m "超管支持重置租户账号密码"
+git add views/ public/style.css
+git commit -m "导航栏精简：品牌名改鸭鸭进销存，合并销售退货/采购供应商/报表流水/商品仓库"
 git push
+
+cd ~/yayaerp
+docker-compose up -d --build
+# 如果又遇到 ContainerConfig KeyError，先手动删旧容器再 up：
+#   sudo docker rm -f $(sudo docker ps -a -q -f name=jxc)
+#   docker-compose up -d
+docker logs jxc-app --tail 20
 ```
-服务器 `git pull` 后重启容器即可，这次没加新依赖，不需要重新 build，
-`docker-compose restart jxc` 就够了。

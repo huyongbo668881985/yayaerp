@@ -1,4 +1,8 @@
 <%- include('partials/header') %>
+<div class="tabbar">
+  <a href="/products" class="active">商品</a>
+  <a href="/warehouses">仓库</a>
+</div>
 <h1>商品档案</h1>
 <p class="muted">成本价/售价均为"基本单位"单价（比如按瓶计价）；库存预警阈值也以基本单位计数。</p>
 <% if (isAdmin) { %>

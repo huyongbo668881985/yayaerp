@@ -1,4 +1,8 @@
 <%- include('partials/header') %>
+<div class="tabbar">
+  <a href="/reports">经营报表</a>
+  <a href="/stock-log" class="active">出入库流水</a>
+</div>
 <h1>出入库流水<% if (!start && !end) { %>（最近200条）<% } %></h1>
 
 <div class="card">

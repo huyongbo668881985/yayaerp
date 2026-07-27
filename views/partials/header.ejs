@@ -3,34 +3,27 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>进销存系统</title>
+  <title>鸭鸭进销存</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 <% if (currentUser) { %>
 <div class="topbar">
   <div class="brand">
-    📦 进销存系统<% if (currentTenant) { %> · <%= currentTenant.name %><% } %>
-    <% if (currentUser.role === 'admin' && currentTenant && currentTenant.expires_at) { %>
-      <span class="muted" style="font-size:12px;font-weight:normal;margin-left:8px">到期：<%= currentTenant.expires_at %></span>
-    <% } %>
+    🦆 鸭鸭进销存<% if (currentTenant) { %> · <%= currentTenant.name %><% } %>
   </div>
   <button class="nav-toggle" id="navToggle" aria-label="菜单" onclick="document.getElementById('mainNav').classList.toggle('open')">☰</button>
   <nav id="mainNav">
     <a href="/">首页</a>
-    <a href="/products">商品</a>
+    <a href="/sales">销售退货</a>
     <a href="/inventory">库存</a>
-    <a href="/sales">销售</a>
-    <a href="/returns">退货</a>
+    <a href="/customers">客户</a>
     <a href="/transfers">调拨</a>
     <% if (currentUser.role === 'admin') { %>
       <a href="/purchases">采购</a>
-      <a href="/suppliers">供应商</a>
       <a href="/reports">经营报表</a>
     <% } %>
-    <a href="/customers">客户</a>
-    <a href="/warehouses">仓库</a>
-    <a href="/stock-log">出入库流水</a>
+    <a href="/products">基础信息</a>
     <% if (currentUser.role === 'admin') { %>
       <a href="/users">账号</a>
     <% } %>

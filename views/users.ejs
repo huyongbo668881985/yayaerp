@@ -1,5 +1,8 @@
 <%- include('partials/header') %>
 <h1>账号管理</h1>
+<% if (currentTenant && currentTenant.expires_at) { %>
+  <p class="muted" style="margin-bottom:10px">服务到期时间：<%= currentTenant.expires_at %></p>
+<% } %>
 <% if (maxUsers) { %>
   <p class="muted" style="margin-bottom:10px">
     当前 <%= users.length %> / <%= maxUsers %> 个账号
