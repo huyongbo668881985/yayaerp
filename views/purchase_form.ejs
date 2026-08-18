@@ -48,7 +48,7 @@
     const div = document.createElement('div');
     div.className = 'item-row';
     div.style.gridTemplateColumns = '2fr 1fr 1fr 1fr auto';
-    const options = PRODUCTS.map(p => `<option value="${p.id}" data-price="${p.cost_price}" data-unit="${p.unit}" data-pack-unit="${p.pack_unit || ''}" data-pack-size="${p.pack_size || 1}">${p.name}${p.spec ? ' ('+p.spec+')' : ''}</option>`).join('');
+    const options = PRODUCTS.map(p => `<option value="${p.id}" data-price="${p.cost_price}" data-price-pack="${p.cost_price_pack != null ? p.cost_price_pack : ''}" data-unit="${p.unit}" data-pack-unit="${p.pack_unit || ''}" data-pack-size="${p.pack_size || 1}">${p.name}${p.spec ? ' ('+p.spec+')' : ''}</option>`).join('');
     div.innerHTML = `
       <select name="product_id" onchange="onProductChange(this)" required>
         <option value="">-- 选择商品 --</option>
@@ -88,10 +88,12 @@
     const row = select.parentElement;
     const opt = select.options[select.selectedIndex];
     const basePrice = Number(opt.getAttribute('data-price')) || 0;
+    const packPriceRaw = opt.getAttribute('data-price-pack');
+    const packPrice = packPriceRaw !== null && packPriceRaw !== '' ? Number(packPriceRaw) : null;
     const packSize = Number(opt.getAttribute('data-pack-size')) || 1;
     const unitChoice = row.querySelector('select[name=unit_choice]').value;
     const priceInput = row.querySelector('input[name=unit_price]');
-    const suggested = unitChoice === 'pack' ? basePrice * packSize : basePrice;
+    const suggested = unitChoice === 'pack' ? (packPrice != null ? packPrice : basePrice * packSize) : basePrice;
     priceInput.value = suggested || '';
   }
 

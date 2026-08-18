@@ -74,7 +74,7 @@
     const div = document.createElement('div');
     div.className = 'item-row';
     div.style.gridTemplateColumns = '2fr 1fr 1fr 1fr auto auto';
-    const options = PRODUCTS.map(p => `<option value="${p.id}" data-price="${p.sale_price}" data-unit="${p.unit}" data-pack-unit="${p.pack_unit || ''}" data-pack-size="${p.pack_size || 1}">${p.name}${p.spec ? ' ('+p.spec+')' : ''}</option>`).join('');
+    const options = PRODUCTS.map(p => `<option value="${p.id}" data-price="${p.sale_price}" data-price-pack="${p.sale_price_pack != null ? p.sale_price_pack : ''}" data-unit="${p.unit}" data-pack-unit="${p.pack_unit || ''}" data-pack-size="${p.pack_size || 1}">${p.name}${p.spec ? ' ('+p.spec+')' : ''}</option>`).join('');
     div.innerHTML = `
       <select name="product_id" onchange="onProductChange(this)" required>
         <option value="">-- 选择商品 --</option>
@@ -146,6 +146,8 @@
     const row = select.parentElement;
     const opt = select.options[select.selectedIndex];
     const basePrice = Number(opt.getAttribute('data-price')) || 0;
+    const packPriceRaw = opt.getAttribute('data-price-pack');
+    const packPrice = packPriceRaw !== null && packPriceRaw !== '' ? Number(packPriceRaw) : null;
     const packSize = Number(opt.getAttribute('data-pack-size')) || 1;
     const unitChoice = row.querySelector('select[name=unit_choice]').value;
     const priceInput = row.querySelector('input[name=unit_price]');
@@ -154,7 +156,8 @@
       priceInput.value = '0';
       return;
     }
-    const suggested = unitChoice === 'pack' ? basePrice * packSize : basePrice;
+    // 整箱：优先用商品资料里精确录入的箱价，没填过箱价才退回"瓶价*换算比例"的旧算法（会有小数误差）
+    const suggested = unitChoice === 'pack' ? (packPrice != null ? packPrice : basePrice * packSize) : basePrice;
     priceInput.value = suggested || '';
   }
 

@@ -15,16 +15,19 @@ router.get('/products/new', requireAdmin, (req, res) => {
 
 router.post('/products/new', requireAdmin, (req, res) => {
   const db = req.tenantDb;
-  const { sku, name, spec, unit, pack_unit, pack_size, cost_price, sale_price, low_stock_threshold } = req.body;
+  const { sku, name, spec, unit, pack_unit, pack_size, cost_price, sale_price, cost_price_pack, sale_price_pack, low_stock_threshold } = req.body;
   if (!name) return res.render('product_form', { product: req.body, error: '商品名称必填' });
   try {
     const info = db.prepare(
-      `INSERT INTO products (sku, name, spec, unit, pack_unit, pack_size, cost_price, sale_price, low_stock_threshold)
-       VALUES (?,?,?,?,?,?,?,?,?)`
+      `INSERT INTO products (sku, name, spec, unit, pack_unit, pack_size, cost_price, sale_price, cost_price_pack, sale_price_pack, low_stock_threshold)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`
     ).run(
       sku || null, name, spec || '', unit || '瓶',
       pack_unit || null, Number(pack_size) || 1,
-      Number(cost_price) || 0, Number(sale_price) || 0, Number(low_stock_threshold) || 0
+      Number(cost_price) || 0, Number(sale_price) || 0,
+      cost_price_pack !== undefined && cost_price_pack !== '' ? Number(cost_price_pack) : null,
+      sale_price_pack !== undefined && sale_price_pack !== '' ? Number(sale_price_pack) : null,
+      Number(low_stock_threshold) || 0
     );
     // 为所有已存在的仓库建立库存行（初始为0）
     const warehouses = db.prepare('SELECT id FROM warehouses').all();
@@ -45,13 +48,16 @@ router.get('/products/:id/edit', requireAdmin, (req, res) => {
 
 router.post('/products/:id/edit', requireAdmin, (req, res) => {
   const db = req.tenantDb;
-  const { sku, name, spec, unit, pack_unit, pack_size, cost_price, sale_price, low_stock_threshold } = req.body;
+  const { sku, name, spec, unit, pack_unit, pack_size, cost_price, sale_price, cost_price_pack, sale_price_pack, low_stock_threshold } = req.body;
   db.prepare(
-    `UPDATE products SET sku=?, name=?, spec=?, unit=?, pack_unit=?, pack_size=?, cost_price=?, sale_price=?, low_stock_threshold=? WHERE id=?`
+    `UPDATE products SET sku=?, name=?, spec=?, unit=?, pack_unit=?, pack_size=?, cost_price=?, sale_price=?, cost_price_pack=?, sale_price_pack=?, low_stock_threshold=? WHERE id=?`
   ).run(
     sku || null, name, spec || '', unit || '瓶',
     pack_unit || null, Number(pack_size) || 1,
-    Number(cost_price) || 0, Number(sale_price) || 0, Number(low_stock_threshold) || 0,
+    Number(cost_price) || 0, Number(sale_price) || 0,
+    cost_price_pack !== undefined && cost_price_pack !== '' ? Number(cost_price_pack) : null,
+    sale_price_pack !== undefined && sale_price_pack !== '' ? Number(sale_price_pack) : null,
+    Number(low_stock_threshold) || 0,
     req.params.id
   );
   res.redirect('/products');

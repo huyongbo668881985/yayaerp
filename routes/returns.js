@@ -114,7 +114,7 @@ router.get('/returns/new', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const customers = db.prepare('SELECT * FROM customers ORDER BY name').all();
   const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
-  const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price FROM products ORDER BY name').all();
+  const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
   res.render('return_form', { customers, warehouses, products, error: null, order: null, existingItems: [] });
 });
 
@@ -125,7 +125,7 @@ router.post('/returns/new', requireLogin, (req, res) => {
   const renderError = (msg) => {
     const customers = db.prepare('SELECT * FROM customers ORDER BY name').all();
     const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
-    const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price FROM products ORDER BY name').all();
+    const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
     return res.render('return_form', { customers, warehouses, products, error: msg, order: null, existingItems: [] });
   };
 
@@ -172,7 +172,7 @@ router.get('/returns/:id/edit', requireLogin, (req, res) => {
 
   const customers = db.prepare('SELECT * FROM customers ORDER BY name').all();
   const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
-  const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price FROM products ORDER BY name').all();
+  const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
   const existingItems = db.prepare('SELECT * FROM return_order_items WHERE return_order_id = ?').all(order.id);
   res.render('return_form', { customers, warehouses, products, error: null, order, existingItems });
 });
@@ -189,7 +189,7 @@ router.post('/returns/:id/edit', requireLogin, (req, res) => {
   const renderError = (msg) => {
     const customers = db.prepare('SELECT * FROM customers ORDER BY name').all();
     const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
-    const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price FROM products ORDER BY name').all();
+    const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
     const existingItems = db.prepare('SELECT * FROM return_order_items WHERE return_order_id = ?').all(order.id);
     return res.render('return_form', { customers, warehouses, products, error: msg, order, existingItems });
   };

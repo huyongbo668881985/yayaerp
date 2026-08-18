@@ -4,7 +4,7 @@
   <a href="/warehouses">仓库</a>
 </div>
 <h1>商品档案</h1>
-<p class="muted">成本价/售价均为"基本单位"单价（比如按瓶计价）；库存预警阈值也以基本单位计数。</p>
+<p class="muted">箱价为整箱下单时使用的精确单价；瓶价仅为拆零参考价，可能有小数误差。库存预警阈值以基本单位计数。</p>
 <% if (isAdmin) { %>
   <div style="margin-bottom:12px"><a class="btn" href="/products/new">+ 新增商品</a></div>
 <% } %>
@@ -12,8 +12,10 @@
   <table>
     <tr>
       <th>SKU</th><th>名称</th><th>规格</th><th>单位换算</th>
-      <% if (isAdmin) { %><th>成本价</th><% } %>
-      <th>售价</th><th>预警阈值</th>
+      <% if (isAdmin) { %><th>箱成本价</th><% } %>
+      <th>箱售价</th>
+      <% if (isAdmin) { %><th>瓶成本价</th><% } %>
+      <th>瓶售价</th><th>预警阈值</th>
       <% if (isAdmin) { %><th>操作</th><% } %>
     </tr>
     <% products.forEach(function(p) { %>
@@ -28,6 +30,10 @@
             <%= p.unit %>
           <% } %>
         </td>
+        <% if (isAdmin) { %>
+          <td><% if (p.cost_price_pack != null) { %>¥<%= p.cost_price_pack.toFixed(2) %><% } else if (p.pack_unit) { %>约¥<%= (p.cost_price * p.pack_size).toFixed(2) %><% } else { %>-<% } %></td>
+        <% } %>
+        <td><% if (p.sale_price_pack != null) { %>¥<%= p.sale_price_pack.toFixed(2) %><% } else if (p.pack_unit) { %>约¥<%= (p.sale_price * p.pack_size).toFixed(2) %><% } else { %>-<% } %></td>
         <% if (isAdmin) { %><td>¥<%= p.cost_price.toFixed(2) %></td><% } %>
         <td>¥<%= p.sale_price.toFixed(2) %></td>
         <td><%= p.low_stock_threshold %></td>
