@@ -2,6 +2,12 @@ const express = require('express');
 const { requireAdmin } = require('../middleware/auth');
 const router = express.Router();
 
+// 设计说明（2026-09-06 定版）：采购入库没有审核流，录单即加库存。
+// 原因：整个采购模块本来就只有管理员能进（下面所有路由都挂 requireAdmin），
+// "管理员录单→管理员审核"是自己审自己，纯增摩擦没有防错价值。
+// 操作员的误操作风险已被角色权限挡住（操作员根本进不了采购）。
+// purchase_orders.status 字段保留但暂不启用，将来若开放操作员录采购再启用审核流。
+
 router.get('/purchases', requireAdmin, (req, res) => {
   const db = req.tenantDb;
   const orders = db.prepare(`

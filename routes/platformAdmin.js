@@ -47,6 +47,7 @@ router.post('/platform-admin/login', platformLoginLimiter, (req, res) => {
   const { username, password } = req.body;
   const admin = getPlatformAdminByUsername(username);
   if (!admin || !bcrypt.compareSync(password || '', admin.password_hash)) {
+    platformLoginLimiter.fail(req); // 只统计失败次数
     return res.render('platform_login', { error: '用户名或密码错误' });
   }
   req.session.regenerate((err) => {
@@ -54,6 +55,7 @@ router.post('/platform-admin/login', platformLoginLimiter, (req, res) => {
       console.error(err);
       return res.render('platform_login', { error: '登录失败，请重试' });
     }
+    platformLoginLimiter.reset(req);
     req.session.platformAdmin = { id: admin.id, username: admin.username, name: admin.name };
     res.redirect('/platform-admin');
   });

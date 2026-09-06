@@ -36,6 +36,9 @@
 
     <div style="margin-top:16px">
       <button class="btn" type="submit"><%= order ? '保存修改' : '提交调拨' %></button>
+      <% if (!order) { %>
+        <button class="btn btn-secondary" type="submit" name="save_draft" value="1">存草稿</button>
+      <% } %>
       <a class="btn btn-secondary" href="<%= order ? '/transfers/' + order.id : '/transfers' %>">取消</a>
     </div>
   </form>

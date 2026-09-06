@@ -75,11 +75,13 @@ router.post('/transfers/new', requireLogin, (req, res) => {
   if (items.length === 0) return renderError('请至少填写一行有效商品明细');
 
   // 草稿/待审核阶段不动库存
+  // 点"存草稿"按钮会带 save_draft=1 → 存为 draft，之后在详情页继续编辑/提交审核
+  const status = (req.body.save_draft === '1' || req.body.save_draft === 'on') ? 'draft' : 'submitted';
   const tx = db.transaction(() => {
     const info = db.prepare(
       `INSERT INTO transfer_orders (from_warehouse_id, to_warehouse_id, user_id, order_date, note, status)
-       VALUES (?,?,?,?,?,'submitted')`
-    ).run(from_warehouse_id, to_warehouse_id, req.session.user.id, order_date || new Date().toISOString().slice(0,10), note || '');
+       VALUES (?,?,?,?,?,?)`
+    ).run(from_warehouse_id, to_warehouse_id, req.session.user.id, order_date || new Date().toISOString().slice(0,10), note || '', status);
     const toId = info.lastInsertRowid;
     const insertItem = db.prepare('INSERT INTO transfer_order_items (transfer_order_id, product_id, quantity, unit_label, base_quantity) VALUES (?,?,?,?,?)');
     for (const it of items) {

@@ -68,6 +68,20 @@
   </table>
 </div>
 
+<% if (totalPages > 1) { %>
+<div class="card" style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap">
+  <span class="muted">共 <%= totalOrders %> 单，第 <%= page %> / <%= totalPages %> 页</span>
+  <div style="display:flex; gap:8px">
+    <% if (page > 1) { %>
+      <a class="btn btn-secondary btn-sm" href="/sales?page=<%= page - 1 %>&start=<%= start %>&end=<%= end %><%= unpaidOnly ? '&unpaid=1' : '' %>">上一页</a>
+    <% } %>
+    <% if (page < totalPages) { %>
+      <a class="btn btn-secondary btn-sm" href="/sales?page=<%= page + 1 %>&start=<%= start %>&end=<%= end %><%= unpaidOnly ? '&unpaid=1' : '' %>">下一页</a>
+    <% } %>
+  </div>
+</div>
+<% } %>
+
 <div class="mobile-order-cards">
   <% const statusMap2 = {
        draft:     { text: '草稿',   bg: '#f3f4f6', fg: '#6b7280' },

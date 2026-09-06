@@ -57,6 +57,20 @@ app.use(session({
 // 根据 session 里的 tenant_code 挂载对应租户的 db 连接到 req.tenantDb
 app.use(resolveTenant);
 
+// CSRF 防护（与 cookie 的 SameSite=Lax 形成双层防线）：
+// 现代浏览器发起跨站 POST 时都会带 Origin 头——只要 Origin 存在且与本站不同源就拒绝。
+// 不带 Origin 的场景（极老浏览器、服务器间调用）放行，由 SameSite=Lax 兜底。
+// 这个方案不用给全站几十个表单埋 token，模板零改动。
+app.use((req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
+  const origin = req.headers.origin;
+  if (!origin) return next();
+  try {
+    if (new URL(origin).host === req.headers.host) return next();
+  } catch (e) { /* 解析不了的 Origin 一律视为非法 */ }
+  return res.status(403).send('跨站请求被拒绝（CSRF 校验失败）');
+});
+
 // 所有已登录页面统一注入 currentUser，方便模板使用
 app.use((req, res, next) => {
   res.locals.currentUser = req.session.user || null;
@@ -92,10 +106,12 @@ app.use((req, res) => {
 app.use((err, req, res, next) => {
   console.error(err);
 
-  if (err && err.code === 'SQLITE_CONSTRAINT_FOREIGNKEY') {
-    return res.status(400).render('global_error', {
-      message: '操作失败：这条记录还被其他单据引用着，无法删除，请先处理相关单据。'
-    });
+  // better-sqlite3 抛的是扩展错误码（如 SQLITE_CONSTRAINT_FOREIGNKEY / _CHECK / _UNIQUE），用前缀匹配
+  if (err && typeof err.code === 'string' && err.code.startsWith('SQLITE_CONSTRAINT')) {
+    const message = err.code === 'SQLITE_CONSTRAINT_FOREIGNKEY'
+      ? '操作失败：这条记录还被其他单据引用着，无法删除，请先处理相关单据。'
+      : '操作失败：数据不符合业务规则（例如库存不能扣成负数、内容重复），请核对后重试。';
+    return res.status(400).render('global_error', { message });
   }
 
   res.status(500).render('global_error', {

@@ -62,12 +62,33 @@ docker logs jxc-app --tail 20  # 看到"进销存系统已启动"即成功
 - 看板口径：销 50/收 20/退 25 → 首页显示销售额 25.00、欠款 5.00，与报表一致
 - 句柄泄漏：连建 2 个租户，进程打开的租户库句柄 1→1
 - 启动校验：无/短 SESSION_SECRET 均 exit(1)；容器路径（无 .env 文件、纯环境变量）启动正常
-- 短信链路：未配置时报 500 + 明确日志；重复发码被限流 429
+- 短信链路：真实下发验证码到手机 + 校验闭环 PASS/拒绝 全通过（短信认证服务 dypnsapi）
+
+## P2 批量修复（2026-09-06 晚，17 项回归全过）
+
+```
+utils/csv.js             CSV 文件名补 RFC6266 filename*=UTF-8''（中文文件名不再乱码）
+app.js                   CSRF 同源校验（跨源 POST 拒 403，配合 SameSite=Lax 双层防护）；
+                         全局错误处理器按 SQLITE_CONSTRAINT* 前缀匹配（CHECK 触发给友好提示而非 500）
+middleware/rateLimit.js  登录限流改为只计失败次数（fail/reset 语义），成功登录清零，团队共用出口 IP 不再误拦
+routes/auth.js           登录失败 fail() / 成功 reset()
+routes/platformAdmin.js  同上（平台后台登录）
+routes/sales.js          列表分页（每页 50，内存分页保证与"只看未结清"筛选组合正确）
+views/sales.ejs          分页控件（上一页/下一页/页码）
+routes/sales|returns|transfers.js + 三个表单   新增"存草稿"按钮（存为 draft，详情页继续编辑/提交审核）
+lib/schema.js            inventory 表迁移加 CHECK(quantity>=0) 负库存数据库防线（老库负数自动归零）
+lib/trialDb.js           清理废弃的本地验证码函数（短信认证服务接管后不再用）
+routes/purchases.js      注明采购无审核流的设计决策（仅管理员可录，自审无意义）
+README.md                重写为多租户现状（双入口登录/试用注册/部署/功能清单）
+删除 views/platform_tenant_edit.ejs.txt（历史残留死文件）
+```
+
+回归测试 17 项全过：含跨源 403/同源放行、存草稿→提交→审核全链路、CSV 文件名头、分页参数健壮性、9 次失败后正确密码可登录（成功清零）、连错 10 次 429、老库迁移归零负数 + CHECK 拦截写入。
 
 ## 待办
 
 - [x] 短信认证服务接入完成（2026-09-06 实测：真实下发验证码 + 校验闭环 PASS/拒绝 全通过）
-- [ ] 老胡：确认手机收到验证码短信（签名【恒创联众】）
+- [x] 老胡：已确认手机收到验证码短信
+- [x] P2 批量修复（见上）
 - [ ] 老胡：禁用旧 AK（LTAI5t7t549eEHHEmfVE1N1S，无权限且已弃用）
 - [ ] 服务器按上面步骤部署
-- P2 项（CSV 文件名乱码、CSRF token、采购审核流、README 更新、分页等）本次未动，等你点头再做

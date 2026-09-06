@@ -100,13 +100,30 @@ function queryOrders(db, user, start, end, unpaidOnly) {
 }
 
 // 销售单列表 - 管理员看全部，操作员看自己的；支持 ?start=&end= 按日期范围筛选，?unpaid=1 只看未结清
+// 分页：每页 50 条。"只看未结清"是查询后按有效欠款在内存里过滤的，
+// 所以先全量查询+过滤，再内存切片分页，保证筛选和分页的组合结果正确。
+// （SQLite 本地查询几千行很快，真正的开销是渲染 HTML，只渲染当页即可。）
+const SALES_PAGE_SIZE = 50;
+
 router.get('/sales', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const user = req.session.user;
   const { start, end } = req.query;
   const unpaidOnly = req.query.unpaid === '1';
-  const orders = queryOrders(db, user, start, end, unpaidOnly);
-  res.render('sales', { orders, user, start: start || '', end: end || '', unpaidOnly });
+
+  const allOrders = queryOrders(db, user, start, end, unpaidOnly);
+  const totalOrders = allOrders.length;
+  const totalPages = Math.max(1, Math.ceil(totalOrders / SALES_PAGE_SIZE));
+
+  let page = parseInt(req.query.page, 10);
+  if (!Number.isInteger(page) || page < 1) page = 1;
+  if (page > totalPages) page = totalPages;
+
+  const orders = allOrders.slice((page - 1) * SALES_PAGE_SIZE, page * SALES_PAGE_SIZE);
+  res.render('sales', {
+    orders, user, start: start || '', end: end || '', unpaidOnly,
+    page, totalPages, totalOrders
+  });
 });
 
 // 导出当前筛选范围内的销售单为 CSV
@@ -193,17 +210,19 @@ router.post('/sales/new', requireLogin, (req, res) => {
   }
 
   // 草稿/待审核阶段不动库存，这里只做数据落库，不检查库存、不生成出入库流水
+  // 点"存草稿"按钮会带 save_draft=1 → 存为 draft，之后在详情页继续编辑/提交审核
   const total = items.reduce((s, it) => s + it.qty * it.price, 0);
   const paid = parseFloat(paid_amount) || 0;
   let paymentStatus = 'unpaid';
   if (paid >= total && total > 0) paymentStatus = 'paid';
   else if (paid > 0) paymentStatus = 'partial';
+  const status = (req.body.save_draft === '1' || req.body.save_draft === 'on') ? 'draft' : 'submitted';
 
   const tx = db.transaction(() => {
     const info = db.prepare(
       `INSERT INTO sales_orders (customer_id, warehouse_id, user_id, order_date, total_amount, paid_amount, payment_status, status, note, remarks)
-       VALUES (?,?,?,?,?,?,?,'submitted',?,?)`
-    ).run(customer_id || null, warehouse_id, req.session.user.id, order_date || new Date().toISOString().slice(0,10), total, paid, paymentStatus, note || '', remarks || '');
+       VALUES (?,?,?,?,?,?,?,?,?,?)`
+    ).run(customer_id || null, warehouse_id, req.session.user.id, order_date || new Date().toISOString().slice(0,10), total, paid, paymentStatus, status, note || '', remarks || '');
     const soId = info.lastInsertRowid;
     const insertItem = db.prepare('INSERT INTO sales_order_items (sales_order_id, product_id, quantity, unit_label, base_quantity, unit_price, is_gift, cost_price_snapshot) VALUES (?,?,?,?,?,?,?,?)');
     for (const it of items) {

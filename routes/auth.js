@@ -40,9 +40,11 @@ router.post('/login', loginLimiter, (req, res) => {
   const { db, tenant } = result;
   const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
   if (!user || !bcrypt.compareSync(password || '', user.password_hash)) {
+    loginLimiter.fail(req); // 只统计失败次数；成功登录会清零，团队共用出口 IP 不会被误拦
     return res.render('login', { error: '用户名或密码错误', tenantCode: tenant_code });
   }
   if (!user.active) {
+    loginLimiter.fail(req);
     return res.render('login', { error: '该账号已被禁用，请联系管理员', tenantCode: tenant_code });
   }
 
@@ -53,6 +55,7 @@ router.post('/login', loginLimiter, (req, res) => {
       console.error(err);
       return res.render('login', { error: '登录失败，请重试', tenantCode: tenant_code });
     }
+    loginLimiter.reset(req); // 成功登录清零失败计数
     req.session.tenantCode = tenant.tenant_code;
     req.session.user = { id: user.id, username: user.username, name: user.name, role: user.role };
     res.redirect('/');
