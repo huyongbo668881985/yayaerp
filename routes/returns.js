@@ -140,9 +140,19 @@ router.get('/returns/export', requireLogin, (req, res) => {
   sendCsv(res, `退货单_${start || '起'}_${end || '止'}.csv`, headers, csvRows);
 });
 
+// 退货单表单里客户下拉的数据范围：与 sales.js 的 customersForForm 同口径——
+// 管理员看全部；操作员只看自己名下的（编辑草稿时额外带上单据当前关联的客户，防误清空）
+function customersForForm(db, user, currentCustomerId) {
+  if (user.role === 'admin') {
+    return db.prepare('SELECT * FROM customers ORDER BY name').all();
+  }
+  return db.prepare('SELECT * FROM customers WHERE operator_id = ? OR id = ? ORDER BY name')
+    .all(user.id, currentCustomerId || -1);
+}
+
 router.get('/returns/new', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  const customers = db.prepare('SELECT * FROM customers ORDER BY name').all();
+  const customers = customersForForm(db, req.session.user, null);
   const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
   const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
   res.render('return_form', { customers, warehouses, products, error: null, order: null, existingItems: [] });
@@ -153,7 +163,7 @@ router.post('/returns/new', requireLogin, (req, res) => {
   const { customer_id, warehouse_id, order_date, note, refunded_amount, remarks, related_sales_order_id } = req.body;
 
   const renderError = (msg) => {
-    const customers = db.prepare('SELECT * FROM customers ORDER BY name').all();
+    const customers = customersForForm(db, req.session.user, null);
     const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
     const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
     return res.render('return_form', { customers, warehouses, products, error: msg, order: null, existingItems: [] });
@@ -209,7 +219,7 @@ router.get('/returns/:id/edit', requireLogin, (req, res) => {
   if (order.status !== 'draft') return res.status(400).send('只有草稿状态的退货单可以编辑，请先撤回');
   if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限编辑他人的退货单');
 
-  const customers = db.prepare('SELECT * FROM customers ORDER BY name').all();
+  const customers = customersForForm(db, req.session.user, order.customer_id);
   const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
   const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
   const existingItems = db.prepare('SELECT * FROM return_order_items WHERE return_order_id = ?').all(order.id);
@@ -226,7 +236,7 @@ router.post('/returns/:id/edit', requireLogin, (req, res) => {
   const { customer_id, warehouse_id, order_date, note, refunded_amount, remarks, related_sales_order_id } = req.body;
 
   const renderError = (msg) => {
-    const customers = db.prepare('SELECT * FROM customers ORDER BY name').all();
+    const customers = customersForForm(db, req.session.user, order.customer_id);
     const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
     const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
     const existingItems = db.prepare('SELECT * FROM return_order_items WHERE return_order_id = ?').all(order.id);

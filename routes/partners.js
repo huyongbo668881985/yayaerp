@@ -27,17 +27,22 @@ router.post('/suppliers/:id/delete', requireAdmin, (req, res) => {
   res.redirect('/suppliers');
 });
 
-// 客户 - 所有登录用户可查看和新增（操作员录入销售单需要选客户）
+// 客户 - 列表按角色过滤：管理员看全部客户，操作员只看自己名下的（operator_id = 自己）。
+// 无归属人（operator_id 为 NULL）的客户是管理员维护的，操作员也看不到。
+// 操作员新增的客户自动归到自己名下，录入销售单时从这个范围里选。
 router.get('/customers', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  const customers = db.prepare(`
+  const user = req.session.user;
+  const baseSql = `
     SELECT c.*, u.name AS operator_name
     FROM customers c
     LEFT JOIN users u ON u.id = c.operator_id
-    ORDER BY c.id DESC
-  `).all();
+  `;
+  const customers = user.role === 'admin'
+    ? db.prepare(baseSql + ' ORDER BY c.id DESC').all()
+    : db.prepare(baseSql + ' WHERE c.operator_id = ? ORDER BY c.id DESC').all(user.id);
   const users = db.prepare('SELECT id, name, role FROM users ORDER BY name').all();
-  res.render('customers', { customers, users, isAdmin: req.session.user.role === 'admin' });
+  res.render('customers', { customers, users, isAdmin: user.role === 'admin' });
 });
 
 router.post('/customers/new', requireLogin, (req, res) => {

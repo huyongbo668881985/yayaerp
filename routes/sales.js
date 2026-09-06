@@ -200,9 +200,20 @@ function hasNegativePrice(items) {
   return items.some(it => it.price < 0);
 }
 
+// 销售单表单里客户下拉的数据范围：管理员看全部客户；操作员只看自己名下的。
+// 编辑草稿单时额外带上这张单当前关联的客户——万一它后来被管理员转给了别人，
+// 不然下拉里找不到它，表单提交时会被误清空。
+function customersForForm(db, user, currentCustomerId) {
+  if (user.role === 'admin') {
+    return db.prepare('SELECT * FROM customers ORDER BY name').all();
+  }
+  return db.prepare('SELECT * FROM customers WHERE operator_id = ? OR id = ? ORDER BY name')
+    .all(user.id, currentCustomerId || -1);
+}
+
 router.get('/sales/new', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  const customers = db.prepare('SELECT * FROM customers ORDER BY name').all();
+  const customers = customersForForm(db, req.session.user, null);
   const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
   const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
   res.render('sale_form', { customers, warehouses, products, error: null, order: null, existingItems: [] });
@@ -213,7 +224,7 @@ router.post('/sales/new', requireLogin, (req, res) => {
   const { customer_id, warehouse_id, order_date, note, paid_amount, remarks } = req.body;
 
   const renderError = (msg) => {
-    const customers = db.prepare('SELECT * FROM customers ORDER BY name').all();
+    const customers = customersForForm(db, req.session.user, null);
     const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
     const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
     return res.render('sale_form', { customers, warehouses, products, error: msg, order: null, existingItems: [] });
@@ -264,7 +275,7 @@ router.get('/sales/:id/edit', requireLogin, (req, res) => {
   if (order.status !== 'draft') return res.status(400).send('只有草稿状态的订单可以编辑，请先撤回');
   if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限编辑他人的订单');
 
-  const customers = db.prepare('SELECT * FROM customers ORDER BY name').all();
+  const customers = customersForForm(db, req.session.user, order.customer_id);
   const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
   const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
   const existingItems = db.prepare('SELECT * FROM sales_order_items WHERE sales_order_id = ?').all(order.id);
@@ -281,7 +292,7 @@ router.post('/sales/:id/edit', requireLogin, (req, res) => {
   const { customer_id, warehouse_id, order_date, note, paid_amount, remarks } = req.body;
 
   const renderError = (msg) => {
-    const customers = db.prepare('SELECT * FROM customers ORDER BY name').all();
+    const customers = customersForForm(db, req.session.user, order.customer_id);
     const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
     const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
     const existingItems = db.prepare('SELECT * FROM sales_order_items WHERE sales_order_id = ?').all(order.id);
