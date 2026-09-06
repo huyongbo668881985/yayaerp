@@ -37,13 +37,16 @@ cp .env.example .env
 openssl rand -hex 32          # 把输出填到 .env 的 SESSION_SECRET=
 vim .env                      # 填好 SESSION_SECRET；HTTPS 配好后 COOKIE_SECURE=true
 
-# 3. 填阿里云短信 4 个值（不填试用注册不可用，其他功能不受影响）
+# 3. 填阿里云短信认证服务配置（不填试用注册不可用，其他功能不受影响）
 #    ALIYUN_ACCESS_KEY_ID / ALIYUN_ACCESS_KEY_SECRET
-#    ALIYUN_SMS_SIGN_NAME / ALIYUN_SMS_TEMPLATE_CODE（模板需含 ${code} 和 ${min} 变量）
 #
-#    ⚠️ 进展（2026-09-06）：AK 与模板已配好（SMS_337380326，内容只有 ${code}）。
-#    唯一缺口：账号下还没有短信签名（签名数 0），SendSms 报 isv.SMS_SIGNATURE_ILLEGAL。
-#    需在 短信服务控制台 → 国内消息 → 签名管理 申请签名（如"鸭鸭进销存"）并等审核通过。
+#    ⚠️ 产品线（2026-09-06 定版）：本项目用「短信认证服务」（dypnsapi），
+#    不是传统短信服务。签名/模板用阿里云赠送的，无需申请审核，
+#    赠送值全账号通用（已实测发信+校验闭环通过）：
+#      ALIYUN_SMS_SIGN_NAME=恒创联众
+#      ALIYUN_SMS_TEMPLATE_CODE=100001
+#      ALIYUN_SMS_TEMPLATE_PARAM={"code":"##code##","min":"5"}
+#    （.env.example 里已带默认值，一般不用改）
 
 # 4. 重建并启动
 docker compose up -d --build
@@ -63,8 +66,8 @@ docker logs jxc-app --tail 20  # 看到"进销存系统已启动"即成功
 
 ## 待办
 
-- [ ] 老胡：去 RAM 控制台给 AK 所属子账号添加 AliyunDysmsFullAccess（SendSms 实测 403）
-- [ ] 老胡：提供模板 Code（SMS_ 开头，控制台→国内消息→模板管理；注意不是模板内容）
-- [ ] 填齐后真实发一条验证码做端到端验证
+- [x] 短信认证服务接入完成（2026-09-06 实测：真实下发验证码 + 校验闭环 PASS/拒绝 全通过）
+- [ ] 老胡：确认手机收到验证码短信（签名【恒创联众】）
+- [ ] 老胡：禁用旧 AK（LTAI5t7t549eEHHEmfVE1N1S，无权限且已弃用）
 - [ ] 服务器按上面步骤部署
 - P2 项（CSV 文件名乱码、CSRF token、采购审核流、README 更新、分页等）本次未动，等你点头再做

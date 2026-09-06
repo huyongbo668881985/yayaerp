@@ -7,6 +7,7 @@
     "start": "node app.js"
   },
   "dependencies": {
+    "@alicloud/dypnsapi20170525": "^2.0.0",
     "@alicloud/dysmsapi20170525": "^3.1.1",
     "@alicloud/openapi-client": "^0.4.13",
     "@alicloud/tea-util": "^1.4.10",

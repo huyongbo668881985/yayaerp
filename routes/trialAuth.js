@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
 
-const { createVerificationCode, verifyCode, isPhoneAlreadyTrialed } = require('../lib/trialDb');
-const { sendVerificationCode } = require('../lib/smsGateway');
+const { isPhoneAlreadyTrialed } = require('../lib/trialDb');
+const { sendVerifyCode, checkVerifyCode } = require('../lib/smsGateway');
 const { registerTrialAccount } = require('../lib/trialProvision');
 const { sendTextMessage } = require('../lib/feishuBot');
 const { sendTrialNotificationEmail } = require('../lib/mailer');
@@ -37,8 +37,8 @@ router.post('/api/trial/send-code', express.json(), async (req, res) => {
   }
 
   try {
-    const code = createVerificationCode(phone);
-    await sendVerificationCode(phone, code);
+    // 短信认证服务：验证码由阿里云生成和下发，我们不经手验证码本身
+    await sendVerifyCode(phone);
     res.json({ ok: true });
   } catch (err) {
     console.error('[trialAuth] 发送验证码失败:', err);
@@ -59,15 +59,21 @@ router.post('/api/trial/verify-and-register', express.json(), async (req, res) =
     return res.status(409).json({ ok: false, message: '该手机号已经开通过试用了' });
   }
 
-  const verifyResult = verifyCode(phone, code);
-  if (!verifyResult.ok) {
-    const messages = {
-      not_found: '请先获取验证码',
-      expired: '验证码已过期，请重新获取',
-      too_many_attempts: '验证码错误次数过多，请重新获取',
-      mismatch: '验证码不正确'
-    };
-    return res.status(400).json({ ok: false, message: messages[verifyResult.reason] || '验证失败' });
+  // 校验次数限流：防止拿这个接口暴力猜验证码（6 位数字 + 阿里云 5 分钟有效期，
+  // 每个手机号 10 分钟内最多试 10 次，远不够猜中）
+  if (!rateLimiter.hit(`check:phone:${phone}`, 10 * 60 * 1000, 10)) {
+    return res.status(429).json({ ok: false, message: '尝试次数太多，请 10 分钟后再试' });
+  }
+
+  try {
+    // 短信认证服务：把用户输入交给阿里云核对，返回 PASS / UNKNOWN
+    const check = await checkVerifyCode(phone, String(code).trim());
+    if (!check.pass) {
+      return res.status(400).json({ ok: false, message: '验证码不正确或已过期，请重新输入' });
+    }
+  } catch (err) {
+    console.error('[trialAuth] 验证码校验失败:', err);
+    return res.status(500).json({ ok: false, message: '验证失败，请稍后重试' });
   }
 
   try {
