@@ -59,15 +59,22 @@ app.use(resolveTenant);
 
 // CSRF 防护（与 cookie 的 SameSite=Lax 形成双层防线）：
 // 现代浏览器发起跨站 POST 时都会带 Origin 头——只要 Origin 存在且与本站不同源就拒绝。
-// 不带 Origin 的场景（极老浏览器、服务器间调用）放行，由 SameSite=Lax 兜底。
+// 表单请求不带 Origin 的场景（极老浏览器、服务器间调用）放行，由 SameSite=Lax 兜底；
 // 这个方案不用给全站几十个表单埋 token，模板零改动。
+// 对 JSON API（/api/ 开头，如官网试用注册接口）收紧一档：必须带 Origin 且同源——
+// 这类接口只被同源页面的 fetch 调用，没有"无 Origin 兼容"的需求，收紧后脚本工具无法直接打接口。
 app.use((req, res, next) => {
   if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
   const origin = req.headers.origin;
-  if (!origin) return next();
+  const isJsonApi = req.path.startsWith('/api/');
+  if (!origin) {
+    if (isJsonApi) return res.status(403).json({ ok: false, message: '非法请求' });
+    return next();
+  }
   try {
     if (new URL(origin).host === req.headers.host) return next();
   } catch (e) { /* 解析不了的 Origin 一律视为非法 */ }
+  if (isJsonApi) return res.status(403).json({ ok: false, message: '非法请求' });
   return res.status(403).send('跨站请求被拒绝（CSRF 校验失败）');
 });
 

@@ -60,7 +60,7 @@ router.get('/transfers/new', requireLogin, (req, res) => {
 
 router.post('/transfers/new', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  const { from_warehouse_id, to_warehouse_id, order_date, note } = req.body;
+  const { from_warehouse_id, to_warehouse_id, order_date, note, remarks } = req.body;
 
   const renderError = (msg) => {
     const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
@@ -79,9 +79,9 @@ router.post('/transfers/new', requireLogin, (req, res) => {
   const status = (req.body.save_draft === '1' || req.body.save_draft === 'on') ? 'draft' : 'submitted';
   const tx = db.transaction(() => {
     const info = db.prepare(
-      `INSERT INTO transfer_orders (from_warehouse_id, to_warehouse_id, user_id, order_date, note, status)
-       VALUES (?,?,?,?,?,?)`
-    ).run(from_warehouse_id, to_warehouse_id, req.session.user.id, order_date || new Date().toISOString().slice(0,10), note || '', status);
+      `INSERT INTO transfer_orders (from_warehouse_id, to_warehouse_id, user_id, order_date, note, status, remarks)
+       VALUES (?,?,?,?,?,?,?)`
+    ).run(from_warehouse_id, to_warehouse_id, req.session.user.id, order_date || new Date().toISOString().slice(0,10), note || '', status, remarks || '');
     const toId = info.lastInsertRowid;
     const insertItem = db.prepare('INSERT INTO transfer_order_items (transfer_order_id, product_id, quantity, unit_label, base_quantity) VALUES (?,?,?,?,?)');
     for (const it of items) {
@@ -114,7 +114,7 @@ router.post('/transfers/:id/edit', requireLogin, (req, res) => {
   if (order.status !== 'draft') return res.status(400).send('只有草稿状态的调拨单可以编辑，请先撤回');
   if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限编辑他人的调拨单');
 
-  const { from_warehouse_id, to_warehouse_id, order_date, note } = req.body;
+  const { from_warehouse_id, to_warehouse_id, order_date, note, remarks } = req.body;
 
   const renderError = (msg) => {
     const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
@@ -131,8 +131,8 @@ router.post('/transfers/:id/edit', requireLogin, (req, res) => {
 
   const tx = db.transaction(() => {
     db.prepare(
-      `UPDATE transfer_orders SET from_warehouse_id=?, to_warehouse_id=?, order_date=?, note=? WHERE id=?`
-    ).run(from_warehouse_id, to_warehouse_id, order_date || order.order_date, note || '', order.id);
+      `UPDATE transfer_orders SET from_warehouse_id=?, to_warehouse_id=?, order_date=?, note=?, remarks=? WHERE id=?`
+    ).run(from_warehouse_id, to_warehouse_id, order_date || order.order_date, note || '', remarks || '', order.id);
     db.prepare('DELETE FROM transfer_order_items WHERE transfer_order_id = ?').run(order.id);
     const insertItem = db.prepare('INSERT INTO transfer_order_items (transfer_order_id, product_id, quantity, unit_label, base_quantity) VALUES (?,?,?,?,?)');
     for (const it of items) {

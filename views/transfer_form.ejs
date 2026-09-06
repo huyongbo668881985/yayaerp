@@ -29,9 +29,15 @@
     <div id="items"></div>
     <button type="button" class="btn btn-secondary btn-sm" onclick="addRow()">+ 添加一行</button>
 
-    <div class="form-row" style="margin-top:16px">
-      <label>备注</label>
-      <textarea name="note" rows="2" placeholder="比如：车1 今日出车装货"><%= order ? (order.note || '') : '' %></textarea>
+    <div class="grid-3" style="margin-top:16px">
+      <div class="form-row">
+        <label>备注</label>
+        <input type="text" name="remarks" placeholder="备注信息" value="<%= order ? (order.remarks || '') : '' %>">
+      </div>
+      <div class="form-row" style="grid-column: span 2">
+        <label>内部备注</label>
+        <input type="text" name="note" placeholder="比如：车1 今日出车装货" value="<%= order ? (order.note || '') : '' %>">
+      </div>
     </div>
 
     <div style="margin-top:16px">

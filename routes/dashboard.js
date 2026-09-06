@@ -47,7 +47,10 @@ router.get('/', requireLogin, (req, res) => {
       AS t
   `;
   const monthlyParams = [];
-  if (operatorFilter) monthlyParams.push(user.id);
+  // 操作员口径下 SQL 里有两个 user_id = ? 占位符（销售子查询 + 退货子查询），
+  // 两个都要传——以前只传了一个，操作员一进首页这里就抛
+  // "Too few parameter values were provided"，整个首页 500（潜伏 bug，这次补上）。
+  if (operatorFilter) monthlyParams.push(user.id, user.id);
   const monthlySales = db.prepare(monthlySalesSql).get(...monthlyParams).t;
 
   // ---- 总欠款：只累计"有效欠款 > 0"的销售单，退货抵扣部分不算欠 ----
@@ -60,8 +63,10 @@ router.get('/', requireLogin, (req, res) => {
   if (operatorFilter) debtParams.push(user.id);
   const totalDebt = db.prepare(debtSql).get(...debtParams).d;
 
-  // 待审核单据数
-  const pendingOrders = db.prepare(`SELECT COUNT(*) c FROM sales_orders WHERE status = 'submitted'`).get().c;
+  // 待审核单据数（操作员只统计自己名下的，与文件头的口径说明保持一致）
+  const pendingOrders = db.prepare(
+    `SELECT COUNT(*) c FROM sales_orders WHERE status = 'submitted' ${operatorFilter ? 'AND user_id = ?' : ''}`
+  ).get(...(operatorFilter ? [user.id] : [])).c;
 
   // 毛利：仅管理员可见。口径 = 已审核 + 已收款(全款) 的订单，每行"销售额-成本"求和。
   // 成本用明细行上的成本快照（开单那一刻的成本价），改商品成本价不影响历史毛利。
@@ -89,14 +94,17 @@ router.get('/', requireLogin, (req, res) => {
     LIMIT 20
   `).all();
 
+  // 最近销售单（操作员只看自己录入的——列表页/详情页都是这个口径，
+  // 首页不能反而把别人的单号递到眼前）
   const recentSales = db.prepare(`
     SELECT so.id, so.order_date, so.total_amount, so.paid_amount, so.payment_status, so.status,
            c.name AS customer_name, w.name AS warehouse_name
     FROM sales_orders so
     LEFT JOIN customers c ON c.id = so.customer_id
     LEFT JOIN warehouses w ON w.id = so.warehouse_id
+    ${operatorFilter ? 'WHERE so.user_id = ?' : ''}
     ORDER BY so.id DESC LIMIT 5
-  `).all();
+  `).all(...(operatorFilter ? [user.id] : []));
 
   res.render('dashboard', {
     todaySales, monthlySales, totalDebt, pendingOrders, todayProfit, monthlyProfit,

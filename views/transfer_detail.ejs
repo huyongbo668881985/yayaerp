@@ -2,7 +2,7 @@
 <h1>调拨单 #<%= order.id %></h1>
 <div class="card">
   <p><strong>日期：</strong><%= order.order_date %> &nbsp; <strong><%= order.from_name %></strong> → <strong><%= order.to_name %></strong></p>
-  <p><strong>操作人：</strong><%= order.user_name %> &nbsp; <strong>备注：</strong><%= order.note || '-' %></p>
+  <p><strong>操作人：</strong><%= order.user_name %> &nbsp; <strong>备注：</strong><%= order.remarks || '-' %> &nbsp; <strong>内部备注：</strong><%= order.note || '-' %></p>
   <p>
     <strong>审核状态：</strong>
     <%

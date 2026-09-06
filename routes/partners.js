@@ -93,9 +93,17 @@ router.post('/customers/reassign', requireAdmin, (req, res) => {
 
 router.post('/customers/:id/delete', requireAdmin, (req, res) => {
   const db = req.tenantDb;
-  const refCount = db.prepare('SELECT COUNT(*) c FROM sales_orders WHERE customer_id = ?').get(req.params.id).c;
+  // 引用检查要同时覆盖销售单和退货单（return_orders.customer_id 也有外键），
+  // 只查销售单的话，有退货记录的客户会走到外键约束报错，用户看到的是难懂的 500 页
+  const salesCount = db.prepare('SELECT COUNT(*) c FROM sales_orders WHERE customer_id = ?').get(req.params.id).c;
+  const returnCount = db.prepare('SELECT COUNT(*) c FROM return_orders WHERE customer_id = ?').get(req.params.id).c;
+  const refCount = salesCount + returnCount;
   if (refCount > 0) {
-    return res.status(400).send(`无法删除：该客户名下还有 ${refCount} 张销售单记录，请先处理相关单据（或者不删，改个名字标记为停用）`);
+    const detail = [
+      salesCount > 0 ? `${salesCount} 张销售单` : '',
+      returnCount > 0 ? `${returnCount} 张退货单` : ''
+    ].filter(Boolean).join('、');
+    return res.status(400).send(`无法删除：该客户名下还有 ${detail} 记录，请先处理相关单据（或者不删，改个名字标记为停用）`);
   }
   db.prepare('DELETE FROM customers WHERE id = ?').run(req.params.id);
   res.redirect('/customers');

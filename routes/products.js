@@ -49,18 +49,23 @@ router.get('/products/:id/edit', requireAdmin, (req, res) => {
 router.post('/products/:id/edit', requireAdmin, (req, res) => {
   const db = req.tenantDb;
   const { sku, name, spec, unit, pack_unit, pack_size, cost_price, sale_price, cost_price_pack, sale_price_pack, low_stock_threshold } = req.body;
-  db.prepare(
-    `UPDATE products SET sku=?, name=?, spec=?, unit=?, pack_unit=?, pack_size=?, cost_price=?, sale_price=?, cost_price_pack=?, sale_price_pack=?, low_stock_threshold=? WHERE id=?`
-  ).run(
-    sku || null, name, spec || '', unit || '瓶',
-    pack_unit || null, Number(pack_size) || 1,
-    Number(cost_price) || 0, Number(sale_price) || 0,
-    cost_price_pack !== undefined && cost_price_pack !== '' ? Number(cost_price_pack) : null,
-    sale_price_pack !== undefined && sale_price_pack !== '' ? Number(sale_price_pack) : null,
-    Number(low_stock_threshold) || 0,
-    req.params.id
-  );
-  res.redirect('/products');
+  // 与"新建商品"保持一致：SKU 撞车等约束错误渲染表单提示，而不是抛到全局 500 错误页
+  try {
+    db.prepare(
+      `UPDATE products SET sku=?, name=?, spec=?, unit=?, pack_unit=?, pack_size=?, cost_price=?, sale_price=?, cost_price_pack=?, sale_price_pack=?, low_stock_threshold=? WHERE id=?`
+    ).run(
+      sku || null, name, spec || '', unit || '瓶',
+      pack_unit || null, Number(pack_size) || 1,
+      Number(cost_price) || 0, Number(sale_price) || 0,
+      cost_price_pack !== undefined && cost_price_pack !== '' ? Number(cost_price_pack) : null,
+      sale_price_pack !== undefined && sale_price_pack !== '' ? Number(sale_price_pack) : null,
+      Number(low_stock_threshold) || 0,
+      req.params.id
+    );
+    res.redirect('/products');
+  } catch (e) {
+    res.render('product_form', { product: req.body, error: 'SKU 已存在或数据有误：' + e.message });
+  }
 });
 
 router.post('/products/:id/delete', requireAdmin, (req, res) => {
