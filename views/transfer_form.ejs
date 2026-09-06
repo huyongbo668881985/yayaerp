@@ -45,12 +45,12 @@
 </div>
 
 <script>
-  const PRODUCTS = <%- JSON.stringify(products) %>;
+  const PRODUCTS = <%- JSON.stringify(products).replace(/</g, '\\u003c') %>;
   const EXISTING_ITEMS = <%- JSON.stringify((typeof existingItems !== 'undefined' ? existingItems : []).map(function(it) {
     const p = products.find(function(pr) { return pr.id === it.product_id; });
     const isPack = p && p.pack_unit && it.unit_label === p.pack_unit;
     return { id: it.product_id, quantity: it.quantity, unit_choice: isPack ? 'pack' : 'base' };
-  })) %>;
+  })).replace(/</g, '\\u003c') %>;
 
   function addRow(initial) {
     const container = document.getElementById('items');

@@ -294,6 +294,8 @@ router.get('/transfers/:id', requireLogin, (req, res) => {
     WHERE t.id = ?
   `).get(req.params.id);
   if (!order) return res.status(404).send('单据不存在');
+  // 与列表页口径保持一致：操作员只能看自己录入的调拨单（列表里有 t.user_id = ? 过滤）
+  if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限查看他人的调拨单');
   const items = db.prepare(`
     SELECT ti.*, p.name AS product_name
     FROM transfer_order_items ti

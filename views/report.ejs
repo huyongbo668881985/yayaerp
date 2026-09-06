@@ -170,6 +170,20 @@
   <% if (returnOrders.length === 0) { %><p class="muted">这段时间没有符合条件的退货单</p><% } %>
 </div>
 
+<div class="card" style="margin-top:24px">
+  <p class="muted" style="font-size:13px; line-height:1.8; margin:0">
+    <strong style="color:#1A1A17">统计口径说明</strong><br>
+    · 只统计「已审核」的单据，草稿 / 待审核 / 已拒绝不计入。<br>
+    · 销售额 = 区间内已审核销售单金额 − 区间内已审核退货单金额，各自按自己的单据日期归属到区间。<br>
+    · 应收金额 = 销售单金额 − 已收款 − 该单关联的已审核退货金额，只累计仍大于 0 的部分。<br>
+    · <strong style="color:#1A1A17">「不含应收」毛利的判定只看销售单的收款状态</strong>（状态为「已收款」才计入），
+      <strong style="color:#1A1A17">不把退货抵扣视作已结清</strong>——与首页仪表盘口径保持一致。
+      因此可能出现这种情况：某单已收完全款、之后又发生退货，列表里收款状态显示「部分收款」，但它的毛利仍计入「不含应收」。<br>
+    · 退货单审核通过后冲减当期毛利；「不含应收」口径下，只有已退款、或所关联销售单已收款的退货单才参与冲减。<br>
+    · 毛利用开单那一刻存下的成本快照计算，事后修改商品成本价不会改写历史毛利。
+  </p>
+</div>
+
 <script>
 function fmt(d) { return d.toISOString().slice(0, 10); }
 function setRange(kind) {

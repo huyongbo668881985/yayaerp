@@ -371,6 +371,22 @@ router.post('/sales/unapprove/:id', requireLogin, (req, res) => {
     return res.status(400).send('只有已审核或已拒绝状态可以反审核');
   }
 
+  // 反审核前先挡一道：这张销售单不能存在"已审核"的关联退货单。
+  // 退货审核通过时已经把退回的货加回过库存（returns.js 的 approve），
+  // 这里如果再把整单的库存加回去，那部分货就被加了两次，库存凭空多出来。
+  if (order.status === 'approved') {
+    const linkedReturns = db.prepare(
+      `SELECT id FROM return_orders WHERE related_sales_order_id = ? AND status = 'approved' ORDER BY id`
+    ).all(order.id);
+    if (linkedReturns.length > 0) {
+      const ids = linkedReturns.map(r => '#' + r.id).join('、');
+      return res.status(400).send(
+        `反审核失败：这张销售单关联的退货单 ${ids} 已审核通过（退回的货已经加回库存了）。` +
+        `直接反审核会把同一批货重复加回、导致库存虚增。请先把这些退货单反审核，再来反审核本销售单。`
+      );
+    }
+  }
+
   const tx = db.transaction(() => {
     if (order.status === 'approved') {
       // 把审核通过时扣掉的库存加回来
@@ -406,7 +422,18 @@ router.post('/sales/:id/record-payment', requireLogin, (req, res) => {
   const amount = parseFloat(req.body.amount);
   if (!(amount > 0)) return res.status(400).send('收款金额必须大于0');
 
-  db.prepare('UPDATE sales_orders SET paid_amount = paid_amount + ? WHERE id = ?').run(amount, order.id);
+  // 收款状态必须跟着 paid_amount 一起更新，不能只加金额不改状态。
+  // 以前这里漏了 payment_status，导致"建单时只收了定金、后来补完全款"的单子
+  // 状态永远停在 partial，仪表盘和经营报表的"不含应收"毛利永远统计不到它——
+  // 钱收齐了却不算已结清，毛利凭空少一块。
+  // 判定口径：只看实收现金 vs 单据金额，不做退货抵扣（与仪表盘一致）。
+  const newPaid = (order.paid_amount || 0) + amount;
+  let paymentStatus = 'unpaid';
+  if (order.total_amount > 0 && newPaid >= order.total_amount) paymentStatus = 'paid';
+  else if (newPaid > 0) paymentStatus = 'partial';
+
+  db.prepare('UPDATE sales_orders SET paid_amount = ?, payment_status = ? WHERE id = ?')
+    .run(newPaid, paymentStatus, order.id);
   res.redirect('/sales/' + order.id);
 });
 
@@ -422,6 +449,9 @@ router.get('/sales/:id', requireLogin, (req, res) => {
     WHERE so.id = ?
   `).get(req.params.id);
   if (!order) return res.status(404).send('单据不存在');
+  // 列表页按"管理员看全部、操作员只看自己的"过滤，详情页必须跟上同样的口径，
+  // 否则操作员手输 /sales/123 就能看到别人单据的客户、金额和商品明细。
+  if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限查看他人的销售单');
   attachEffectivePayment(order);
   const items = db.prepare(`
     SELECT soi.*, p.name AS product_name

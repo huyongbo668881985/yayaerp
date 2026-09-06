@@ -40,7 +40,7 @@
 </div>
 
 <script>
-  const PRODUCTS = <%- JSON.stringify(products) %>;
+  const PRODUCTS = <%- JSON.stringify(products).replace(/</g, '\\u003c') %>;
   let rowIndex = 0;
 
   function addRow() {

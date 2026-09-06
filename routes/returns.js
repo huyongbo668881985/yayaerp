@@ -349,6 +349,8 @@ router.get('/returns/:id', requireLogin, (req, res) => {
     WHERE ro.id = ?
   `).get(req.params.id);
   if (!order) return res.status(404).send('单据不存在');
+  // 与列表页口径保持一致：操作员只能看自己录入的退货单（列表里有 ro.user_id = ? 过滤）
+  if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限查看他人的退货单');
   const items = db.prepare(`
     SELECT roi.*, p.name AS product_name
     FROM return_order_items roi

@@ -58,7 +58,7 @@
 </div>
 
 <script>
-  const PRODUCTS = <%- JSON.stringify(products) %>;
+  const PRODUCTS = <%- JSON.stringify(products).replace(/</g, '\\u003c') %>;
   // 编辑模式下，把已有明细转换成和新建表单一致的结构（quantity 用录入时的原始数量，配合 unit_choice 换算）
   const EXISTING_ITEMS = <%- JSON.stringify((typeof existingItems !== 'undefined' ? existingItems : []).map(function(it) {
     const p = products.find(function(pr) { return pr.id === it.product_id; });
@@ -70,7 +70,7 @@
       unit_choice: isPack ? 'pack' : 'base',
       is_gift: !!it.is_gift
     };
-  })) %>;
+  })).replace(/</g, '\\u003c') %>;
 
   function addRow(initial) {
     const container = document.getElementById('items');

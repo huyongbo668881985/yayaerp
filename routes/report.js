@@ -14,19 +14,21 @@ const RETURNED_AMOUNT_SUBQUERY = `COALESCE((SELECT SUM(ro.total_amount) FROM ret
 const EFFECTIVE_DEBT_EXPR = `(so.total_amount - so.paid_amount - ${RETURNED_AMOUNT_SUBQUERY})`;
 
 // 一笔退货算不算"现金基础已落定"：要么自己收到了现金退款（refund_status='refunded'），
-// 要么它关联的销售单已经结清了（不管是靠收现金还是靠这笔退货本身抵扣的）——
-// 没有这一条的话，销售那边already"结清全算"，退货这边却因为"没退现金"不扣成本，两边口径就对不上了。
+// 要么它关联的销售单在收款状态上已经是"已收款"（payment_status='paid'）。
+//
+// 口径说明（2026-09-07 定版，以仪表盘为准）：
+// "算不算已结清"统一看 sales_orders.payment_status 这个落库字段，跟首页仪表盘完全一致，
+// 不再用"金额 − 已收款 − 关联退货 <= 0"这套实时扣减算法。
+// 两套算法的分歧在于退货：实时算法认为"退货抵掉的部分"也算结清了，
+// 而 payment_status 只认实收现金。以前报表用实时算法、仪表盘用 payment_status，
+// 同一张单两边结论不一样，现在统一到仪表盘这一侧。
 const RETURN_SETTLED_EXPR = `(
   ro.refund_status = 'refunded'
   OR (
     ro.related_sales_order_id IS NOT NULL
     AND COALESCE((
-      SELECT so2.total_amount - so2.paid_amount - COALESCE((
-        SELECT SUM(ro3.total_amount) FROM return_orders ro3
-        WHERE ro3.related_sales_order_id = so2.id AND ro3.status = 'approved'
-      ), 0)
-      FROM sales_orders so2 WHERE so2.id = ro.related_sales_order_id
-    ), 999999999) <= 0.001
+      SELECT so2.payment_status FROM sales_orders so2 WHERE so2.id = ro.related_sales_order_id
+    ), 'unpaid') = 'paid'
   )
 )`;
 
@@ -63,12 +65,13 @@ function getSummary(db, start, end) {
 
   // 毛利用明细行上的成本快照（cost_price_snapshot），不用商品当前成本价——
   // 这样管理员事后改成本价，不会追溯改写历史单据的毛利。
-  // 不含应收口径下，一张销售单只有"有效欠款已经结清"（现金收完，或者退货已经抵掉）才算数
+  // 不含应收口径下，一张销售单只有"收款状态已经是已收款"（payment_status='paid'）才算数，
+  // 跟首页仪表盘的判定条件完全一致（2026-09-07 统一，详见 RETURN_SETTLED_EXPR 处的口径说明）。
   const salesProfitSql = (onlyPaid) => `
     SELECT COALESCE(SUM(soi.quantity * soi.unit_price - soi.base_quantity * soi.cost_price_snapshot), 0) AS profit
     FROM sales_order_items soi
     JOIN sales_orders so ON so.id = soi.sales_order_id
-    WHERE so.status = 'approved' ${onlyPaid ? `AND ${EFFECTIVE_DEBT_EXPR} <= 0.001` : ''} ${saleFilter.clause}
+    WHERE so.status = 'approved' ${onlyPaid ? `AND so.payment_status = 'paid'` : ''} ${saleFilter.clause}
   `;
   const returnProfitSql = (onlyRefunded) => `
     SELECT COALESCE(SUM(roi.quantity * roi.unit_price - roi.base_quantity * roi.cost_price_snapshot), 0) AS profit
@@ -90,8 +93,8 @@ function getSummary(db, start, end) {
   return { sales, returnsAmount: returnsRaw.amount, receivable, profitWithoutReceivable, profitWithReceivable, receivableProfit };
 }
 
-// 销售单明细：includeReceivable=false 时只列"有效已结清"的单子（对应"不含应收"口径），
-// true 时列区间内全部已审核单子（不管结没结清）
+// 销售单明细：includeReceivable=false 时只列"已收款"的单子（payment_status='paid'，对应"不含应收"口径），
+// true 时列区间内全部已审核单子（不管收没收到钱）
 function getSalesOrderList(db, start, end, includeReceivable) {
   const { clause, params } = buildDateFilter('so', start, end);
   let sql = `
@@ -104,7 +107,7 @@ function getSalesOrderList(db, start, end, includeReceivable) {
     JOIN sales_order_items soi ON soi.sales_order_id = so.id
     WHERE so.status = 'approved' ${clause}
   `;
-  if (!includeReceivable) sql += ` AND ${EFFECTIVE_DEBT_EXPR} <= 0.001`;
+  if (!includeReceivable) sql += ` AND so.payment_status = 'paid'`;
   sql += ' GROUP BY so.id ORDER BY so.order_date DESC, so.id DESC';
   return db.prepare(sql).all(...params);
 }
