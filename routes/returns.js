@@ -176,6 +176,10 @@ router.post('/returns/new', requireLogin, (req, res) => {
 
   const total = items.reduce((s, it) => s + it.qty * it.price, 0);
   const refunded = parseFloat(refunded_amount) || 0;
+  // 退款不能超过退货总额：多退的钱没有业务意义，还会把退款状态/报表搞乱
+  if (refunded > total + 0.001) {
+    return renderError(`退款金额（¥${refunded.toFixed(2)}）不能超过退货总额（¥${total.toFixed(2)}）`);
+  }
   let refundStatus = 'unrefunded';
   if (refunded >= total && total > 0) refundStatus = 'refunded';
   else if (refunded > 0) refundStatus = 'partial';
@@ -246,6 +250,10 @@ router.post('/returns/:id/edit', requireLogin, (req, res) => {
 
   const total = items.reduce((s, it) => s + it.qty * it.price, 0);
   const refunded = parseFloat(refunded_amount) || 0;
+  // 与新建单一致：退款不能超过退货总额
+  if (refunded > total + 0.001) {
+    return renderError(`退款金额（¥${refunded.toFixed(2)}）不能超过退货总额（¥${total.toFixed(2)}）`);
+  }
   let refundStatus = 'unrefunded';
   if (refunded >= total && total > 0) refundStatus = 'refunded';
   else if (refunded > 0) refundStatus = 'partial';
@@ -399,6 +407,15 @@ router.post('/returns/:id/record-refund', requireLogin, (req, res) => {
 
   const amount = parseFloat(req.body.amount);
   if (!(amount > 0)) return res.status(400).send('退款金额必须大于0');
+
+  // 退款累计不能超过退货总额（与 record-payment 的封顶逻辑对称，允许 0.001 浮点误差）
+  const remaining = order.total_amount - (order.refunded_amount || 0);
+  if (remaining <= 0.001) {
+    return res.status(400).send(`该单已退满（已退 ¥${(order.refunded_amount || 0).toFixed(2)} / 总额 ¥${order.total_amount.toFixed(2)}），无需再记退款`);
+  }
+  if (amount > remaining + 0.001) {
+    return res.status(400).send(`退款金额（¥${amount.toFixed(2)}）超过该单剩余未退金额（¥${remaining.toFixed(2)}），最多还能退 ¥${remaining.toFixed(2)}`);
+  }
 
   const newRefunded = (order.refunded_amount || 0) + amount;
   let refundStatus = 'unrefunded';

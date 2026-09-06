@@ -57,7 +57,9 @@
         <td><%= c.address || '-' %></td>
         <td><%= c.operator_name || '-' %></td>
         <td>
-          <a href="/customers/<%= c.id %>/edit" class="btn btn-sm btn-secondary">编辑</a>
+          <% if (isAdmin || c.operator_id === currentUser.id) { %>
+            <a href="/customers/<%= c.id %>/edit" class="btn btn-sm btn-secondary">编辑</a>
+          <% } %>
           <% if (isAdmin) { %>
             <form method="POST" action="/customers/<%= c.id %>/delete" style="display:inline" onsubmit="return confirm('确认删除？如果该客户有历史订单会删除失败。')">
               <button type="submit" style="background:none;border:none;color:#e5484d;cursor:pointer;padding:0;margin-left:6px">删除</button>
@@ -81,7 +83,9 @@
       </div>
       <% if (c.address) { %><div class="muted" style="margin-bottom:8px"><%= c.address %></div><% } %>
       <div style="display:flex; gap:8px">
-        <a href="/customers/<%= c.id %>/edit" class="btn btn-sm btn-secondary" style="flex:1; text-align:center">编辑</a>
+        <% if (isAdmin || c.operator_id === currentUser.id) { %>
+          <a href="/customers/<%= c.id %>/edit" class="btn btn-sm btn-secondary" style="flex:1; text-align:center">编辑</a>
+        <% } %>
         <% if (isAdmin) { %>
           <form method="POST" action="/customers/<%= c.id %>/delete" style="flex:1" onsubmit="return confirm('确认删除？如果该客户有历史订单会删除失败。')">
             <button type="submit" class="btn btn-sm btn-danger" style="width:100%">删除</button>

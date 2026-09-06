@@ -231,6 +231,10 @@ router.post('/sales/new', requireLogin, (req, res) => {
   // 点"存草稿"按钮会带 save_draft=1 → 存为 draft，之后在详情页继续编辑/提交审核
   const total = items.reduce((s, it) => s + it.qty * it.price, 0);
   const paid = parseFloat(paid_amount) || 0;
+  // 收款不能超过单据总额：多收的钱没有业务意义，还会把应收/欠款统计搞乱
+  if (paid > total + 0.001) {
+    return renderError(`收款金额（¥${paid.toFixed(2)}）不能超过单据总额（¥${total.toFixed(2)}）`);
+  }
   let paymentStatus = 'unpaid';
   if (paid >= total && total > 0) paymentStatus = 'paid';
   else if (paid > 0) paymentStatus = 'partial';
@@ -294,6 +298,10 @@ router.post('/sales/:id/edit', requireLogin, (req, res) => {
 
   const total = items.reduce((s, it) => s + it.qty * it.price, 0);
   const paid = parseFloat(paid_amount) || 0;
+  // 与新建单一致：收款不能超过单据总额
+  if (paid > total + 0.001) {
+    return renderError(`收款金额（¥${paid.toFixed(2)}）不能超过单据总额（¥${total.toFixed(2)}）`);
+  }
   let paymentStatus = 'unpaid';
   if (paid >= total && total > 0) paymentStatus = 'paid';
   else if (paid > 0) paymentStatus = 'partial';
@@ -457,6 +465,16 @@ router.post('/sales/:id/record-payment', requireLogin, (req, res) => {
 
   const amount = parseFloat(req.body.amount);
   if (!(amount > 0)) return res.status(400).send('收款金额必须大于0');
+
+  // 收款累计不能超过单据总额：多收的钱没有业务意义，还会把应收/欠款统计搞乱。
+  // 允许 0.001 的浮点误差，与全站"有效欠款 <= 0.001 算结清"的口径一致。
+  const remaining = order.total_amount - (order.paid_amount || 0);
+  if (remaining <= 0.001) {
+    return res.status(400).send(`该单已收满（已收 ¥${(order.paid_amount || 0).toFixed(2)} / 总额 ¥${order.total_amount.toFixed(2)}），无需再记收款`);
+  }
+  if (amount > remaining + 0.001) {
+    return res.status(400).send(`收款金额（¥${amount.toFixed(2)}）超过该单剩余未收金额（¥${remaining.toFixed(2)}），最多还能收 ¥${remaining.toFixed(2)}`);
+  }
 
   // 收款状态必须跟着 paid_amount 一起更新，不能只加金额不改状态。
   // 以前这里漏了 payment_status，导致"建单时只收了定金、后来补完全款"的单子

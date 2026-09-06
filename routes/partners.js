@@ -53,19 +53,33 @@ router.post('/customers/new', requireLogin, (req, res) => {
   res.redirect('/customers');
 });
 
+// 操作员只能编辑自己名下的客户（operator_id = 自己）；
+// 无归属人（operator_id 为 NULL，一般是管理员建的老客户）也归管理员管。
+// 之前操作员能改任意客户，存在误改/串改他人客户资料的风险。
+function canEditCustomer(customer, sessionUser) {
+  return sessionUser.role === 'admin' || customer.operator_id === sessionUser.id;
+}
+
 router.get('/customers/:id/edit', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
   if (!customer) return res.status(404).send('客户不存在');
+  if (!canEditCustomer(customer, req.session.user)) {
+    return res.status(403).send('只能编辑自己名下的客户，如需修改请联系管理员');
+  }
   const users = db.prepare('SELECT id, name, role FROM users ORDER BY name').all();
   res.render('customer_form', { customer, users, error: null, isAdmin: req.session.user.role === 'admin' });
 });
 
 router.post('/customers/:id/edit', requireLogin, (req, res) => {
   const db = req.tenantDb;
+  const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
+  if (!customer) return res.status(404).send('客户不存在');
+  if (!canEditCustomer(customer, req.session.user)) {
+    return res.status(403).send('只能编辑自己名下的客户，如需修改请联系管理员');
+  }
   const { name, contact, phone, address } = req.body;
   if (!name) {
-    const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
     const users = db.prepare('SELECT id, name, role FROM users ORDER BY name').all();
     return res.render('customer_form', { customer, users, error: '名称必填', isAdmin: req.session.user.role === 'admin' });
   }
