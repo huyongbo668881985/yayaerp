@@ -13,17 +13,30 @@ router.get('/products/new', requireAdmin, (req, res) => {
   res.render('product_form', { product: null, error: null });
 });
 
+// 换算比例（pack_size）必须是正整数：负数会让 base_quantity 变负（采购"入库"实际减库存、
+// 销售出库实际加库存），小数会算出小数库存。留空默认 1（没有大单位）。
+function parsePackSize(raw) {
+  if (raw === undefined || raw === null || String(raw).trim() === '') return { value: 1 };
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) {
+    return { error: '换算比例（1个大单位 = 几个基本单位）必须是大于 0 的整数' };
+  }
+  return { value: n };
+}
+
 router.post('/products/new', requireAdmin, (req, res) => {
   const db = req.tenantDb;
   const { sku, name, spec, unit, pack_unit, pack_size, cost_price, sale_price, cost_price_pack, sale_price_pack, low_stock_threshold } = req.body;
   if (!name) return res.render('product_form', { product: req.body, error: '商品名称必填' });
+  const pack = parsePackSize(pack_size);
+  if (pack.error) return res.render('product_form', { product: req.body, error: pack.error });
   try {
     const info = db.prepare(
       `INSERT INTO products (sku, name, spec, unit, pack_unit, pack_size, cost_price, sale_price, cost_price_pack, sale_price_pack, low_stock_threshold)
        VALUES (?,?,?,?,?,?,?,?,?,?,?)`
     ).run(
       sku || null, name, spec || '', unit || '瓶',
-      pack_unit || null, Number(pack_size) || 1,
+      pack_unit || null, pack.value,
       Number(cost_price) || 0, Number(sale_price) || 0,
       cost_price_pack !== undefined && cost_price_pack !== '' ? Number(cost_price_pack) : null,
       sale_price_pack !== undefined && sale_price_pack !== '' ? Number(sale_price_pack) : null,
@@ -49,13 +62,16 @@ router.get('/products/:id/edit', requireAdmin, (req, res) => {
 router.post('/products/:id/edit', requireAdmin, (req, res) => {
   const db = req.tenantDb;
   const { sku, name, spec, unit, pack_unit, pack_size, cost_price, sale_price, cost_price_pack, sale_price_pack, low_stock_threshold } = req.body;
-  // 与"新建商品"保持一致：SKU 撞车等约束错误渲染表单提示，而不是抛到全局 500 错误页
+  // 与"新建商品"保持一致：名称必填、换算比例正整数、SKU 撞车等约束错误渲染表单提示，而不是抛到全局 500 错误页
+  if (!name) return res.render('product_form', { product: req.body, error: '商品名称必填' });
+  const pack = parsePackSize(pack_size);
+  if (pack.error) return res.render('product_form', { product: req.body, error: pack.error });
   try {
     db.prepare(
       `UPDATE products SET sku=?, name=?, spec=?, unit=?, pack_unit=?, pack_size=?, cost_price=?, sale_price=?, cost_price_pack=?, sale_price_pack=?, low_stock_threshold=? WHERE id=?`
     ).run(
       sku || null, name, spec || '', unit || '瓶',
-      pack_unit || null, Number(pack_size) || 1,
+      pack_unit || null, pack.value,
       Number(cost_price) || 0, Number(sale_price) || 0,
       cost_price_pack !== undefined && cost_price_pack !== '' ? Number(cost_price_pack) : null,
       sale_price_pack !== undefined && sale_price_pack !== '' ? Number(sale_price_pack) : null,

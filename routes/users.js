@@ -18,6 +18,11 @@ router.post('/users/new', requireAdmin, (req, res) => {
     const users = db.prepare(`SELECT ${USER_FIELDS} FROM users ORDER BY id`).all();
     return res.render('users', { users, error: '请完整填写信息，密码不能为空', maxUsers: req.tenant.max_users || null });
   }
+  // 与"重置密码"保持同一强度：新账号密码也至少 6 位
+  if (password.length < 6) {
+    const users = db.prepare(`SELECT ${USER_FIELDS} FROM users ORDER BY id`).all();
+    return res.render('users', { users, error: '密码至少6位', maxUsers: req.tenant.max_users || null });
+  }
   if (req.tenant.max_users) {
     const currentCount = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
     if (currentCount >= req.tenant.max_users) {
@@ -60,7 +65,10 @@ router.post('/users/:id/delete', requireAdmin, (req, res) => {
     db.prepare('SELECT COUNT(*) c FROM sales_orders WHERE user_id = ?').get(targetId).c +
     db.prepare('SELECT COUNT(*) c FROM purchase_orders WHERE user_id = ?').get(targetId).c +
     db.prepare('SELECT COUNT(*) c FROM transfer_orders WHERE user_id = ?').get(targetId).c +
+    db.prepare('SELECT COUNT(*) c FROM return_orders WHERE user_id = ?').get(targetId).c +
     db.prepare('SELECT COUNT(*) c FROM stock_transactions WHERE user_id = ?').get(targetId).c;
+  // return_orders 也要查（与 products.js 的同类检查对齐）：漏查的话有退货记录的账号
+  // 会走到外键约束报错，用户看到的是难懂的全局兑底提示
   if (refCount > 0) {
     return res.status(400).send('无法删除：该账号名下有历史单据记录，删除会破坏单据的录入人信息。建议改用"禁用"，既能立刻收回权限，又能保留历史记录。');
   }
@@ -72,8 +80,10 @@ router.post('/users/:id/reset-password', requireAdmin, (req, res) => {
   const db = req.tenantDb;
   const { new_password } = req.body;
   if (!new_password || new_password.length < 6) return res.status(400).send('新密码至少6位');
+  const target = db.prepare('SELECT id FROM users WHERE id = ?').get(Number(req.params.id));
+  if (!target) return res.status(404).send('账号不存在');
   const hash = bcrypt.hashSync(new_password, 10);
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, req.params.id);
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, target.id);
   res.redirect('/users');
 });
 

@@ -1,5 +1,6 @@
 const express = require('express');
 const { requireLogin } = require('../middleware/auth');
+const { todayLocalDate } = require('../utils/dates');
 const router = express.Router();
 
 // 统计口径说明（与经营报表 /reports 保持一致）：
@@ -17,7 +18,9 @@ const EFFECTIVE_DEBT_EXPR = `(so.total_amount - so.paid_amount - ${RETURNED_AMOU
 router.get('/', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const user = req.session.user;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayLocalDate(); // 北京时间，不用 UTC（toISOString 会把北京 0~8 点算成前一天）
+  // SQLite 的 'now' 是 UTC，加 '+8 hours' 修正到北京时间（中国无夏令时，固定偏移精确）
+  const LOCAL_NOW_MONTH = "strftime('%Y-%m', 'now', '+8 hours')";
   const operatorFilter = user.role !== 'admin';
 
   // ---- 今日销售额（销售按销售单日期，退货按退货单日期，两边都只算已审核） ----
@@ -40,10 +43,10 @@ router.get('/', requireLogin, (req, res) => {
   const monthlySalesSql = `
     SELECT
       COALESCE((SELECT SUM(total_amount) FROM sales_orders so
-                WHERE strftime('%Y-%m', so.order_date) = strftime('%Y-%m', 'now') AND so.status = 'approved' ${operatorFilter ? 'AND so.user_id = ?' : ''}), 0)
+                WHERE strftime('%Y-%m', so.order_date) = ${LOCAL_NOW_MONTH} AND so.status = 'approved' ${operatorFilter ? 'AND so.user_id = ?' : ''}), 0)
       -
       COALESCE((SELECT SUM(total_amount) FROM return_orders ro
-                WHERE strftime('%Y-%m', ro.order_date) = strftime('%Y-%m', 'now') AND ro.status = 'approved' ${operatorFilter ? 'AND ro.user_id = ?' : ''}), 0)
+                WHERE strftime('%Y-%m', ro.order_date) = ${LOCAL_NOW_MONTH} AND ro.status = 'approved' ${operatorFilter ? 'AND ro.user_id = ?' : ''}), 0)
       AS t
   `;
   const monthlyParams = [];
@@ -81,7 +84,7 @@ router.get('/', requireLogin, (req, res) => {
       WHERE so.status = 'approved' AND so.payment_status = 'paid'
     `;
     todayProfit = db.prepare(profitSqlBase + ` AND so.order_date = ?`).get(today).profit;
-    monthlyProfit = db.prepare(profitSqlBase + ` AND strftime('%Y-%m', so.order_date) = strftime('%Y-%m', 'now')`).get().profit;
+    monthlyProfit = db.prepare(profitSqlBase + ` AND strftime('%Y-%m', so.order_date) = ${LOCAL_NOW_MONTH}`).get().profit;
   }
 
   const lowStock = db.prepare(`

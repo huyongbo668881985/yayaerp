@@ -1,5 +1,6 @@
 const express = require('express');
 const { requireLogin } = require('../middleware/auth');
+const { todayLocalDate } = require('../utils/dates');
 const router = express.Router();
 
 // 状态机与销售单一致：draft -> submitted -> approved/rejected，submitted<->draft 撤回，approved/rejected -> submitted 反审核
@@ -81,7 +82,7 @@ router.post('/transfers/new', requireLogin, (req, res) => {
     const info = db.prepare(
       `INSERT INTO transfer_orders (from_warehouse_id, to_warehouse_id, user_id, order_date, note, status, remarks)
        VALUES (?,?,?,?,?,?,?)`
-    ).run(from_warehouse_id, to_warehouse_id, req.session.user.id, order_date || new Date().toISOString().slice(0,10), note || '', status, remarks || '');
+    ).run(from_warehouse_id, to_warehouse_id, req.session.user.id, order_date || todayLocalDate(), note || '', status, remarks || '');
     const toId = info.lastInsertRowid;
     const insertItem = db.prepare('INSERT INTO transfer_order_items (transfer_order_id, product_id, quantity, unit_label, base_quantity) VALUES (?,?,?,?,?)');
     for (const it of items) {
@@ -175,13 +176,20 @@ router.post('/transfers/approve/:id', requireLogin, (req, res) => {
   if (order.status !== 'submitted') return res.status(400).send('只有待审核状态可以审核通过');
 
   const items = db.prepare('SELECT * FROM transfer_order_items WHERE transfer_order_id = ?').all(order.id);
-  const getInv = db.prepare('SELECT quantity FROM inventory WHERE product_id=? AND warehouse_id=?');
+
+  // 库存校验按商品汇总后再比（与 sales.js 同理）：同一商品拆多行时逐行检查都会通过，
+  // 事务里才扣成负数，报错变成全局兑底的泛化提示。
+  const needed = new Map(); // product_id -> 调出总量（基础单位）
   for (const it of items) {
-    const inv = getInv.get(it.product_id, order.from_warehouse_id);
+    needed.set(it.product_id, (needed.get(it.product_id) || 0) + it.base_quantity);
+  }
+  const getInv = db.prepare('SELECT quantity FROM inventory WHERE product_id=? AND warehouse_id=?');
+  for (const [pid, totalQty] of needed) {
+    const inv = getInv.get(pid, order.from_warehouse_id);
     const have = inv ? inv.quantity : 0;
-    if (have < it.base_quantity) {
-      const p = db.prepare('SELECT name FROM products WHERE id=?').get(it.product_id);
-      return res.status(400).send(`审核失败：${p ? p.name : '商品'} 调出仓库当前库存 ${have}，不足以调出 ${it.base_quantity}`);
+    if (have < totalQty) {
+      const p = db.prepare('SELECT name FROM products WHERE id=?').get(pid);
+      return res.status(400).send(`审核失败：${p ? p.name : '商品'} 调出仓库当前库存 ${have}，不足以调出合计 ${totalQty}`);
     }
   }
 

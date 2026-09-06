@@ -1,6 +1,7 @@
 const express = require('express');
 const { requireLogin } = require('../middleware/auth');
 const { sendCsv } = require('../utils/csv');
+const { todayLocalDate } = require('../utils/dates');
 const router = express.Router();
 
 // 状态机说明：
@@ -19,7 +20,15 @@ function buildItemsFromRequest(db, body) {
   const { items_json } = body;
   let product_id, quantity, unit_price, unit_choice, is_gift;
   if (items_json) {
-    const parsed = JSON.parse(items_json);
+    // 前端把明细序列化成 JSON 提交；解析失败（极端情况下字段被篡改/截断）时按"没有明细"处理，
+    // 让上层走"至少填写一行有效明细"的正常报错，而不是抛 SyntaxError 变成 500 兑底页。
+    let parsed;
+    try {
+      parsed = JSON.parse(items_json);
+    } catch (e) {
+      parsed = [];
+    }
+    if (!Array.isArray(parsed)) parsed = [];
     product_id = parsed.map(i => i.id);
     quantity = parsed.map(i => i.quantity);
     unit_price = parsed.map(i => i.price);
@@ -185,6 +194,12 @@ router.get('/sales/export', requireLogin, (req, res) => {
   sendCsv(res, `销售单明细${rangeLabel}.csv`, headers, rows);
 });
 
+// 明细里是否有人工填入的负单价：数量、单价都没有下限校验的话，
+// 可以录出总额为负的销售单，欠款/收款状态判定也会跟着异常。赠品价格固定为 0，不受影响。
+function hasNegativePrice(items) {
+  return items.some(it => it.price < 0);
+}
+
 router.get('/sales/new', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const customers = db.prepare('SELECT * FROM customers ORDER BY name').all();
@@ -208,6 +223,9 @@ router.post('/sales/new', requireLogin, (req, res) => {
   if (!warehouse_id || items.length === 0) {
     return renderError('请选择仓库并至少填写一行有效商品明细');
   }
+  if (hasNegativePrice(items)) {
+    return renderError('单价不能为负数，请检查明细中的单价');
+  }
 
   // 草稿/待审核阶段不动库存，这里只做数据落库，不检查库存、不生成出入库流水
   // 点"存草稿"按钮会带 save_draft=1 → 存为 draft，之后在详情页继续编辑/提交审核
@@ -222,7 +240,7 @@ router.post('/sales/new', requireLogin, (req, res) => {
     const info = db.prepare(
       `INSERT INTO sales_orders (customer_id, warehouse_id, user_id, order_date, total_amount, paid_amount, payment_status, status, note, remarks)
        VALUES (?,?,?,?,?,?,?,?,?,?)`
-    ).run(customer_id || null, warehouse_id, req.session.user.id, order_date || new Date().toISOString().slice(0,10), total, paid, paymentStatus, status, note || '', remarks || '');
+    ).run(customer_id || null, warehouse_id, req.session.user.id, order_date || todayLocalDate(), total, paid, paymentStatus, status, note || '', remarks || '');
     const soId = info.lastInsertRowid;
     const insertItem = db.prepare('INSERT INTO sales_order_items (sales_order_id, product_id, quantity, unit_label, base_quantity, unit_price, is_gift, cost_price_snapshot) VALUES (?,?,?,?,?,?,?,?)');
     for (const it of items) {
@@ -269,6 +287,9 @@ router.post('/sales/:id/edit', requireLogin, (req, res) => {
   const items = buildItemsFromRequest(db, req.body);
   if (!warehouse_id || items.length === 0) {
     return renderError('请选择仓库并至少填写一行有效商品明细');
+  }
+  if (hasNegativePrice(items)) {
+    return renderError('单价不能为负数，请检查明细中的单价');
   }
 
   const total = items.reduce((s, it) => s + it.qty * it.price, 0);
@@ -323,13 +344,21 @@ router.post('/sales/approve/:id', requireLogin, (req, res) => {
   if (order.status !== 'submitted') return res.status(400).send('只有待审核状态可以审核通过');
 
   const items = db.prepare('SELECT * FROM sales_order_items WHERE sales_order_id = ?').all(order.id);
-  const getInv = db.prepare('SELECT quantity FROM inventory WHERE product_id=? AND warehouse_id=?');
+
+  // 库存校验必须按商品汇总后再比：同一商品拆成多行明细时（比如库存 15、两行各 10），
+  // 逐行检查每一行都能通过（检查时库存还没扣），事务里第二行才扣成负数，
+  // 被 inventory 的 CHECK(quantity>=0) 拦下后用户只能看到全局兑底的泛化报错。先汇总就能给出准确提示。
+  const needed = new Map(); // product_id -> 应扣总数量（基础单位）
   for (const it of items) {
-    const inv = getInv.get(it.product_id, order.warehouse_id);
+    needed.set(it.product_id, (needed.get(it.product_id) || 0) + it.base_quantity);
+  }
+  const getInv = db.prepare('SELECT quantity FROM inventory WHERE product_id=? AND warehouse_id=?');
+  for (const [pid, totalQty] of needed) {
+    const inv = getInv.get(pid, order.warehouse_id);
     const have = inv ? inv.quantity : 0;
-    if (have < it.base_quantity) {
-      const p = db.prepare('SELECT name FROM products WHERE id=?').get(it.product_id);
-      return res.status(400).send(`审核失败：${p ? p.name : '商品'} 当前库存 ${have}，不足以扣减 ${it.base_quantity}，请联系提交人调整数量或先补货`);
+    if (have < totalQty) {
+      const p = db.prepare('SELECT name FROM products WHERE id=?').get(pid);
+      return res.status(400).send(`审核失败：${p ? p.name : '商品'} 当前库存 ${have}，不足以扣减合计 ${totalQty}，请联系提交人调整数量或先补货`);
     }
   }
 
@@ -416,11 +445,15 @@ router.post('/sales/unapprove/:id', requireLogin, (req, res) => {
 
 // 记录收款：客户分批还钱、或者退货冲抵之后补齐尾款，都用这个。
 // 只加 paid_amount，不碰审核状态、不碰库存、不碰商品明细——跟"审核"是完全独立的两件事。
+// 只允许对已审核的单子收款：草稿还没定稿、被拒绝的单子不该发生真实收款。
 router.post('/sales/:id/record-payment', requireLogin, (req, res) => {
   const db = req.tenantDb;
   if (req.session.user.role !== 'admin') return res.status(403).send('无权限，只有管理员能记录收款');
   const order = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(req.params.id);
   if (!order) return res.status(404).send('单据不存在');
+  if (order.status !== 'approved') {
+    return res.status(400).send('只有已审核的销售单可以记录收款');
+  }
 
   const amount = parseFloat(req.body.amount);
   if (!(amount > 0)) return res.status(400).send('收款金额必须大于0');

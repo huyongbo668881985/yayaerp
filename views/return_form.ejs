@@ -75,12 +75,19 @@
     };
   })).replace(/</g, '\\u003c') %>;
 
+  // HTML 转义：商品名/规格/单位是自由文本，经 innerHTML 拼 <option> 时
+  // 若含 < > 引号会破坏 DOM 结构甚至注入脚本
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
   function addRow(initial) {
     const container = document.getElementById('items');
     const div = document.createElement('div');
     div.className = 'item-row';
     div.style.gridTemplateColumns = '2fr 1fr 1fr 1fr auto';
-    const options = PRODUCTS.map(p => `<option value="${p.id}" data-price="${p.sale_price}" data-price-pack="${p.sale_price_pack != null ? p.sale_price_pack : ''}" data-unit="${p.unit}" data-pack-unit="${p.pack_unit || ''}" data-pack-size="${p.pack_size || 1}">${p.name}${p.spec ? ' ('+p.spec+')' : ''}</option>`).join('');
+    const options = PRODUCTS.map(p => `<option value="${p.id}" data-price="${p.sale_price}" data-price-pack="${p.sale_price_pack != null ? p.sale_price_pack : ''}" data-unit="${esc(p.unit)}" data-pack-unit="${esc(p.pack_unit || '')}" data-pack-size="${p.pack_size || 1}">${esc(p.name)}${p.spec ? ' ('+esc(p.spec)+')' : ''}</option>`).join('');
     div.innerHTML = `
       <select name="product_id" onchange="onProductChange(this)" required>
         <option value="">-- 选择商品 --</option>

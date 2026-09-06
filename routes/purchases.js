@@ -1,5 +1,6 @@
 const express = require('express');
 const { requireAdmin } = require('../middleware/auth');
+const { todayLocalDate } = require('../utils/dates');
 const router = express.Router();
 
 // 设计说明（2026-09-06 定版）：采购入库没有审核流，录单即加库存。
@@ -59,6 +60,12 @@ router.post('/purchases/new', requireAdmin, (req, res) => {
     const products = db.prepare('SELECT * FROM products ORDER BY name').all();
     return res.render('purchase_form', { suppliers, warehouses, products, error: '请选择仓库并至少填写一行有效商品明细' });
   }
+  if (items.some(it => it.price < 0)) {
+    const suppliers = db.prepare('SELECT * FROM suppliers ORDER BY name').all();
+    const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
+    const products = db.prepare('SELECT * FROM products ORDER BY name').all();
+    return res.render('purchase_form', { suppliers, warehouses, products, error: '单价不能为负数，请检查明细中的单价' });
+  }
 
   const total = items.reduce((s, it) => s + it.qty * it.price, 0);
 
@@ -66,7 +73,7 @@ router.post('/purchases/new', requireAdmin, (req, res) => {
     const info = db.prepare(
       `INSERT INTO purchase_orders (supplier_id, warehouse_id, user_id, order_date, total_amount, note, remarks)
        VALUES (?,?,?,?,?,?,?)`
-    ).run(supplier_id || null, warehouse_id, req.session.user.id, order_date || new Date().toISOString().slice(0,10), total, note || '', req.body.remarks || '');
+    ).run(supplier_id || null, warehouse_id, req.session.user.id, order_date || todayLocalDate(), total, note || '', req.body.remarks || '');
     const poId = info.lastInsertRowid;
 
     const insertItem = db.prepare('INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity, unit_label, base_quantity, unit_price) VALUES (?,?,?,?,?,?)');
@@ -116,15 +123,20 @@ router.post('/purchases/:id/delete', requireAdmin, (req, res) => {
   if (!order) return res.status(404).send('单据不存在');
   const items = db.prepare('SELECT * FROM purchase_order_items WHERE purchase_order_id = ?').all(order.id);
 
-  // 删除采购单要把当初入库加的库存扣回去；如果这批货已经被卖出/调走一部分，扣回去会变成负库存，先拦下来
-  const getInv = db.prepare('SELECT quantity FROM inventory WHERE product_id=? AND warehouse_id=?');
+  // 删除采购单要把当初入库加的库存扣回去；如果这批货已经被卖出/调走一部分，扣回去会变成负库存，先拦下来。
+  // 校验按商品汇总后再比：同一商品拆多行时逐行检查都会通过（检查时还没扣），事务里才扣成负数。
+  const needed = new Map(); // product_id -> 应扣总数量（基础单位）
   for (const it of items) {
-    const inv = getInv.get(it.product_id, order.warehouse_id);
+    needed.set(it.product_id, (needed.get(it.product_id) || 0) + it.base_quantity);
+  }
+  const getInv = db.prepare('SELECT quantity FROM inventory WHERE product_id=? AND warehouse_id=?');
+  for (const [pid, totalQty] of needed) {
+    const inv = getInv.get(pid, order.warehouse_id);
     const have = inv ? inv.quantity : 0;
-    if (have < it.base_quantity) {
-      const p = db.prepare('SELECT name FROM products WHERE id=?').get(it.product_id);
+    if (have < totalQty) {
+      const p = db.prepare('SELECT name FROM products WHERE id=?').get(pid);
       return res.status(400).send(
-        `无法删除：${p ? p.name : '商品'} 当前库存 ${have}，少于这张采购单入库的 ${it.base_quantity}` +
+        `无法删除：${p ? p.name : '商品'} 当前库存 ${have}，少于这张采购单入库的合计 ${totalQty}` +
         `（说明这批货已经被销售或调拨掉了一部分），删除会导致库存变成负数。请先处理相关的销售/调拨单再删除这张采购单。`
       );
     }

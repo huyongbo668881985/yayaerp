@@ -1,6 +1,7 @@
 const express = require('express');
 const { requireLogin } = require('../middleware/auth');
 const { sendCsv } = require('../utils/csv');
+const { todayLocalDate } = require('../utils/dates');
 const router = express.Router();
 
 // 状态机跟销售单一致：submitted --审核通过--> approved（这一步才真正把库存加回去）
@@ -8,6 +9,10 @@ const router = express.Router();
 //                      approved/rejected --反审核--> submitted（approved 需要把加回去的库存再扣回来，
 //                      扣之前要检查库存够不够——如果这批货已经又被卖出去了，硬扣会拉成负库存）
 // 退货不要求关联具体的原始销售单（按你的要求做成自由录入），所以数量上系统不做"不能超过原销售数量"的校验。
+// 但关联了销售单的退货，必须在销售单"已审核"（approved）的前提下才能审核通过：
+// 库存是销售审核时才扣的，货还没出库就退货入库，库存会凭空多出来。
+
+const SALE_STATUS_TEXT = { draft: '草稿', submitted: '待审核', approved: '已审核', rejected: '已拒绝' };
 
 function canEditOrWithdraw(order, sessionUser) {
   return sessionUser.role === 'admin' || order.user_id === sessionUser.id;
@@ -17,7 +22,14 @@ function buildItemsFromRequest(db, body) {
   const { items_json } = body;
   let product_id, quantity, unit_price, unit_choice;
   if (items_json) {
-    const parsed = JSON.parse(items_json);
+    // 解析失败按"没有明细"处理，走上层正常报错，而不是抛 SyntaxError 变成 500 兑底页
+    let parsed;
+    try {
+      parsed = JSON.parse(items_json);
+    } catch (e) {
+      parsed = [];
+    }
+    if (!Array.isArray(parsed)) parsed = [];
     product_id = parsed.map(i => i.id);
     quantity = parsed.map(i => i.quantity);
     unit_price = parsed.map(i => i.price);
@@ -49,6 +61,23 @@ function buildItemsFromRequest(db, body) {
     items.push({ pid, qty, price: price || 0, unitLabel, baseQty, costSnapshot: product.cost_price || 0, productName: product.name });
   }
   return items;
+}
+
+// 校验关联销售单：必须存在且已审核（库存已扣过），否则不允许关联退货。
+// 通过校验返回 null，否则返回给 renderError 的错误文案。
+function checkRelatedSale(db, relatedId) {
+  const related = db.prepare('SELECT id, status FROM sales_orders WHERE id = ?').get(relatedId);
+  if (!related) return `关联的销售单号 #${relatedId} 不存在，请检查单号是否正确`;
+  if (related.status !== 'approved') {
+    const statusLabel = SALE_STATUS_TEXT[related.status] || related.status;
+    return `关联的销售单 #${relatedId} 当前状态为"${statusLabel}"，只有已审核（库存已扣减）的销售单才能关联退货`;
+  }
+  return null;
+}
+
+// 明细里的人工负单价校验（与 sales.js 同口径）：负价退货会算出负的退款额和毛利
+function hasNegativePrice(items) {
+  return items.some(it => it.price < 0);
 }
 
 function queryOrders(db, user, start, end) {
@@ -132,14 +161,17 @@ router.post('/returns/new', requireLogin, (req, res) => {
 
   let relatedId = null;
   if (related_sales_order_id && related_sales_order_id.trim()) {
-    const related = db.prepare('SELECT id FROM sales_orders WHERE id = ?').get(related_sales_order_id.trim());
-    if (!related) return renderError(`关联的销售单号 #${related_sales_order_id} 不存在，请检查单号是否正确`);
-    relatedId = related.id;
+    relatedId = related_sales_order_id.trim();
+    const relatedError = checkRelatedSale(db, relatedId);
+    if (relatedError) return renderError(relatedError);
   }
 
   const items = buildItemsFromRequest(db, req.body);
   if (!warehouse_id || items.length === 0) {
     return renderError('请选择退回的仓库并至少填写一行有效商品明细');
+  }
+  if (hasNegativePrice(items)) {
+    return renderError('单价不能为负数，请检查明细中的单价');
   }
 
   const total = items.reduce((s, it) => s + it.qty * it.price, 0);
@@ -154,7 +186,7 @@ router.post('/returns/new', requireLogin, (req, res) => {
     const info = db.prepare(
       `INSERT INTO return_orders (customer_id, warehouse_id, user_id, related_sales_order_id, order_date, total_amount, refunded_amount, refund_status, status, note, remarks)
        VALUES (?,?,?,?,?,?,?,?,?,?,?)`
-    ).run(customer_id || null, warehouse_id, req.session.user.id, relatedId, order_date || new Date().toISOString().slice(0,10), total, refunded, refundStatus, status, note || '', remarks || '');
+    ).run(customer_id || null, warehouse_id, req.session.user.id, relatedId, order_date || todayLocalDate(), total, refunded, refundStatus, status, note || '', remarks || '');
     const roId = info.lastInsertRowid;
     const insertItem = db.prepare('INSERT INTO return_order_items (return_order_id, product_id, quantity, unit_label, base_quantity, unit_price, cost_price_snapshot) VALUES (?,?,?,?,?,?,?)');
     for (const it of items) {
@@ -199,14 +231,17 @@ router.post('/returns/:id/edit', requireLogin, (req, res) => {
 
   let relatedId = null;
   if (related_sales_order_id && related_sales_order_id.trim()) {
-    const related = db.prepare('SELECT id FROM sales_orders WHERE id = ?').get(related_sales_order_id.trim());
-    if (!related) return renderError(`关联的销售单号 #${related_sales_order_id} 不存在，请检查单号是否正确`);
-    relatedId = related.id;
+    relatedId = related_sales_order_id.trim();
+    const relatedError = checkRelatedSale(db, relatedId);
+    if (relatedError) return renderError(relatedError);
   }
 
   const items = buildItemsFromRequest(db, req.body);
   if (!warehouse_id || items.length === 0) {
     return renderError('请选择退回的仓库并至少填写一行有效商品明细');
+  }
+  if (hasNegativePrice(items)) {
+    return renderError('单价不能为负数，请检查明细中的单价');
   }
 
   const total = items.reduce((s, it) => s + it.qty * it.price, 0);
@@ -257,6 +292,15 @@ router.post('/returns/approve/:id', requireLogin, (req, res) => {
   const order = db.prepare('SELECT * FROM return_orders WHERE id = ?').get(req.params.id);
   if (!order) return res.status(404).send('单据不存在');
   if (order.status !== 'submitted') return res.status(400).send('只有待审核状态可以审核通过');
+
+  // 审核时再校验一遍关联销售单的状态：建单时销售单可能是 approved，但之后可能被反审核
+  // （退货单还是草稿/待审核时，销售单反审核不会被拦），这时审核退货会把从未扣过的库存加回去。
+  if (order.related_sales_order_id) {
+    const relatedError = checkRelatedSale(db, order.related_sales_order_id);
+    if (relatedError) {
+      return res.status(400).send(`审核失败：${relatedError}`);
+    }
+  }
 
   const items = db.prepare('SELECT * FROM return_order_items WHERE return_order_id = ?').all(order.id);
 
@@ -337,6 +381,32 @@ router.post('/returns/unapprove/:id', requireLogin, (req, res) => {
   });
   tx();
 
+  res.redirect('/returns/' + order.id);
+});
+
+// 记录退款：与销售单的 record-payment 对称。之前 refunded_amount 只能在建单/编辑草稿时填，
+// 已审核的退货单之后再退钱就没地方记了，报表的"已退款"口径也永远停在旧值。
+// 只更新 refunded_amount / refund_status，不碰审核状态、不碰库存。
+// 只允许对已审核的退货单操作：钱对应的是已经确认入库的那批货。
+router.post('/returns/:id/record-refund', requireLogin, (req, res) => {
+  const db = req.tenantDb;
+  if (req.session.user.role !== 'admin') return res.status(403).send('无权限，只有管理员能记录退款');
+  const order = db.prepare('SELECT * FROM return_orders WHERE id = ?').get(req.params.id);
+  if (!order) return res.status(404).send('单据不存在');
+  if (order.status !== 'approved') {
+    return res.status(400).send('只有已审核的退货单可以记录退款');
+  }
+
+  const amount = parseFloat(req.body.amount);
+  if (!(amount > 0)) return res.status(400).send('退款金额必须大于0');
+
+  const newRefunded = (order.refunded_amount || 0) + amount;
+  let refundStatus = 'unrefunded';
+  if (order.total_amount > 0 && newRefunded >= order.total_amount) refundStatus = 'refunded';
+  else if (newRefunded > 0) refundStatus = 'partial';
+
+  db.prepare('UPDATE return_orders SET refunded_amount = ?, refund_status = ? WHERE id = ?')
+    .run(newRefunded, refundStatus, order.id);
   res.redirect('/returns/' + order.id);
 });
 
