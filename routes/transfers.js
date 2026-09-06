@@ -56,7 +56,7 @@ router.get('/transfers/new', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
   const products = db.prepare('SELECT * FROM products ORDER BY name').all();
-  res.render('transfer_form', { warehouses, products, error: null, order: null, existingItems: [] });
+  res.render('transfer_form', { warehouses, products, error: null, order: null, existingItems: [], today: todayLocalDate() });
 });
 
 router.post('/transfers/new', requireLogin, (req, res) => {
@@ -66,7 +66,7 @@ router.post('/transfers/new', requireLogin, (req, res) => {
   const renderError = (msg) => {
     const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
     const products = db.prepare('SELECT * FROM products ORDER BY name').all();
-    return res.render('transfer_form', { warehouses, products, error: msg, order: null, existingItems: [] });
+    return res.render('transfer_form', { warehouses, products, error: msg, order: null, existingItems: [], today: todayLocalDate() });
   };
 
   if (!from_warehouse_id || !to_warehouse_id) return renderError('请选择调出仓库和调入仓库');
@@ -105,7 +105,7 @@ router.get('/transfers/:id/edit', requireLogin, (req, res) => {
   const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
   const products = db.prepare('SELECT * FROM products ORDER BY name').all();
   const existingItems = db.prepare('SELECT * FROM transfer_order_items WHERE transfer_order_id = ?').all(order.id);
-  res.render('transfer_form', { warehouses, products, error: null, order, existingItems });
+  res.render('transfer_form', { warehouses, products, error: null, order, existingItems, today: todayLocalDate() });
 });
 
 router.post('/transfers/:id/edit', requireLogin, (req, res) => {
@@ -121,7 +121,7 @@ router.post('/transfers/:id/edit', requireLogin, (req, res) => {
     const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
     const products = db.prepare('SELECT * FROM products ORDER BY name').all();
     const existingItems = db.prepare('SELECT * FROM transfer_order_items WHERE transfer_order_id = ?').all(order.id);
-    return res.render('transfer_form', { warehouses, products, error: msg, order, existingItems });
+    return res.render('transfer_form', { warehouses, products, error: msg, order, existingItems, today: todayLocalDate() });
   };
 
   if (!from_warehouse_id || !to_warehouse_id) return renderError('请选择调出仓库和调入仓库');

@@ -27,7 +27,7 @@ router.get('/purchases/new', requireAdmin, (req, res) => {
   const suppliers = db.prepare('SELECT * FROM suppliers ORDER BY name').all();
   const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
   const products = db.prepare('SELECT * FROM products ORDER BY name').all();
-  res.render('purchase_form', { suppliers, warehouses, products, error: null });
+  res.render('purchase_form', { suppliers, warehouses, products, error: null, today: todayLocalDate() });
 });
 
 router.post('/purchases/new', requireAdmin, (req, res) => {
@@ -58,13 +58,13 @@ router.post('/purchases/new', requireAdmin, (req, res) => {
     const suppliers = db.prepare('SELECT * FROM suppliers ORDER BY name').all();
     const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
     const products = db.prepare('SELECT * FROM products ORDER BY name').all();
-    return res.render('purchase_form', { suppliers, warehouses, products, error: '请选择仓库并至少填写一行有效商品明细' });
+    return res.render('purchase_form', { suppliers, warehouses, products, error: '请选择仓库并至少填写一行有效商品明细', today: todayLocalDate() });
   }
   if (items.some(it => it.price < 0)) {
     const suppliers = db.prepare('SELECT * FROM suppliers ORDER BY name').all();
     const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
     const products = db.prepare('SELECT * FROM products ORDER BY name').all();
-    return res.render('purchase_form', { suppliers, warehouses, products, error: '单价不能为负数，请检查明细中的单价' });
+    return res.render('purchase_form', { suppliers, warehouses, products, error: '单价不能为负数，请检查明细中的单价', today: todayLocalDate() });
   }
 
   const total = items.reduce((s, it) => s + it.qty * it.price, 0);

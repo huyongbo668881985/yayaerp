@@ -20,5 +20,6 @@ services:
       retries: 3
       start_period: 10s
     ports:
-      # 只绑定到本机，交给 Nginx Proxy Manager 反代（与你现有服务保持一致）
-      - "3000:3000"
+      # 只绑定本机回环地址（Docker 默认绑定 0.0.0.0，会把 3000 暴露到公网绕过 NPM 反代），
+      # 公网流量必须经由 Nginx Proxy Manager 转发进来。
+      - "127.0.0.1:3000:3000"

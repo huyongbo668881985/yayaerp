@@ -1,6 +1,7 @@
 const express = require('express');
 const { requireAdmin } = require('../middleware/auth');
 const { sendCsv } = require('../utils/csv');
+const { RETURN_SETTLED_EXPR, salesProfit, returnProfit } = require('../lib/profitCalc');
 const router = express.Router();
 
 // 统计口径统一：只算"已审核"的单据（草稿/待审核/已拒绝不算真实发生的业务），
@@ -15,22 +16,8 @@ const EFFECTIVE_DEBT_EXPR = `(so.total_amount - so.paid_amount - ${RETURNED_AMOU
 
 // 一笔退货算不算"现金基础已落定"：要么自己收到了现金退款（refund_status='refunded'），
 // 要么它关联的销售单在收款状态上已经是"已收款"（payment_status='paid'）。
-//
-// 口径说明（2026-09-07 定版，以仪表盘为准）：
-// "算不算已结清"统一看 sales_orders.payment_status 这个落库字段，跟首页仪表盘完全一致，
-// 不再用"金额 − 已收款 − 关联退货 <= 0"这套实时扣减算法。
-// 两套算法的分歧在于退货：实时算法认为"退货抵掉的部分"也算结清了，
-// 而 payment_status 只认实收现金。以前报表用实时算法、仪表盘用 payment_status，
-// 同一张单两边结论不一样，现在统一到仪表盘这一侧。
-const RETURN_SETTLED_EXPR = `(
-  ro.refund_status = 'refunded'
-  OR (
-    ro.related_sales_order_id IS NOT NULL
-    AND COALESCE((
-      SELECT so2.payment_status FROM sales_orders so2 WHERE so2.id = ro.related_sales_order_id
-    ), 'unpaid') = 'paid'
-  )
-)`;
+// RETURN_SETTLED_EXPR 的 SQL 定义与毛利计算一起收敛在 lib/profitCalc.js（口径唯一实现点），
+// 首页仪表盘与经营报表共用同一处实现，避免两边口径分叉（2026-09-07 曾因此对不上账）。
 
 function buildDateFilter(alias, start, end) {
   let clause = '';
@@ -63,27 +50,12 @@ function getSummary(db, start, end) {
     WHERE so.status = 'approved' AND ${EFFECTIVE_DEBT_EXPR} > 0.001 ${saleFilter.clause}
   `).get(...saleFilter.params);
 
-  // 毛利用明细行上的成本快照（cost_price_snapshot），不用商品当前成本价——
-  // 这样管理员事后改成本价，不会追溯改写历史单据的毛利。
-  // 不含应收口径下，一张销售单只有"收款状态已经是已收款"（payment_status='paid'）才算数，
-  // 跟首页仪表盘的判定条件完全一致（2026-09-07 统一，详见 RETURN_SETTLED_EXPR 处的口径说明）。
-  const salesProfitSql = (onlyPaid) => `
-    SELECT COALESCE(SUM(soi.quantity * soi.unit_price - soi.base_quantity * soi.cost_price_snapshot), 0) AS profit
-    FROM sales_order_items soi
-    JOIN sales_orders so ON so.id = soi.sales_order_id
-    WHERE so.status = 'approved' ${onlyPaid ? `AND so.payment_status = 'paid'` : ''} ${saleFilter.clause}
-  `;
-  const returnProfitSql = (onlyRefunded) => `
-    SELECT COALESCE(SUM(roi.quantity * roi.unit_price - roi.base_quantity * roi.cost_price_snapshot), 0) AS profit
-    FROM return_order_items roi
-    JOIN return_orders ro ON ro.id = roi.return_order_id
-    WHERE ro.status = 'approved' ${onlyRefunded ? `AND ${RETURN_SETTLED_EXPR}` : ''} ${returnFilter.clause}
-  `;
-
-  const salesProfitPaid = db.prepare(salesProfitSql(true)).get(...saleFilter.params).profit;
-  const salesProfitAll = db.prepare(salesProfitSql(false)).get(...saleFilter.params).profit;
-  const returnProfitRefunded = db.prepare(returnProfitSql(true)).get(...returnFilter.params).profit;
-  const returnProfitAll = db.prepare(returnProfitSql(false)).get(...returnFilter.params).profit;
+  // 毛利计算统一走 lib/profitCalc.js（成本快照、只算已审核、含/不含应收判定都在那实现），
+  // 与首页仪表盘共用同一套 SQL，杜绝两边口径再次分叉。
+  const salesProfitPaid = salesProfit(db, { onlyPaid: true, filter: saleFilter });
+  const salesProfitAll = salesProfit(db, { onlyPaid: false, filter: saleFilter });
+  const returnProfitRefunded = returnProfit(db, { onlySettled: true, filter: returnFilter });
+  const returnProfitAll = returnProfit(db, { onlySettled: false, filter: returnFilter });
 
   const sales = { amount: salesRaw.amount - returnsRaw.amount, count: salesRaw.count, returnCount: returnsRaw.count };
   const profitWithoutReceivable = salesProfitPaid - returnProfitRefunded;

@@ -211,12 +211,26 @@ function customersForForm(db, user, currentCustomerId) {
     .all(user.id, currentCustomerId || -1);
 }
 
+// 落库前服务端复检 customer_id 是否在当前用户可见范围内（与表单下拉 customersForForm 同一口径）：
+// 管理员不受限；操作员只能用"自己名下"的客户；编辑草稿单时额外放行单据当前已关联的客户
+// （防止管理员把客户转归属后，创建人编辑自己草稿单时反而被拦）。空值=散客，直接放行。
+// 返回 true=允许；false=越权（调用方走 renderError，不要 500）。
+function isCustomerInScope(db, sessionUser, customerId, currentCustomerId) {
+  if (customerId === undefined || customerId === null || String(customerId).trim() === '') return true;
+  if (sessionUser.role === 'admin') return true;
+  const cid = Number(customerId);
+  if (!Number.isInteger(cid) || cid <= 0) return false;
+  const hit = db.prepare('SELECT id FROM customers WHERE id = ? AND (operator_id = ? OR id = ?)')
+    .get(cid, sessionUser.id, currentCustomerId || -1);
+  return !!hit;
+}
+
 router.get('/sales/new', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const customers = customersForForm(db, req.session.user, null);
   const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
   const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
-  res.render('sale_form', { customers, warehouses, products, error: null, order: null, existingItems: [] });
+  res.render('sale_form', { customers, warehouses, products, error: null, order: null, existingItems: [], today: todayLocalDate() });
 });
 
 router.post('/sales/new', requireLogin, (req, res) => {
@@ -227,7 +241,7 @@ router.post('/sales/new', requireLogin, (req, res) => {
     const customers = customersForForm(db, req.session.user, null);
     const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
     const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
-    return res.render('sale_form', { customers, warehouses, products, error: msg, order: null, existingItems: [] });
+    return res.render('sale_form', { customers, warehouses, products, error: msg, order: null, existingItems: [], today: todayLocalDate() });
   };
 
   const items = buildItemsFromRequest(db, req.body);
@@ -236,6 +250,9 @@ router.post('/sales/new', requireLogin, (req, res) => {
   }
   if (hasNegativePrice(items)) {
     return renderError('单价不能为负数，请检查明细中的单价');
+  }
+  if (!isCustomerInScope(db, req.session.user, customer_id, null)) {
+    return renderError('所选客户不在你的名下，无权使用：请选择自己负责的客户，或联系管理员处理');
   }
 
   // 草稿/待审核阶段不动库存，这里只做数据落库，不检查库存、不生成出入库流水
@@ -279,7 +296,7 @@ router.get('/sales/:id/edit', requireLogin, (req, res) => {
   const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
   const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
   const existingItems = db.prepare('SELECT * FROM sales_order_items WHERE sales_order_id = ?').all(order.id);
-  res.render('sale_form', { customers, warehouses, products, error: null, order, existingItems });
+  res.render('sale_form', { customers, warehouses, products, error: null, order, existingItems, today: todayLocalDate() });
 });
 
 router.post('/sales/:id/edit', requireLogin, (req, res) => {
@@ -296,7 +313,7 @@ router.post('/sales/:id/edit', requireLogin, (req, res) => {
     const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
     const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
     const existingItems = db.prepare('SELECT * FROM sales_order_items WHERE sales_order_id = ?').all(order.id);
-    return res.render('sale_form', { customers, warehouses, products, error: msg, order, existingItems });
+    return res.render('sale_form', { customers, warehouses, products, error: msg, order, existingItems, today: todayLocalDate() });
   };
 
   const items = buildItemsFromRequest(db, req.body);
@@ -305,6 +322,11 @@ router.post('/sales/:id/edit', requireLogin, (req, res) => {
   }
   if (hasNegativePrice(items)) {
     return renderError('单价不能为负数，请检查明细中的单价');
+  }
+  // 编辑时额外放行"单据当前已关联的客户"：管理员可能已把客户转给别人，
+  // 但创建人编辑自己草稿单时不应因此被拦（与下拉框 customersForForm 的 OR id=? 同口径）。
+  if (!isCustomerInScope(db, req.session.user, customer_id, order.customer_id)) {
+    return renderError('所选客户不在你的名下，无权使用：请选择自己负责的客户，或联系管理员处理');
   }
 
   const total = items.reduce((s, it) => s + it.qty * it.price, 0);

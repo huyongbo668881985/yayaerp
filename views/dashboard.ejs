@@ -21,11 +21,11 @@
   <% if (user.role === 'admin') { %>
     <div class="stat-card">
       <div class="num">¥<%= todayProfit.toFixed(2) %></div>
-      <div class="label">今日毛利（已收款订单）</div>
+      <div class="label">今日毛利（已收款订单，已扣退货）</div>
     </div>
     <div class="stat-card">
       <div class="num">¥<%= monthlyProfit.toFixed(2) %></div>
-      <div class="label">本月毛利（已收款订单）</div>
+      <div class="label">本月毛利（已收款订单，已扣退货）</div>
     </div>
   <% } %>
 </div>

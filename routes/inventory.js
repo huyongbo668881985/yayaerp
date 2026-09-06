@@ -26,7 +26,10 @@ router.get('/inventory', requireLogin, (req, res) => {
   res.render('inventory', { rows, warehouses, warehouseId });
 });
 
-function queryStockLogs(db, start, end, limit) {
+// 出入库流水：管理员看全部；操作员只能看自己操作产生的流水（user_id=自己），
+// 与销售/退货/调拨列表页的"操作员只看自己名下单据"边界保持一致——
+// 否则操作员能从流水页反推出同事的销售/采购量。
+function queryStockLogs(db, user, start, end, limit) {
   let sql = `
     SELECT st.*, p.name AS product_name, p.unit, w.name AS warehouse_name, u.name AS user_name
     FROM stock_transactions st
@@ -36,6 +39,7 @@ function queryStockLogs(db, start, end, limit) {
     WHERE 1=1
   `;
   const params = [];
+  if (user && user.role !== 'admin') { sql += ' AND st.user_id = ?'; params.push(user.id); }
   if (start) { sql += ' AND date(st.created_at) >= ?'; params.push(start); }
   if (end) { sql += ' AND date(st.created_at) <= ?'; params.push(end); }
   sql += ' ORDER BY st.id DESC';
@@ -46,14 +50,14 @@ function queryStockLogs(db, start, end, limit) {
 router.get('/stock-log', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const { start, end } = req.query;
-  const logs = queryStockLogs(db, start, end, 200);
+  const logs = queryStockLogs(db, req.session.user, start, end, 200);
   res.render('stock_log', { logs, start: start || '', end: end || '' });
 });
 
 router.get('/stock-log/export', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const { start, end } = req.query;
-  const logs = queryStockLogs(db, start, end, null);
+  const logs = queryStockLogs(db, req.session.user, start, end, null);
 
   const typeLabels = { purchase_in: '采购入库', sale_out: '销售出库', transfer_out: '调拨调出', transfer_in: '调拨调入', adjust: '库存调整', sale_return: '销售退货入库' };
   // 数量列输出纯数字（正负自明），单位独立成列——以前手工拼成 "+5 瓶"，以 + 开头

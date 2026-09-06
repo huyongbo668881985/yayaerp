@@ -1,6 +1,7 @@
 const express = require('express');
 const { requireLogin } = require('../middleware/auth');
 const { todayLocalDate } = require('../utils/dates');
+const { profitOfPeriod } = require('../lib/profitCalc');
 const router = express.Router();
 
 // 统计口径说明（与经营报表 /reports 保持一致）：
@@ -71,20 +72,20 @@ router.get('/', requireLogin, (req, res) => {
     `SELECT COUNT(*) c FROM sales_orders WHERE status = 'submitted' ${operatorFilter ? 'AND user_id = ?' : ''}`
   ).get(...(operatorFilter ? [user.id] : [])).c;
 
-  // 毛利：仅管理员可见。口径 = 已审核 + 已收款(全款) 的订单，每行"销售额-成本"求和。
-  // 成本用明细行上的成本快照（开单那一刻的成本价），改商品成本价不影响历史毛利。
-  // 赠品收入为0但成本照算（赠品实打实占用了库存和成本）。只统计公司整体，不按人拆分。
+  // 毛利：仅管理员可见。口径与经营报表"不含应收"完全一致（SQL 唯一实现在 lib/profitCalc.js，
+  // 避免仪表盘/报表再次分叉）：
+  //   已审核 + 已收全款(payment_status='paid') 销售毛利
+  //   − 同区间"已结清"退货冲减毛利（退货按退货单日期归属；"已结清" = 已退款或所关联销售单已收款）。
+  // 成本用明细行落库时的成本快照，赠品收入为0但成本照算。
   let todayProfit = null;
   let monthlyProfit = null;
   if (user.role === 'admin') {
-    const profitSqlBase = `
-      SELECT COALESCE(SUM(soi.quantity * soi.unit_price - soi.base_quantity * soi.cost_price_snapshot), 0) AS profit
-      FROM sales_order_items soi
-      JOIN sales_orders so ON so.id = soi.sales_order_id
-      WHERE so.status = 'approved' AND so.payment_status = 'paid'
-    `;
-    todayProfit = db.prepare(profitSqlBase + ` AND so.order_date = ?`).get(today).profit;
-    monthlyProfit = db.prepare(profitSqlBase + ` AND strftime('%Y-%m', so.order_date) = ${LOCAL_NOW_MONTH}`).get().profit;
+    const month = today.slice(0, 7);
+    const monthEndDay = String(
+      new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)), 0)).getUTCDate()
+    ).padStart(2, '0');
+    todayProfit = profitOfPeriod(db, { start: today, end: today }).profit;
+    monthlyProfit = profitOfPeriod(db, { start: `${month}-01`, end: `${month}-${monthEndDay}` }).profit;
   }
 
   const lowStock = db.prepare(`
