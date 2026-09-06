@@ -132,9 +132,11 @@ router.post('/purchases/:id/delete', requireAdmin, (req, res) => {
 
   const tx = db.transaction(() => {
     const decInv = db.prepare('UPDATE inventory SET quantity = quantity - ? WHERE product_id=? AND warehouse_id=?');
+    // type 用 adjust 而不是沿用 purchase_in：这笔流水 change_qty 是负数（把入库的扣回去），
+    // 还标"采购入库"会出现"采购入库 -50"的矛盾记录；ref_type 仍可追溯到被删的采购单。
     const insertTxn = db.prepare(`
       INSERT INTO stock_transactions (product_id, warehouse_id, change_qty, type, ref_type, ref_id, user_id)
-      VALUES (?,?,?,'purchase_in','purchase_order_delete',?,?)
+      VALUES (?,?,?,'adjust','purchase_order_delete',?,?)
     `);
     for (const it of items) {
       decInv.run(it.base_quantity, it.product_id, order.warehouse_id);

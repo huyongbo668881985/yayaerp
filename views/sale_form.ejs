@@ -89,6 +89,7 @@
       <input type="number" name="quantity" placeholder="数量" min="1" required>
       <input type="number" name="unit_price" placeholder="销售单价" step="0.01" required>
       <label style="display:flex;align-items:center;gap:4px;font-size:13px;white-space:nowrap">
+        <input type="hidden" name="is_gift" value="0">
         <input type="checkbox" name="is_gift" value="1" class="gift-checkbox" onchange="toggleGift(this)"> 赠品
       </label>
       <button type="button" class="btn btn-danger btn-sm" onclick="this.parentElement.remove(); recalcTotal();">删除</button>
@@ -118,9 +119,12 @@
     const priceInput = row.querySelector('input[name=unit_price]');
     if (checkbox.checked) {
       priceInput.value = '0';
-      priceInput.disabled = true;
+      // 用 readOnly 而不是 disabled：disabled 的 input 不参与表单提交，
+      // 一旦 JS 失效走了后端的表单数组回退路径，unit_price/is_gift 数组就会比其他数组短，
+      // 数量跟价格错位、赠品标记串行。readOnly 照常提交值（赠品固定提交 0），数组保持对齐。
+      priceInput.readOnly = true;
     } else {
-      priceInput.disabled = false;
+      priceInput.readOnly = false;
       fillPrice(row.querySelector('select[name=product_id]'));
     }
   }

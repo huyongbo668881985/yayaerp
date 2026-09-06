@@ -56,13 +56,16 @@ router.get('/stock-log/export', requireLogin, (req, res) => {
   const logs = queryStockLogs(db, start, end, null);
 
   const typeLabels = { purchase_in: '采购入库', sale_out: '销售出库', transfer_out: '调拨调出', transfer_in: '调拨调入', adjust: '库存调整', sale_return: '销售退货入库' };
-  const headers = ['时间', '商品', '仓库', '类型', '数量变化', '操作人'];
+  // 数量列输出纯数字（正负自明），单位独立成列——以前手工拼成 "+5 瓶"，以 + 开头
+  // 会被 CSV 公式注入防护加 ' 前缀（纯数字才放行），Excel 里复制出来会带着引号。
+  const headers = ['时间', '商品', '仓库', '类型', '数量变化', '单位', '操作人'];
   const rows = logs.map(l => [
     l.created_at,
     l.product_name,
     l.warehouse_name,
     typeLabels[l.type] || l.type,
-    (l.change_qty > 0 ? '+' : '') + l.change_qty + ' ' + l.unit,
+    l.change_qty,
+    l.unit,
     l.user_name || '-'
   ]);
 

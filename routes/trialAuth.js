@@ -101,6 +101,11 @@ router.post('/api/trial/verify-and-register', express.json(), async (req, res) =
     });
   } catch (err) {
     console.error('[trialAuth] 创建试用账号失败:', err);
+    // 同一手机号并发重复提交时，trial_requests.phone 的 UNIQUE 约束会兜底拦住
+    // （trialProvision 里建租户和记录在同一事务），这里按"已开通"返回，而不是 500。
+    if (err && typeof err.code === 'string' && err.code.startsWith('SQLITE_CONSTRAINT')) {
+      return res.status(409).json({ ok: false, message: '该手机号已经开通过试用了' });
+    }
     res.status(500).json({ ok: false, message: '开通失败，请稍后重试或联系客服' });
   }
 });

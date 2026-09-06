@@ -1,6 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const { getTenantDb } = require('../lib/tenantManager');
+const { requireLogin } = require('../middleware/auth');
 const { createLoginLimiter } = require('../middleware/rateLimit');
 const router = express.Router();
 
@@ -66,13 +67,13 @@ router.post('/logout', (req, res) => {
   req.session.destroy(() => res.redirect('/login'));
 });
 
-router.get('/change-password', (req, res) => {
-  if (!req.session.user || !req.tenantDb) return res.redirect('/login');
+// 必须走 requireLogin：它除了查登录态，还会回库核对账号 active 状态。
+// 以前这里只手查 session，被禁用的员工账号（session 还没过期）仍能改自己的密码。
+router.get('/change-password', requireLogin, (req, res) => {
   res.render('change_password', { error: null, currentUser: req.session.user });
 });
 
-router.post('/change-password', (req, res) => {
-  if (!req.session.user || !req.tenantDb) return res.redirect('/login');
+router.post('/change-password', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const { old_password, new_password } = req.body;
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.session.user.id);

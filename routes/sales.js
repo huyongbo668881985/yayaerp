@@ -395,9 +395,12 @@ router.post('/sales/unapprove/:id', requireLogin, (req, res) => {
         INSERT INTO inventory (product_id, warehouse_id, quantity) VALUES (?,?,?)
         ON CONFLICT(product_id, warehouse_id) DO UPDATE SET quantity = quantity + excluded.quantity
       `);
+      // type 用 adjust 而不是沿用 sale_out：这笔流水的 change_qty 是正数（把扣掉的加回来），
+      // 还标"销售出库"的话，流水页会出现"销售出库 +10"这种自相矛盾的记录，按类型汇总也会算错。
+      // ref_type 保留 sales_order_unapprove，能追溯到是哪张单的反审核。
       const insertTxn = db.prepare(`
         INSERT INTO stock_transactions (product_id, warehouse_id, change_qty, type, ref_type, ref_id, user_id)
-        VALUES (?,?,?,'sale_out','sales_order_unapprove',?,?)
+        VALUES (?,?,?,'adjust','sales_order_unapprove',?,?)
       `);
       for (const it of items) {
         upsertInv.run(it.product_id, order.warehouse_id, it.base_quantity);

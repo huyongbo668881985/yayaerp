@@ -322,9 +322,11 @@ router.post('/returns/unapprove/:id', requireLogin, (req, res) => {
   const tx = db.transaction(() => {
     if (order.status === 'approved') {
       const decInv = db.prepare('UPDATE inventory SET quantity = quantity - ? WHERE product_id=? AND warehouse_id=?');
+      // type 用 adjust 而不是沿用 sale_return：这笔流水 change_qty 是负数（把加回的扣回去），
+      // 还标"销售退货入库"会出现"退货入库 -4"的矛盾记录；ref_type 仍可追溯到被反审核的退货单。
       const insertTxn = db.prepare(`
         INSERT INTO stock_transactions (product_id, warehouse_id, change_qty, type, ref_type, ref_id, user_id)
-        VALUES (?,?,?,'sale_return','return_order_unapprove',?,?)
+        VALUES (?,?,?,'adjust','return_order_unapprove',?,?)
       `);
       for (const it of items) {
         decInv.run(it.base_quantity, it.product_id, order.warehouse_id);
