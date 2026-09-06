@@ -52,7 +52,8 @@ function buildItemsFromRequest(db, body) {
     const usePack = unit_choice[i] === 'pack' && product.pack_unit;
     const unitLabel = usePack ? product.pack_unit : product.unit;
     const baseQty = usePack ? qty * product.pack_size : qty;
-    items.push({ pid, qty, price: price || 0, unitLabel, baseQty, productName: product.name, gift });
+    // 成本快照：记下开单那一刻的成本价，之后改商品成本价不影响这张单的历史毛利
+    items.push({ pid, qty, price: price || 0, unitLabel, baseQty, costSnapshot: product.cost_price || 0, productName: product.name, gift });
   }
   return items;
 }
@@ -204,9 +205,9 @@ router.post('/sales/new', requireLogin, (req, res) => {
        VALUES (?,?,?,?,?,?,?,'submitted',?,?)`
     ).run(customer_id || null, warehouse_id, req.session.user.id, order_date || new Date().toISOString().slice(0,10), total, paid, paymentStatus, note || '', remarks || '');
     const soId = info.lastInsertRowid;
-    const insertItem = db.prepare('INSERT INTO sales_order_items (sales_order_id, product_id, quantity, unit_label, base_quantity, unit_price, is_gift) VALUES (?,?,?,?,?,?,?)');
+    const insertItem = db.prepare('INSERT INTO sales_order_items (sales_order_id, product_id, quantity, unit_label, base_quantity, unit_price, is_gift, cost_price_snapshot) VALUES (?,?,?,?,?,?,?,?)');
     for (const it of items) {
-      insertItem.run(soId, it.pid, it.qty, it.unitLabel, it.baseQty, it.price, it.gift ? 1 : 0);
+      insertItem.run(soId, it.pid, it.qty, it.unitLabel, it.baseQty, it.price, it.gift ? 1 : 0, it.costSnapshot);
     }
   });
   tx();
@@ -262,9 +263,9 @@ router.post('/sales/:id/edit', requireLogin, (req, res) => {
       `UPDATE sales_orders SET customer_id=?, warehouse_id=?, order_date=?, total_amount=?, paid_amount=?, payment_status=?, note=?, remarks=? WHERE id=?`
     ).run(customer_id || null, warehouse_id, order_date || order.order_date, total, paid, paymentStatus, note || '', remarks || '', order.id);
     db.prepare('DELETE FROM sales_order_items WHERE sales_order_id = ?').run(order.id);
-    const insertItem = db.prepare('INSERT INTO sales_order_items (sales_order_id, product_id, quantity, unit_label, base_quantity, unit_price, is_gift) VALUES (?,?,?,?,?,?,?)');
+    const insertItem = db.prepare('INSERT INTO sales_order_items (sales_order_id, product_id, quantity, unit_label, base_quantity, unit_price, is_gift, cost_price_snapshot) VALUES (?,?,?,?,?,?,?,?)');
     for (const it of items) {
-      insertItem.run(order.id, it.pid, it.qty, it.unitLabel, it.baseQty, it.price, it.gift ? 1 : 0);
+      insertItem.run(order.id, it.pid, it.qty, it.unitLabel, it.baseQty, it.price, it.gift ? 1 : 0, it.costSnapshot);
     }
   });
   tx();

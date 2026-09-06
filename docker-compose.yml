@@ -3,9 +3,13 @@ services:
     build: .
     container_name: jxc-app
     restart: unless-stopped
+    # .env 里的所有变量（SESSION_SECRET、COOKIE_SECURE、TRUST_PROXY、
+    # 阿里云短信 AK/签名/模板、SMTP、飞书 webhook 等）整体注入容器。
+    # .env 不存在时 compose 会直接报错拒绝启动——这是故意的，避免静默用弱密钥跑起来。
+    env_file:
+      - .env
     environment:
       - PORT=3000
-      - SESSION_SECRET=${SESSION_SECRET:-please-change-this-secret}
     volumes:
       - ./data:/app/data
     ports:

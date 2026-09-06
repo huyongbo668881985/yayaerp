@@ -120,13 +120,18 @@ router.post('/platform-admin/tenants/new', requireSuperAdmin, (req, res) => {
   }
 
   // 新建租户 db 文件并跑初始化 + 建第一个管理员账号
+  // 用完必须关闭：这里不走 getTenantDb 的连接缓存，不关的话句柄会一直泄漏
   const db = openTenantDbByPath(tenant.db_path);
-  bootstrapTenant(db, {
-    adminUsername: admin_username.trim(),
-    adminPassword: admin_password,
-    adminName: admin_name || '管理员',
-    warehouseName: warehouse_name || '总仓'
-  });
+  try {
+    bootstrapTenant(db, {
+      adminUsername: admin_username.trim(),
+      adminPassword: admin_password,
+      adminName: admin_name || '管理员',
+      warehouseName: warehouse_name || '总仓'
+    });
+  } finally {
+    db.close();
+  }
 
   res.redirect('/platform-admin');
 });

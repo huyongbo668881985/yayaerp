@@ -45,7 +45,8 @@ function buildItemsFromRequest(db, body) {
     const usePack = unit_choice[i] === 'pack' && product.pack_unit;
     const unitLabel = usePack ? product.pack_unit : product.unit;
     const baseQty = usePack ? qty * product.pack_size : qty;
-    items.push({ pid, qty, price: price || 0, unitLabel, baseQty, productName: product.name });
+    // 成本快照：与销售单一致，退货毛利也按开单那一刻的成本价计算
+    items.push({ pid, qty, price: price || 0, unitLabel, baseQty, costSnapshot: product.cost_price || 0, productName: product.name });
   }
   return items;
 }
@@ -153,9 +154,9 @@ router.post('/returns/new', requireLogin, (req, res) => {
        VALUES (?,?,?,?,?,?,?,?,'submitted',?,?)`
     ).run(customer_id || null, warehouse_id, req.session.user.id, relatedId, order_date || new Date().toISOString().slice(0,10), total, refunded, refundStatus, note || '', remarks || '');
     const roId = info.lastInsertRowid;
-    const insertItem = db.prepare('INSERT INTO return_order_items (return_order_id, product_id, quantity, unit_label, base_quantity, unit_price) VALUES (?,?,?,?,?,?)');
+    const insertItem = db.prepare('INSERT INTO return_order_items (return_order_id, product_id, quantity, unit_label, base_quantity, unit_price, cost_price_snapshot) VALUES (?,?,?,?,?,?,?)');
     for (const it of items) {
-      insertItem.run(roId, it.pid, it.qty, it.unitLabel, it.baseQty, it.price);
+      insertItem.run(roId, it.pid, it.qty, it.unitLabel, it.baseQty, it.price, it.costSnapshot);
     }
   });
   tx();
@@ -217,9 +218,9 @@ router.post('/returns/:id/edit', requireLogin, (req, res) => {
       `UPDATE return_orders SET customer_id=?, warehouse_id=?, related_sales_order_id=?, order_date=?, total_amount=?, refunded_amount=?, refund_status=?, note=?, remarks=? WHERE id=?`
     ).run(customer_id || null, warehouse_id, relatedId, order_date || order.order_date, total, refunded, refundStatus, note || '', remarks || '', order.id);
     db.prepare('DELETE FROM return_order_items WHERE return_order_id = ?').run(order.id);
-    const insertItem = db.prepare('INSERT INTO return_order_items (return_order_id, product_id, quantity, unit_label, base_quantity, unit_price) VALUES (?,?,?,?,?,?)');
+    const insertItem = db.prepare('INSERT INTO return_order_items (return_order_id, product_id, quantity, unit_label, base_quantity, unit_price, cost_price_snapshot) VALUES (?,?,?,?,?,?,?)');
     for (const it of items) {
-      insertItem.run(order.id, it.pid, it.qty, it.unitLabel, it.baseQty, it.price);
+      insertItem.run(order.id, it.pid, it.qty, it.unitLabel, it.baseQty, it.price, it.costSnapshot);
     }
   });
   tx();

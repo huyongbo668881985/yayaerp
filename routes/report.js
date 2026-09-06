@@ -61,19 +61,19 @@ function getSummary(db, start, end) {
     WHERE so.status = 'approved' AND ${EFFECTIVE_DEBT_EXPR} > 0.001 ${saleFilter.clause}
   `).get(...saleFilter.params);
 
+  // 毛利用明细行上的成本快照（cost_price_snapshot），不用商品当前成本价——
+  // 这样管理员事后改成本价，不会追溯改写历史单据的毛利。
   // 不含应收口径下，一张销售单只有"有效欠款已经结清"（现金收完，或者退货已经抵掉）才算数
   const salesProfitSql = (onlyPaid) => `
-    SELECT COALESCE(SUM(soi.quantity * soi.unit_price - soi.base_quantity * p.cost_price), 0) AS profit
+    SELECT COALESCE(SUM(soi.quantity * soi.unit_price - soi.base_quantity * soi.cost_price_snapshot), 0) AS profit
     FROM sales_order_items soi
     JOIN sales_orders so ON so.id = soi.sales_order_id
-    JOIN products p ON p.id = soi.product_id
     WHERE so.status = 'approved' ${onlyPaid ? `AND ${EFFECTIVE_DEBT_EXPR} <= 0.001` : ''} ${saleFilter.clause}
   `;
   const returnProfitSql = (onlyRefunded) => `
-    SELECT COALESCE(SUM(roi.quantity * roi.unit_price - roi.base_quantity * p.cost_price), 0) AS profit
+    SELECT COALESCE(SUM(roi.quantity * roi.unit_price - roi.base_quantity * roi.cost_price_snapshot), 0) AS profit
     FROM return_order_items roi
     JOIN return_orders ro ON ro.id = roi.return_order_id
-    JOIN products p ON p.id = roi.product_id
     WHERE ro.status = 'approved' ${onlyRefunded ? `AND ${RETURN_SETTLED_EXPR}` : ''} ${returnFilter.clause}
   `;
 
@@ -97,12 +97,11 @@ function getSalesOrderList(db, start, end, includeReceivable) {
   let sql = `
     SELECT so.id, so.order_date, c.name AS customer_name, w.name AS warehouse_name,
            so.total_amount, so.paid_amount, ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount,
-           COALESCE(SUM(soi.quantity * soi.unit_price - soi.base_quantity * p.cost_price), 0) AS order_profit
+           COALESCE(SUM(soi.quantity * soi.unit_price - soi.base_quantity * soi.cost_price_snapshot), 0) AS order_profit
     FROM sales_orders so
     LEFT JOIN customers c ON c.id = so.customer_id
     LEFT JOIN warehouses w ON w.id = so.warehouse_id
     JOIN sales_order_items soi ON soi.sales_order_id = so.id
-    JOIN products p ON p.id = soi.product_id
     WHERE so.status = 'approved' ${clause}
   `;
   if (!includeReceivable) sql += ` AND ${EFFECTIVE_DEBT_EXPR} <= 0.001`;
@@ -116,12 +115,11 @@ function getReturnOrderList(db, start, end, includeReceivable) {
   let sql = `
     SELECT ro.id, ro.order_date, c.name AS customer_name, w.name AS warehouse_name,
            ro.total_amount, ro.refunded_amount, ro.refund_status, ro.related_sales_order_id,
-           COALESCE(SUM(roi.quantity * roi.unit_price - roi.base_quantity * p.cost_price), 0) AS order_profit
+           COALESCE(SUM(roi.quantity * roi.unit_price - roi.base_quantity * roi.cost_price_snapshot), 0) AS order_profit
     FROM return_orders ro
     LEFT JOIN customers c ON c.id = ro.customer_id
     LEFT JOIN warehouses w ON w.id = ro.warehouse_id
     JOIN return_order_items roi ON roi.return_order_id = ro.id
-    JOIN products p ON p.id = roi.product_id
     WHERE ro.status = 'approved' ${clause}
   `;
   if (!includeReceivable) sql += ` AND ${RETURN_SETTLED_EXPR}`;

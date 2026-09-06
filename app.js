@@ -7,6 +7,18 @@ const fs = require('fs');
 
 const { resolveTenant } = require('./middleware/tenant');
 
+// SESSION_SECRET 是用来签 session cookie 的密钥，绝对不能用公开的默认值——
+// 否则任何看过源码的人都能伪造登录态。缺失或太弱就直接拒绝启动，把问题暴露在部署阶段。
+const SESSION_SECRET = process.env.SESSION_SECRET;
+if (!SESSION_SECRET) {
+  console.error('启动失败：缺少 SESSION_SECRET 环境变量。请复制 .env.example 为 .env 并设置，可用 `openssl rand -hex 32` 生成。');
+  process.exit(1);
+}
+if (SESSION_SECRET.length < 32) {
+  console.error('启动失败：SESSION_SECRET 太短（至少 32 个字符）。请用 `openssl rand -hex 32` 重新生成，不要用随手编的短字符串。');
+  process.exit(1);
+}
+
 const DATA_DIR = path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
@@ -30,7 +42,7 @@ app.use('/welcome', express.static(path.join(__dirname, 'public-site')));
 
 app.use(session({
   store: new SqliteSessionStore(path.join(DATA_DIR, 'sessions.db')),
-  secret: process.env.SESSION_SECRET || 'change-this-secret-in-env',
+  secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {

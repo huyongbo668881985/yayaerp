@@ -1,0 +1,10 @@
+# 构建 Docker 镜像时排除这些内容：
+# .env 绝不能进镜像（里面有数据库之外的全部密钥），数据目录和依赖也不需要
+.env
+data
+node_modules
+.git
+.gitignore
+.DS_Store
+.workbuddy
+*.md

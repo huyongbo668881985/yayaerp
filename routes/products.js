@@ -65,12 +65,16 @@ router.post('/products/:id/edit', requireAdmin, (req, res) => {
 
 router.post('/products/:id/delete', requireAdmin, (req, res) => {
   const db = req.tenantDb;
+  // 引用检查要覆盖所有带外键的表：销售/采购/调拨明细、退货明细、出入库流水。
+  // 少查一张表的话，提示语会说"可以删"，实际却被数据库外键约束拦下来，用户看到的是另一个报错。
   const refCount =
     db.prepare('SELECT COUNT(*) c FROM sales_order_items WHERE product_id = ?').get(req.params.id).c +
     db.prepare('SELECT COUNT(*) c FROM purchase_order_items WHERE product_id = ?').get(req.params.id).c +
-    db.prepare('SELECT COUNT(*) c FROM transfer_order_items WHERE product_id = ?').get(req.params.id).c;
+    db.prepare('SELECT COUNT(*) c FROM transfer_order_items WHERE product_id = ?').get(req.params.id).c +
+    db.prepare('SELECT COUNT(*) c FROM return_order_items WHERE product_id = ?').get(req.params.id).c +
+    db.prepare('SELECT COUNT(*) c FROM stock_transactions WHERE product_id = ?').get(req.params.id).c;
   if (refCount > 0) {
-    return res.status(400).send('无法删除：该商品已经在销售单/采购单/调拨单中使用过，无法删除。如果不再销售，可以把名称改成"（停用）xxx"标记一下即可。');
+    return res.status(400).send('无法删除：该商品已有出入库流水或被销售单/采购单/调拨单/退货单引用，删除会破坏历史记录。如果不再销售，可以把名称改成"（停用）xxx"标记一下即可。');
   }
   db.prepare('DELETE FROM inventory WHERE product_id = ?').run(req.params.id);
   db.prepare('DELETE FROM products WHERE id = ?').run(req.params.id);
