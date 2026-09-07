@@ -2,6 +2,7 @@ const express = require('express');
 const { requireLogin } = require('../middleware/auth');
 const { sendCsv } = require('../utils/csv');
 const { todayLocalDate } = require('../utils/dates');
+const { costSnapshotPerBaseUnit } = require('../lib/priceCalc');
 const router = express.Router();
 
 // 状态机说明：
@@ -61,8 +62,11 @@ function buildItemsFromRequest(db, body) {
     const usePack = unit_choice[i] === 'pack' && product.pack_unit;
     const unitLabel = usePack ? product.pack_unit : product.unit;
     const baseQty = usePack ? qty * product.pack_size : qty;
-    // 成本快照：记下开单那一刻的成本价，之后改商品成本价不影响这张单的历史毛利
-    items.push({ pid, qty, price: price || 0, unitLabel, baseQty, costSnapshot: product.cost_price || 0, productName: product.name, gift });
+    // 成本快照：记下开单那一刻的成本价，之后改商品成本价不影响这张单的历史毛利。
+    // 按箱录入且配了箱成本价时用 箱成本价÷箱规（共用 lib/priceCalc.js，与 returns.js 同一份实现），
+    // 否则按箱开单会踩回"瓶价由箱价反算"的舍入误差，毛利系统性偏低。
+    const costSnapshot = costSnapshotPerBaseUnit(product, unit_choice[i]);
+    items.push({ pid, qty, price: price || 0, unitLabel, baseQty, costSnapshot, productName: product.name, gift });
   }
   return items;
 }

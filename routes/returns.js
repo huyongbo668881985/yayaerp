@@ -2,6 +2,7 @@ const express = require('express');
 const { requireLogin } = require('../middleware/auth');
 const { sendCsv } = require('../utils/csv');
 const { todayLocalDate } = require('../utils/dates');
+const { costSnapshotPerBaseUnit } = require('../lib/priceCalc');
 const router = express.Router();
 
 // 状态机跟销售单一致：submitted --审核通过--> approved（这一步才真正把库存加回去）
@@ -57,8 +58,10 @@ function buildItemsFromRequest(db, body) {
     const usePack = unit_choice[i] === 'pack' && product.pack_unit;
     const unitLabel = usePack ? product.pack_unit : product.unit;
     const baseQty = usePack ? qty * product.pack_size : qty;
-    // 成本快照：与销售单一致，退货毛利也按开单那一刻的成本价计算
-    items.push({ pid, qty, price: price || 0, unitLabel, baseQty, costSnapshot: product.cost_price || 0, productName: product.name });
+    // 成本快照：与销售单一致（共用 lib/priceCalc.js），按箱录入且配了箱成本价时用 箱成本价÷箱规，
+    // 退货毛利也按开单那一刻、不踩舍入误差的成本价计算
+    const costSnapshot = costSnapshotPerBaseUnit(product, unit_choice[i]);
+    items.push({ pid, qty, price: price || 0, unitLabel, baseQty, costSnapshot, productName: product.name });
   }
   return items;
 }
