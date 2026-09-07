@@ -45,7 +45,8 @@ router.post('/purchases/new', requireAdmin, (req, res) => {
     const pid = Number(product_id[i]);
     const qty = Number(quantity[i]);
     const price = Number(unit_price[i]);
-    if (!pid || !(qty > 0)) continue;
+    // 数量必须是正整数（与 sales.js 同规则）
+    if (!pid || !(qty > 0) || !Number.isInteger(qty)) continue;
     const product = getProduct.get(pid);
     if (!product) continue;
     // unit_choice: 'pack' 表示按大单位（箱）录入，否则按基本单位（瓶）

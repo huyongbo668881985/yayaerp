@@ -21,7 +21,8 @@ function buildItemsFromRequest(db, body) {
   for (let i = 0; i < product_id.length; i++) {
     const pid = Number(product_id[i]);
     const qty = Number(quantity[i]);
-    if (!pid || !(qty > 0)) continue;
+    // 数量必须是正整数（与 sales.js 同规则）
+    if (!pid || !(qty > 0) || !Number.isInteger(qty)) continue;
     const product = getProduct.get(pid);
     if (!product) continue;
     const usePack = unit_choice[i] === 'pack' && product.pack_unit;

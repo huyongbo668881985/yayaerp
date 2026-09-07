@@ -93,7 +93,7 @@
 
     <% if (order.status === 'approved' && currentUser.role === 'admin' && order.effective_debt > 0.001) { %>
       <form action="/sales/<%= order.id %>/record-payment" method="POST" style="display:flex; gap:6px; align-items:center">
-        <input type="number" name="amount" placeholder="本次收款金额" step="0.01" min="0.01" required style="width:140px">
+        <input type="number" name="amount" placeholder="本次收款金额" step="0.01" min="0.01" max="<%= order.effective_debt.toFixed(2) %>" required style="width:140px">
         <button type="submit" class="btn" style="background:#16a34a">记录收款</button>
       </form>
     <% } %>

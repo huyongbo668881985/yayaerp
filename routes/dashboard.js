@@ -67,10 +67,14 @@ router.get('/', requireLogin, (req, res) => {
   if (operatorFilter) debtParams.push(user.id);
   const totalDebt = db.prepare(debtSql).get(...debtParams).d;
 
-  // 待审核单据数（操作员只统计自己名下的，与文件头的口径说明保持一致）
-  const pendingOrders = db.prepare(
-    `SELECT COUNT(*) c FROM sales_orders WHERE status = 'submitted' ${operatorFilter ? 'AND user_id = ?' : ''}`
-  ).get(...(operatorFilter ? [user.id] : [])).c;
+  // 待审核单据数：销售单 + 退货单 + 调拨单 三类合计（以前只算了销售单，退货/调拨卡在
+  // 待审核时首页显示 0，操作员/管理员都会漏审）。
+  // 操作员只统计自己名下的，与文件头的口径说明保持一致（三张表的归属字段都是各自的 user_id）。
+  const pendingParams = operatorFilter ? [user.id] : [];
+  const pendingCount = (table) =>
+    db.prepare(`SELECT COUNT(*) c FROM ${table} WHERE status = 'submitted' ${operatorFilter ? 'AND user_id = ?' : ''}`)
+      .get(...pendingParams).c;
+  const pendingOrders = pendingCount('sales_orders') + pendingCount('return_orders') + pendingCount('transfer_orders');
 
   // 毛利：仅管理员可见。口径与经营报表"不含应收"完全一致（SQL 唯一实现在 lib/profitCalc.js，
   // 避免仪表盘/报表再次分叉）：

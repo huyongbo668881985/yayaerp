@@ -9,7 +9,9 @@ const {
   setTenantStatus,
   updateTenantLimits,
   getPlatformAdminByUsername,
-  updatePlatformAdminPassword
+  updatePlatformAdminPassword,
+  insertAuditLog,
+  listAuditLogs
 } = require('../lib/platformDb');
 const { openTenantDbByPath, getTenantUserCount } = require('../lib/tenantManager');
 const { bootstrapTenant } = require('../lib/schema');
@@ -83,6 +85,20 @@ router.post('/platform-admin/change-password', requireSuperAdmin, (req, res) => 
   res.render('platform_change_password', { error: null, success: true });
 });
 
+// 高权限操作统一留痕：谁（admin_id/admin_username）在什么时候对哪个租户做了什么（action/detail）。
+// 只在"成功生效"的分支里写，失败/校验拦截不记，避免日志里全是噪音。
+function audit(req, action, tenant, detail) {
+  const admin = req.session.platformAdmin;
+  insertAuditLog({
+    adminId: admin.id,
+    adminUsername: admin.username,
+    action,
+    targetTenantId: tenant ? tenant.id : null,
+    targetTenantCode: tenant ? tenant.tenant_code : null,
+    detail: detail || null
+  });
+}
+
 router.get('/platform-admin', requireSuperAdmin, (req, res) => {
   const tenants = listTenants().map(t => ({
     ...t,
@@ -90,6 +106,12 @@ router.get('/platform-admin', requireSuperAdmin, (req, res) => {
     userCount: getTenantUserCount(t.db_path)
   }));
   res.render('platform_dashboard', { tenants, error: null });
+});
+
+// 审计日志只读页：按时间倒序列出最近 500 条，不做筛选/分页
+router.get('/platform-admin/audit-log', requireSuperAdmin, (req, res) => {
+  const logs = listAuditLogs(500);
+  res.render('platform_audit_log', { logs });
 });
 
 router.get('/platform-admin/tenants/new', requireSuperAdmin, (req, res) => {
@@ -135,13 +157,18 @@ router.post('/platform-admin/tenants/new', requireSuperAdmin, (req, res) => {
     db.close();
   }
 
+  audit(req, 'create_tenant', tenant,
+    `租户名称=${tenant.name}；管理员账号=${admin_username.trim()}；到期=${quota.expiresAt || '不限'}；账号上限=${quota.maxUsers == null ? '不限' : quota.maxUsers}`);
+
   res.redirect('/platform-admin');
 });
 
 router.post('/platform-admin/tenants/:id/toggle', requireSuperAdmin, (req, res) => {
   const tenant = getTenantById(Number(req.params.id));
   if (tenant) {
-    setTenantStatus(tenant.id, tenant.status === 'active' ? 'suspended' : 'active');
+    const newStatus = tenant.status === 'active' ? 'suspended' : 'active';
+    setTenantStatus(tenant.id, newStatus);
+    audit(req, 'toggle_status', tenant, `状态：${tenant.status} → ${newStatus}`);
   }
   res.redirect('/platform-admin');
 });
@@ -172,7 +199,10 @@ router.post('/platform-admin/tenants/:id/edit', requireSuperAdmin, (req, res) =>
     });
   }
 
+  const before = { name: tenant.name, expires_at: tenant.expires_at, max_users: tenant.max_users };
   updateTenantLimits(tenant.id, { name: tenant_name.trim(), expiresAt: quota.expiresAt, maxUsers: quota.maxUsers });
+  audit(req, 'update_limits', tenant,
+    `名称：${before.name} → ${tenant_name.trim()}；到期：${before.expires_at || '不限'} → ${quota.expiresAt || '不限'}；账号上限：${before.max_users == null ? '不限' : before.max_users} → ${quota.maxUsers == null ? '不限' : quota.maxUsers}`);
   res.redirect('/platform-admin');
 });
 
@@ -193,14 +223,16 @@ router.post('/platform-admin/tenants/:id/users/:userId/reset-password', requireS
     return renderWithError('新密码至少6位');
   }
 
+  let resetUser = null;
   let db;
   try {
     db = openTenantDbByPath(tenant.db_path);
-    const user = db.prepare('SELECT id FROM users WHERE id = ?').get(Number(req.params.userId));
+    const user = db.prepare('SELECT id, username FROM users WHERE id = ?').get(Number(req.params.userId));
     if (!user) {
       db.close();
       return renderWithError('账号不存在');
     }
+    resetUser = user;
     const hash = bcrypt.hashSync(new_password, 10);
     db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, user.id);
     db.close();
@@ -209,6 +241,9 @@ router.post('/platform-admin/tenants/:id/users/:userId/reset-password', requireS
     if (db) { try { db.close(); } catch (_) { /* 忽略 */ } }
     return renderWithError('重置失败，请稍后重试');
   }
+
+  // 只记"谁重置了哪个租户的哪个账号"，绝不记新密码本身
+  audit(req, 'reset_user_password', tenant, `重置账号=${resetUser.username}（用户ID ${resetUser.id}）`);
 
   res.redirect(`/platform-admin/tenants/${tenant.id}/edit`);
 });

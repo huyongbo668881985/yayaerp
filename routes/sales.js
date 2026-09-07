@@ -55,7 +55,8 @@ function buildItemsFromRequest(db, body) {
     const qty = Number(quantity[i]);
     let price = Number(unit_price[i]);
     const gift = is_gift[i] === '1' || is_gift[i] === true;
-    if (!pid || !(qty > 0)) continue;
+    // 数量必须是正整数：瓶/箱都不存在"半瓶"的录入场景，小数会让库存和金额统计出碎片（四处单据同规则）
+    if (!pid || !(qty > 0) || !Number.isInteger(qty)) continue;
     const product = getProduct.get(pid);
     if (!product) continue;
     if (gift) price = 0;
@@ -503,11 +504,18 @@ router.post('/sales/:id/record-payment', requireLogin, (req, res) => {
   const amount = parseFloat(req.body.amount);
   if (!(amount > 0)) return res.status(400).send('收款金额必须大于0');
 
-  // 收款累计不能超过单据总额：多收的钱没有业务意义，还会把应收/欠款统计搞乱。
-  // 允许 0.001 的浮点误差，与全站"有效欠款 <= 0.001 算结清"的口径一致。
-  const remaining = order.total_amount - (order.paid_amount || 0);
+  // 收款累计不能超过"有效欠款"：总额 − 已收 − 关联已审核退货（允许 0.001 浮点误差）。
+  // 必须与详情页展示的欠款（attachEffectivePayment 的 effective_debt）同一套算法：
+  // 页面欠款扣了退货、服务端封顶不扣的话，退货抵扣过的那部分钱还能再现金收一遍（双重收取）。
+  const returnedAmount = db.prepare(
+    `SELECT COALESCE(SUM(total_amount), 0) AS t FROM return_orders WHERE related_sales_order_id = ? AND status = 'approved'`
+  ).get(order.id).t;
+  const remaining = order.total_amount - (order.paid_amount || 0) - returnedAmount;
   if (remaining <= 0.001) {
-    return res.status(400).send(`该单已收满（已收 ¥${(order.paid_amount || 0).toFixed(2)} / 总额 ¥${order.total_amount.toFixed(2)}），无需再记收款`);
+    return res.status(400).send(
+      `该单有效欠款已结清（总额 ¥${order.total_amount.toFixed(2)}，已收 ¥${(order.paid_amount || 0).toFixed(2)}` +
+      `，已扣关联退货 ¥${returnedAmount.toFixed(2)}），无需再记收款`
+    );
   }
   if (amount > remaining + 0.001) {
     return res.status(400).send(`收款金额（¥${amount.toFixed(2)}）超过该单剩余未收金额（¥${remaining.toFixed(2)}），最多还能收 ¥${remaining.toFixed(2)}`);

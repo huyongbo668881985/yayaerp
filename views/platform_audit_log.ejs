@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>平台管理 - 操作审计日志</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="topbar">
+  <div class="brand">🛠 平台管理后台</div>
+  <div class="userbox">
+    <span><%= currentPlatformAdmin.name %></span>
+    <a href="/platform-admin" class="btn btn-secondary btn-sm">返回租户列表</a>
+    <form method="POST" action="/platform-admin/logout"><button class="btn btn-secondary btn-sm" type="submit">退出</button></form>
+  </div>
+</div>
+<div class="container">
+  <h1>操作审计日志</h1>
+  <p class="muted">平台超管的高权限操作留痕（创建租户 / 暂停·启用 / 修改限额 / 重置账号密码），按时间倒序，最多显示最近 500 条。此页面只读。</p>
+
+  <div class="card desktop-table-wrap">
+    <% if (logs.length === 0) { %>
+      <p class="muted">暂无审计记录</p>
+    <% } else { %>
+      <table>
+        <tr><th>时间</th><th>操作人</th><th>操作</th><th>目标租户</th><th>详情</th></tr>
+        <% logs.forEach(function(l) { %>
+          <tr>
+            <td><%= l.created_at %></td>
+            <td><%= l.admin_username %></td>
+            <td><%= l.action %></td>
+            <td><%= l.target_tenant_code ? `#${l.target_tenant_id} ${l.target_tenant_code}` : '-' %></td>
+            <td><%= l.detail || '-' %></td>
+          </tr>
+        <% }) %>
+      </table>
+    <% } %>
+  </div>
+</div>
+</body>
+</html>
