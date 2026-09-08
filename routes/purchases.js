@@ -130,6 +130,28 @@ router.post('/purchases/:id/delete', requireAdmin, (req, res) => {
   for (const it of items) {
     needed.set(it.product_id, (needed.get(it.product_id) || 0) + it.base_quantity);
   }
+
+  // 来源检查（2026-09-08 补，修复"误扣退货库存"）：库存校验"当前库存 ≥ 采购量"有一个盲区——
+  // 当前库存不等于这批采购的货还在，它可能来自完全不同的来源。实测复现的翻车链路：
+  //   采购 100 → 卖光（库存 0）→ 客户退货 100（库存 100，但这批货是退回来的）→ 删采购单
+  //   → "库存 100 ≥ 100"放行 → 扣 100 → 库存 0，而仓库里实物躺着 100 瓶。
+  // 只要该商品在该仓库发生过"退货入库"或"调拨入库"，系统就无法区分当前库存里哪些属于这张
+  // 采购单，删除必然有误扣风险，直接拒绝。删单本来就是高危低频操作，宁可保守。
+  const hasReturnOrTransferIn = db.prepare(
+    `SELECT st.product_id FROM stock_transactions st
+     JOIN purchase_order_items poi ON poi.product_id = st.product_id
+     WHERE poi.purchase_order_id = ? AND st.warehouse_id = ?
+       AND st.type IN ('sale_return','transfer_in')
+     LIMIT 1`
+  ).get(order.id, order.warehouse_id);
+  if (hasReturnOrTransferIn) {
+    return res.status(400).send(
+      '无法删除：这张采购单的商品在该仓库发生过"退货入库"或"调拨入库"，当前库存里混着这些来源的货，' +
+      '删除会把退回来的货误当成这批采购扣掉，导致账面库存凭空减少（实物却在仓库里）。' +
+      '如果采购单信息录错了，建议保留单据、在备注里说明，或先用"库存调整"把账面修正到与实物一致。'
+    );
+  }
+
   const getInv = db.prepare('SELECT quantity FROM inventory WHERE product_id=? AND warehouse_id=?');
   for (const [pid, totalQty] of needed) {
     const inv = getInv.get(pid, order.warehouse_id);

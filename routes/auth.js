@@ -5,7 +5,14 @@ const { requireLogin } = require('../middleware/auth');
 const { createLoginLimiter } = require('../middleware/rateLimit');
 const router = express.Router();
 
-const loginLimiter = createLoginLimiter({ windowMs: 15 * 60 * 1000, max: 10 });
+// 双维度限流（见 middleware/rateLimit.js 顶部说明）：
+// 账号桶按"租户+用户名"计，某个客户输错密码只锁他自己，不再全平台互锁；
+// IP 桶兜底防单 IP 大规模枚举。
+const loginLimiter = createLoginLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  extractWho: req => ({ tenantCode: req.body.tenant_code, username: req.body.username })
+});
 
 const LOGIN_ERRORS = {
   tenant_not_found: '租户代码不存在，请确认后重试',

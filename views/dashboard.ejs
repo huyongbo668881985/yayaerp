@@ -81,9 +81,9 @@
             <td><%= o.warehouse_name %></td>
             <td>¥<%= o.total_amount.toFixed(2) %></td>
             <td>
-              <% if (o.payment_status === 'paid') { %>
+              <% if (o.effective_status === 'paid') { %>
                 <span class="badge" style="background:#dcfce7;color:#166534">已收款</span>
-              <% } else if (o.payment_status === 'partial') { %>
+              <% } else if (o.effective_status === 'partial') { %>
                 <span class="badge" style="background:#fef3c7;color:#92400e">部分收款</span>
               <% } else { %>
                 <span class="badge" style="background:#fee2e2;color:#991b1b">未收款</span>
@@ -117,9 +117,9 @@
           </div>
           <div class="order-card-bottom">
             <span class="order-card-amount">¥<%= o.total_amount.toFixed(2) %></span>
-            <% if (o.payment_status === 'paid') { %>
+            <% if (o.effective_status === 'paid') { %>
               <span class="badge" style="background:#dcfce7;color:#166534">已收款</span>
-            <% } else if (o.payment_status === 'partial') { %>
+            <% } else if (o.effective_status === 'partial') { %>
               <span class="badge" style="background:#fef3c7;color:#92400e">部分收款</span>
             <% } else { %>
               <span class="badge" style="background:#fee2e2;color:#991b1b">未收款</span>

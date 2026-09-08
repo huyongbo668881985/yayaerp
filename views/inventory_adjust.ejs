@@ -1,0 +1,66 @@
+<%- include('partials/header') %>
+<h1>库存调整（盘点修正）</h1>
+<div class="card" style="max-width:520px">
+  <p class="muted">用于盘点后把账面库存修正为实际清点数量。调整会记入出入库流水（操作人、原因都可追溯），请谨慎操作。</p>
+  <% if (error) { %><div class="error"><%= error %></div><% } %>
+  <form method="POST" action="/inventory/adjust">
+    <div class="form-row">
+      <label>仓库 *</label>
+      <select name="warehouse_id" id="whSelect" required>
+        <option value="">-- 选择仓库 --</option>
+        <% warehouses.forEach(function(w) { %>
+          <option value="<%= w.id %>"><%= w.name %></option>
+        <% }) %>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>商品 *</label>
+      <select name="product_id" id="prodSelect" required>
+        <option value="">-- 选择商品 --</option>
+        <% products.forEach(function(p) { %>
+          <option value="<%= p.id %>"><%= p.name %><%= p.spec ? '（' + p.spec + '）' : '' %></option>
+        <% }) %>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>当前账面库存</label>
+      <input type="text" id="curQty" value="--" readonly>
+    </div>
+    <div class="form-row">
+      <label>调整后数量 *（填实际清点的数量，按基本单位）</label>
+      <input type="number" name="new_quantity" id="newQty" min="0" step="1" required>
+    </div>
+    <div class="form-row">
+      <label>调整原因 *（会记入出入库流水，例如：月度盘点、破损清理、历史差异修正）</label>
+      <input type="text" name="reason" required maxlength="100" placeholder="月度盘点">
+    </div>
+
+    <script>
+      (function() {
+        // 商品 × 仓库 -> 当前库存。JSON 注入已转义 "<"（与服务端渲染约定一致）
+        const INV = <%- invMapJson %>;
+        const wh = document.getElementById('whSelect');
+        const prod = document.getElementById('prodSelect');
+        const cur = document.getElementById('curQty');
+        const next = document.getElementById('newQty');
+
+        function refresh() {
+          const key = prod.value && wh.value ? (prod.value + '_' + wh.value) : '';
+          if (!key || INV[key] === undefined) {
+            cur.value = key ? '0（该组合暂无库存记录）' : '--';
+            next.value = '';
+            return;
+          }
+          cur.value = INV[key];
+        }
+        wh.addEventListener('change', refresh);
+        prod.addEventListener('change', refresh);
+        refresh();
+      })();
+    </script>
+
+    <button class="btn" type="submit">确认调整</button>
+    <a class="btn btn-secondary" href="/inventory">取消</a>
+  </form>
+</div>
+<%- include('partials/footer') %>

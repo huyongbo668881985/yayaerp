@@ -19,7 +19,12 @@ const { isTenantExpired } = require('../lib/platformDb');
 const { requireSuperAdmin } = require('../middleware/platformAuth');
 const { createLoginLimiter } = require('../middleware/rateLimit');
 
-const platformLoginLimiter = createLoginLimiter({ windowMs: 15 * 60 * 1000, max: 10 });
+// 平台超管登录限流：账号桶按"用户名"计（平台超管无租户概念），IP 桶兜底。
+const platformLoginLimiter = createLoginLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  extractWho: req => ({ username: req.body.username })
+});
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 

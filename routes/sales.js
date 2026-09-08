@@ -3,7 +3,14 @@ const { requireLogin } = require('../middleware/auth');
 const { sendCsv } = require('../utils/csv');
 const { todayLocalDate } = require('../utils/dates');
 const { costSnapshotPerBaseUnit } = require('../lib/priceCalc');
+const { returnedAmountSubquery } = require('../lib/profitCalc');
 const router = express.Router();
+
+// 关联到某张销售单、且已审核的退货金额。
+// 口径定义收敛在 lib/profitCalc.js（唯一实现点），这里按本地 SQL 别名（销售单一律用 so）取一份，
+// 不再自己写第二遍——之前同一个子查询在 sales / report / dashboard / profitCalc 四处各写一份，
+// 这本身就是"同一数字在不同页面对不上"的分叉根因（2026-09-08 收敛）。
+const RETURNED_AMOUNT_SUBQUERY = returnedAmountSubquery('so');
 
 // 状态机说明：
 //   draft(草稿) --提交--> submitted(待审核) --审核通过--> approved(已审核)
@@ -93,7 +100,7 @@ function attachEffectivePayment(order) {
 function queryOrders(db, user, start, end, unpaidOnly) {
   let sql = `
     SELECT so.*, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name,
-           COALESCE((SELECT SUM(total_amount) FROM return_orders WHERE related_sales_order_id = so.id AND status = 'approved'), 0) AS returned_amount
+           ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount
     FROM sales_orders so
     LEFT JOIN customers c ON c.id = so.customer_id
     LEFT JOIN warehouses w ON w.id = so.warehouse_id
@@ -150,7 +157,7 @@ router.get('/sales/export', requireLogin, (req, res) => {
   let sql = `
     SELECT so.id AS order_id, so.order_date, so.warehouse_id, so.status,
            so.total_amount, so.paid_amount,
-           COALESCE((SELECT SUM(total_amount) FROM return_orders WHERE related_sales_order_id = so.id AND status = 'approved'), 0) AS returned_amount,
+           ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount,
            so.remarks, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name,
            soi.quantity, soi.unit_label, soi.unit_price, soi.is_gift, p.name AS product_name
     FROM sales_orders so
@@ -521,11 +528,14 @@ router.post('/sales/:id/record-payment', requireLogin, (req, res) => {
     return res.status(400).send(`收款金额（¥${amount.toFixed(2)}）超过该单剩余未收金额（¥${remaining.toFixed(2)}），最多还能收 ¥${remaining.toFixed(2)}`);
   }
 
-  // 收款状态必须跟着 paid_amount 一起更新，不能只加金额不改状态。
-  // 以前这里漏了 payment_status，导致"建单时只收了定金、后来补完全款"的单子
-  // 状态永远停在 partial，仪表盘和经营报表的"不含应收"毛利永远统计不到它——
-  // 钱收齐了却不算已结清，毛利凭空少一块。
-  // 判定口径：只看实收现金 vs 单据金额，不做退货抵扣（与仪表盘一致）。
+  // payment_status 必须跟着 paid_amount 一起更新，不能只加金额不改状态
+  // （以前漏了这行，导致"建单时只收定金、后来补完全款"的单子状态永远停在 partial）。
+  //
+  // 注意它的语义（2026-09-08 明确）：这里只记**现金收款进度**——实收现金相对单据金额收了多少，
+  // 不做退货抵扣。真正的"是否已结清"一律由「有效欠款 = 金额 − 已收 − 关联已审核退货」现算，
+  // 见 lib/profitCalc.js 的 salesSettledExpr，列表页/详情页/首页/报表全部走那一套。
+  // 以前让 payment_status 兼职"结清判定"，落库快照追不上退货单的审核/反审核，
+  // 定金 + 退货抵扣结清的单子会永远停在 partial，两边对不上账。
   const newPaid = (order.paid_amount || 0) + amount;
   let paymentStatus = 'unpaid';
   if (order.total_amount > 0 && newPaid >= order.total_amount) paymentStatus = 'paid';
@@ -540,7 +550,7 @@ router.get('/sales/:id', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const order = db.prepare(`
     SELECT so.*, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name,
-           COALESCE((SELECT SUM(total_amount) FROM return_orders WHERE related_sales_order_id = so.id AND status = 'approved'), 0) AS returned_amount
+           ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount
     FROM sales_orders so
     LEFT JOIN customers c ON c.id = so.customer_id
     LEFT JOIN warehouses w ON w.id = so.warehouse_id

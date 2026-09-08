@@ -1,23 +1,22 @@
 const express = require('express');
 const { requireAdmin } = require('../middleware/auth');
 const { sendCsv } = require('../utils/csv');
-const { RETURN_SETTLED_EXPR, salesProfit, returnProfit } = require('../lib/profitCalc');
+const {
+  RETURN_SETTLED_EXPR, salesProfit, returnProfit,
+  returnedAmountSubquery, effectiveDebtExpr, salesSettledExpr
+} = require('../lib/profitCalc');
 const router = express.Router();
 
 // 统计口径统一：只算"已审核"的单据（草稿/待审核/已拒绝不算真实发生的业务），
 // 跟现有仪表盘毛利的口径保持一致。
 
-// 关联到某张销售单、且已审核的退货金额——这个子查询在好几处都要用，抽出来复用。
+// 所有金额口径的 SQL 片段统一从 lib/profitCalc.js 引入（口径唯一实现点），
+// 这里只是按本地 SQL 别名（销售单一律用 so）取一份，不再自己写第二遍定义。
 // 注意：不改 sales_orders 表本身的 total_amount/paid_amount，欠款和收款状态永远是"查询时现算"，
 // 这样原始单据数据永远保持真实历史记录，不会被退货悄悄覆盖掉。
-const RETURNED_AMOUNT_SUBQUERY = `COALESCE((SELECT SUM(ro.total_amount) FROM return_orders ro WHERE ro.related_sales_order_id = so.id AND ro.status = 'approved'), 0)`;
+const RETURNED_AMOUNT_SUBQUERY = returnedAmountSubquery('so');
 // "有效欠款"：总金额 − 已收款 − 关联退货金额。<= 0.001 就算结清了（不管是收现金收的还是退货抵的）
-const EFFECTIVE_DEBT_EXPR = `(so.total_amount - so.paid_amount - ${RETURNED_AMOUNT_SUBQUERY})`;
-
-// 一笔退货算不算"现金基础已落定"：要么自己收到了现金退款（refund_status='refunded'），
-// 要么它关联的销售单在收款状态上已经是"已收款"（payment_status='paid'）。
-// RETURN_SETTLED_EXPR 的 SQL 定义与毛利计算一起收敛在 lib/profitCalc.js（口径唯一实现点），
-// 首页仪表盘与经营报表共用同一处实现，避免两边口径分叉（2026-09-07 曾因此对不上账）。
+const EFFECTIVE_DEBT_EXPR = effectiveDebtExpr('so');
 
 function buildDateFilter(alias, start, end) {
   let clause = '';
@@ -65,8 +64,8 @@ function getSummary(db, start, end) {
   return { sales, returnsAmount: returnsRaw.amount, receivable, profitWithoutReceivable, profitWithReceivable, receivableProfit };
 }
 
-// 销售单明细：includeReceivable=false 时只列"已收款"的单子（payment_status='paid'，对应"不含应收"口径），
-// true 时列区间内全部已审核单子（不管收没收到钱）
+// 销售单明细：includeReceivable=false 时只列"有效欠款已结清"的单子（对应"不含应收"口径），
+// true 时列区间内全部已审核单子（不管有没有结清）
 function getSalesOrderList(db, start, end, includeReceivable) {
   const { clause, params } = buildDateFilter('so', start, end);
   let sql = `
@@ -79,7 +78,10 @@ function getSalesOrderList(db, start, end, includeReceivable) {
     JOIN sales_order_items soi ON soi.sales_order_id = so.id
     WHERE so.status = 'approved' ${clause}
   `;
-  if (!includeReceivable) sql += ` AND so.payment_status = 'paid'`;
+  // 这里必须用"有效欠款已结清"而不是 payment_status='paid'：
+  // 后者是落库快照，定金 + 退货抵扣结清的单子会永远停在 'partial'
+  // （补记收款会被"无需再记收款"拦下），两边口径就分叉了。
+  if (!includeReceivable) sql += ` AND ${salesSettledExpr('so')}`;
   sql += ' GROUP BY so.id ORDER BY so.order_date DESC, so.id DESC';
   return db.prepare(sql).all(...params);
 }

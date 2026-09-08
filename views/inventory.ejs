@@ -10,6 +10,9 @@
       <% }) %>
     </select>
   </form>
+  <% if (isAdmin) { %>
+    <p style="margin-top:12px"><a class="btn btn-secondary" href="/inventory/adjust">盘点后账实不符？去库存调整</a></p>
+  <% } %>
 </div>
 <div class="card desktop-table-wrap">
   <table>

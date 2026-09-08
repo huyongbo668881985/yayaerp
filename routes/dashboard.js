@@ -1,20 +1,36 @@
 const express = require('express');
 const { requireLogin } = require('../middleware/auth');
 const { todayLocalDate } = require('../utils/dates');
-const { profitOfPeriod } = require('../lib/profitCalc');
+const {
+  profitOfPeriod, returnedAmountSubquery, effectiveDebtExpr, SETTLE_EPSILON
+} = require('../lib/profitCalc');
 const router = express.Router();
 
 // 统计口径说明（与经营报表 /reports 保持一致）：
 //   销售额 = 已审核销售单（按销售单日期）− 已审核退货单（按退货单日期）
 //   总欠款 = Σ max(0, 销售单金额 − 已收款 − 该单关联的已审核退货金额)
-//   毛利（仅管理员）= 明细行成本快照计算，只算已审核 + 已收款的订单
+//   毛利（仅管理员）= 明细行成本快照计算，只算已审核 + 有效欠款已结清的订单
 // 操作员登录时只统计自己名下的数据。
 
-// 关联到某张销售单、且已审核的退货金额（与 sales.js / report.js 同一口径）
-const RETURNED_AMOUNT_SUBQUERY = `COALESCE((SELECT SUM(ro.total_amount) FROM return_orders ro WHERE ro.related_sales_order_id = so.id AND ro.status = 'approved'), 0)`;
+// 关联到某张销售单、且已审核的退货金额。
+// 与"有效欠款"表达式一起收敛在 lib/profitCalc.js（口径唯一实现点），
+// 这里只是按本地 SQL 别名（销售单一律用 so）取一份，不再自己写第二遍定义。
+const RETURNED_AMOUNT_SUBQUERY = returnedAmountSubquery('so');
 
 // 有效欠款表达式：金额 − 已收款 − 关联退货，负数（多收/超抵）不算欠款
-const EFFECTIVE_DEBT_EXPR = `(so.total_amount - so.paid_amount - ${RETURNED_AMOUNT_SUBQUERY})`;
+const EFFECTIVE_DEBT_EXPR = effectiveDebtExpr('so');
+
+// 给一行销售单补上"有效欠款 / 有效收款状态"（与 sales.js 的 attachEffectivePayment 同一套算法）。
+// 首页的收款状态徽章必须走这里，不能直接读 so.payment_status——
+// 那个是落库快照、不扣退货，和销售列表页/详情页显示的结果对不上。
+function attachEffectiveStatus(o) {
+  const effectiveDebt = o.total_amount - (o.paid_amount || 0) - (o.returned_amount || 0);
+  o.effective_status = effectiveDebt <= SETTLE_EPSILON
+    ? 'paid'
+    : ((o.paid_amount > 0 || o.returned_amount > 0) ? 'partial' : 'unpaid');
+  o.effective_debt = Math.max(0, effectiveDebt);
+  return o;
+}
 
 router.get('/', requireLogin, (req, res) => {
   const db = req.tenantDb;
@@ -78,9 +94,11 @@ router.get('/', requireLogin, (req, res) => {
 
   // 毛利：仅管理员可见。口径与经营报表"不含应收"完全一致（SQL 唯一实现在 lib/profitCalc.js，
   // 避免仪表盘/报表再次分叉）：
-  //   已审核 + 已收全款(payment_status='paid') 销售毛利
-  //   − 同区间"已结清"退货冲减毛利（退货按退货单日期归属；"已结清" = 已退款或所关联销售单已收款）。
-  // 成本用明细行落库时的成本快照，赠品收入为0但成本照算。
+  //   已审核 + 有效欠款已结清（金额 − 已收现金 − 关联已审核退货 ≤ 0.001）的销售毛利
+  //   − 同区间"已结清"退货冲减毛利（退货按退货单日期归属；"已结清" = 已现金退款，
+  //     或所关联销售单的有效欠款已结清，即退货抵掉了尾款）。
+  // 结清判定一律现算、不读 payment_status（那是落库快照，追不上退货单的审核/反审核），
+  // 详见 lib/profitCalc.js 顶部说明。成本用明细行落库时的成本快照，赠品收入为0但成本照算。
   let todayProfit = null;
   let monthlyProfit = null;
   if (user.role === 'admin') {
@@ -104,15 +122,20 @@ router.get('/', requireLogin, (req, res) => {
 
   // 最近销售单（操作员只看自己录入的——列表页/详情页都是这个口径，
   // 首页不能反而把别人的单号递到眼前）
+  // 收款状态徽章按"有效欠款"现算（见 attachEffectiveStatus），
+  // 以前这里直接读 so.payment_status（落库快照，不扣退货），
+  // 定金 + 退货抵扣结清的单子在首页显示"部分收款"、点进销售列表却显示"已收款"，
+  // 一登录就能撞见两个不一样的结果（2026-09-08 修）。
   const recentSales = db.prepare(`
-    SELECT so.id, so.order_date, so.total_amount, so.paid_amount, so.payment_status, so.status,
+    SELECT so.id, so.order_date, so.total_amount, so.paid_amount, so.status,
+           ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount,
            c.name AS customer_name, w.name AS warehouse_name
     FROM sales_orders so
     LEFT JOIN customers c ON c.id = so.customer_id
     LEFT JOIN warehouses w ON w.id = so.warehouse_id
     ${operatorFilter ? 'WHERE so.user_id = ?' : ''}
     ORDER BY so.id DESC LIMIT 5
-  `).all(...(operatorFilter ? [user.id] : []));
+  `).all(...(operatorFilter ? [user.id] : [])).map(attachEffectiveStatus);
 
   res.render('dashboard', {
     todaySales, monthlySales, totalDebt, pendingOrders, todayProfit, monthlyProfit,
