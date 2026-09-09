@@ -58,11 +58,19 @@ docker compose up -d --build
 
 ## 六、数据备份
 
-数据全部在 `data/` 目录（platform.db + 各租户 db + sessions.db），整体复制即完整备份：
+内置备份系统：**本地 7 天滚动快照（gzip + AES-256 加密）+ rclone 同步 Cloudflare R2（7 天生命周期过期）+ 失败邮件告警**。
 
 ```bash
-cp -r /opt/jxc-app/data /opt/backups/jxc-$(date +%Y%m%d)
+# 手动执行一次（Docker 部署）
+docker compose exec jxc node scripts/backup-run.js
+
+# 恢复某个快照
+docker compose exec jxc node scripts/backup-restore.js data/backups/demo_2026-09-09.db.gz.enc ./restored
 ```
+
+环境变量（`BACKUP_ENCRYPTION_KEY` 必填、`R2_*` 可选启用异地同步、`BACKUP_ALERT_EMAIL` 告警收件）与 crontab 定时配置、R2 Lifecycle Rule 步骤、完整恢复命令，见 **[docs/BACKUP.md](docs/BACKUP.md)**。
+
+兜底冷备（可选）：停机窗口内整体拷贝 `data/` 目录仍完全有效（platform.db + 各租户 db；sessions.db 是临时会话，可不拷）。
 
 ## 七、后续可扩展方向（现在没做，等真的需要再加）
 

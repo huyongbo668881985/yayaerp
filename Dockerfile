@@ -1,7 +1,7 @@
 FROM node:20-slim
 
-# better-sqlite3 需要编译工具
-RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
+# better-sqlite3 需要编译工具；rclone 用于把备份快照同步到 Cloudflare R2
+RUN apt-get update && apt-get install -y python3 make g++ rclone && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY package.json ./
