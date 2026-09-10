@@ -310,6 +310,10 @@ function rowIdOf(html, name, pattern) {
   ok(r.status === 400 && (r.text.includes('不足以') || r.text.includes('库存不足')), '库存不足审核被拒');
   r = await A.raw('/sales/new', { body: f({ warehouse_id: String(w1), order_date: '2026-09-08', items_json: JSON.stringify([{ id: pA, quantity: 1, price: -5, unit_choice: 'base' }]) }) });
   ok(r.status === 400 && r.text.includes('销售单价'), '负价被拒');
+  for (const route of ['/purchases/new', '/sales/new', '/returns/new', '/transfers/new']) {
+    r = await A.raw(route, { body: f({ order_date: '2026-02-30' }) });
+    ok(r.status === 400 && r.text.includes('单据日期无效'), `${route} 拒绝不存在的日期`);
+  }
   for (const invalidPaid of ['-1', 'Infinity', 'not-a-number']) {
     r = await A.raw('/sales/new', { body: f({ warehouse_id: String(w1), order_date: '2026-09-08', paid_amount: invalidPaid, items_json: JSON.stringify([{ id: pA, quantity: 1, price: 60, unit_choice: 'base' }]) }) });
     ok(r.status === 400 && r.text.includes('已收款金额'), `非法已收款 ${invalidPaid} 被拒`);

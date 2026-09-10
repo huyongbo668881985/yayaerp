@@ -1,6 +1,7 @@
 const express = require('express');
 const { requireLogin } = require('../middleware/auth');
 const { todayLocalDate } = require('../utils/dates');
+const { isBlank, isValidDateString } = require('../lib/validators');
 const router = express.Router();
 
 // 状态机与销售单一致：draft -> submitted -> approved/rejected，submitted<->draft 撤回，approved/rejected -> submitted 反审核
@@ -70,6 +71,11 @@ router.post('/transfers/new', requireLogin, (req, res) => {
     return res.render('transfer_form', { warehouses, products, error: msg, order: null, existingItems: [], today: todayLocalDate() });
   };
 
+  if (!isBlank(order_date) && !isValidDateString(order_date)) {
+    res.status(400);
+    return renderError('单据日期无效，请使用 YYYY-MM-DD 格式的真实日期');
+  }
+
   if (!from_warehouse_id || !to_warehouse_id) return renderError('请选择调出仓库和调入仓库');
   if (from_warehouse_id === to_warehouse_id) return renderError('调出仓库和调入仓库不能是同一个');
 
@@ -124,6 +130,11 @@ router.post('/transfers/:id/edit', requireLogin, (req, res) => {
     const existingItems = db.prepare('SELECT * FROM transfer_order_items WHERE transfer_order_id = ?').all(order.id);
     return res.render('transfer_form', { warehouses, products, error: msg, order, existingItems, today: todayLocalDate() });
   };
+
+  if (!isBlank(order_date) && !isValidDateString(order_date)) {
+    res.status(400);
+    return renderError('单据日期无效，请使用 YYYY-MM-DD 格式的真实日期');
+  }
 
   if (!from_warehouse_id || !to_warehouse_id) return renderError('请选择调出仓库和调入仓库');
   if (from_warehouse_id === to_warehouse_id) return renderError('调出仓库和调入仓库不能是同一个');

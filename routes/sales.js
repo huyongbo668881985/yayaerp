@@ -4,7 +4,7 @@ const { sendCsv } = require('../utils/csv');
 const { todayLocalDate } = require('../utils/dates');
 const { costSnapshotPerBaseUnit } = require('../lib/priceCalc');
 const { returnedAmountSubquery } = require('../lib/profitCalc');
-const { isBlank, isValidNonNegativeAmount, roundToCents } = require('../lib/validators');
+const { isBlank, isValidDateString, isValidNonNegativeAmount, roundToCents } = require('../lib/validators');
 const router = express.Router();
 
 // 关联到某张销售单、且已审核的退货金额。
@@ -259,6 +259,11 @@ router.post('/sales/new', requireLogin, (req, res) => {
     return res.render('sale_form', { customers, warehouses, products, error: msg, order: null, existingItems: [], today: todayLocalDate() });
   };
 
+  if (!isBlank(order_date) && !isValidDateString(order_date)) {
+    res.status(400);
+    return renderError('单据日期无效，请使用 YYYY-MM-DD 格式的真实日期');
+  }
+
   const items = buildItemsFromRequest(db, req.body);
   if (!warehouse_id || items.length === 0) {
     return renderError('请选择仓库并至少填写一行有效商品明细');
@@ -341,6 +346,11 @@ router.post('/sales/:id/edit', requireLogin, (req, res) => {
     const existingItems = db.prepare('SELECT * FROM sales_order_items WHERE sales_order_id = ?').all(order.id);
     return res.render('sale_form', { customers, warehouses, products, error: msg, order, existingItems, today: todayLocalDate() });
   };
+
+  if (!isBlank(order_date) && !isValidDateString(order_date)) {
+    res.status(400);
+    return renderError('单据日期无效，请使用 YYYY-MM-DD 格式的真实日期');
+  }
 
   const items = buildItemsFromRequest(db, req.body);
   if (!warehouse_id || items.length === 0) {

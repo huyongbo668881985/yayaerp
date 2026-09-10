@@ -1,7 +1,7 @@
 const express = require('express');
 const { requireAdmin } = require('../middleware/auth');
 const { todayLocalDate } = require('../utils/dates');
-const { isValidNonNegativeAmount, roundToCents } = require('../lib/validators');
+const { isBlank, isValidDateString, isValidNonNegativeAmount, roundToCents } = require('../lib/validators');
 const router = express.Router();
 
 // 设计说明（2026-09-06 定版）：采购入库没有审核流，录单即加库存。
@@ -39,6 +39,13 @@ router.post('/purchases/new', requireAdmin, (req, res) => {
   if (!Array.isArray(quantity)) quantity = [quantity];
   if (!Array.isArray(unit_price)) unit_price = [unit_price];
   if (!Array.isArray(unit_choice)) unit_choice = [unit_choice];
+
+  if (!isBlank(order_date) && !isValidDateString(order_date)) {
+    const suppliers = db.prepare('SELECT * FROM suppliers ORDER BY name').all();
+    const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
+    const products = db.prepare('SELECT * FROM products ORDER BY name').all();
+    return res.status(400).render('purchase_form', { suppliers, warehouses, products, error: '单据日期无效，请使用 YYYY-MM-DD 格式的真实日期', today: todayLocalDate() });
+  }
 
   const getProduct = db.prepare('SELECT * FROM products WHERE id = ?');
   const items = [];

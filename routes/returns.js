@@ -3,7 +3,7 @@ const { requireLogin } = require('../middleware/auth');
 const { sendCsv } = require('../utils/csv');
 const { todayLocalDate } = require('../utils/dates');
 const { costSnapshotPerBaseUnit } = require('../lib/priceCalc');
-const { isBlank, isValidNonNegativeAmount, roundToCents } = require('../lib/validators');
+const { isBlank, isValidDateString, isValidNonNegativeAmount, roundToCents } = require('../lib/validators');
 const router = express.Router();
 
 // 状态机跟销售单一致：submitted --审核通过--> approved（这一步才真正把库存加回去）
@@ -256,6 +256,11 @@ router.post('/returns/new', requireLogin, (req, res) => {
     return res.render('return_form', { customers, warehouses, products, error: msg, order: null, existingItems: [], today: todayLocalDate() });
   };
 
+  if (!isBlank(order_date) && !isValidDateString(order_date)) {
+    res.status(400);
+    return renderError('单据日期无效，请使用 YYYY-MM-DD 格式的真实日期');
+  }
+
   const relatedId = related_sales_order_id && related_sales_order_id.trim()
     ? related_sales_order_id.trim() : null;
 
@@ -351,6 +356,11 @@ router.post('/returns/:id/edit', requireLogin, (req, res) => {
     const existingItems = db.prepare('SELECT * FROM return_order_items WHERE return_order_id = ?').all(order.id);
     return res.render('return_form', { customers, warehouses, products, error: msg, order, existingItems, today: todayLocalDate() });
   };
+
+  if (!isBlank(order_date) && !isValidDateString(order_date)) {
+    res.status(400);
+    return renderError('单据日期无效，请使用 YYYY-MM-DD 格式的真实日期');
+  }
 
   const relatedId = related_sales_order_id && related_sales_order_id.trim()
     ? related_sales_order_id.trim() : null;
