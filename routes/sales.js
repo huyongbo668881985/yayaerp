@@ -488,18 +488,39 @@ router.post('/sales/unapprove/:id', requireLogin, (req, res) => {
     return res.status(400).send('只有已审核或已拒绝状态可以反审核');
   }
 
-  // 反审核前先挡一道：这张销售单不能存在"已审核"的关联退货单。
-  // 退货审核通过时已经把退回的货加回过库存（returns.js 的 approve），
-  // 这里如果再把整单的库存加回去，那部分货就被加了两次，库存凭空多出来。
+  // 反审核前先挡一道：逆向加回库存这件事，不能和任何"已经把货加回库存"的退货单叠加。
+  // 退货审核通过时会把退回的货加进它自己的仓库（见 returns.js 的 approve），
+  // 这里如果再把整单的库存加回去，同一批货就被加了两次，库存凭空多出来。
+  //   1) 直接关联本单的已审核退货 —— 必然是同一批货，无条件拦；
+  //   2) 同一仓库、未关联销售单的"自由退货"，且与本单商品有交集、日期不早于本单
+  //      —— 这类退货很可能就是本单退回来的货（当时没填关联单号），同样会重复加回。
+  //      加"商品有交集 + 日期 >= 本单日期"这两个条件，是为了不误伤更早的、明显无关的历史退货单，
+  //      否则一个仓库里只要有过任何一张自由退货，该仓库所有销售单就永远无法反审核了。
   if (order.status === 'approved') {
     const linkedReturns = db.prepare(
       `SELECT id FROM return_orders WHERE related_sales_order_id = ? AND status = 'approved' ORDER BY id`
     ).all(order.id);
-    if (linkedReturns.length > 0) {
-      const ids = linkedReturns.map(r => '#' + r.id).join('、');
+    // order_date 建单时有 todayLocalDate() 兜底，理论上有值；万一为空则传 ''，
+    // 字符串比较下所有非空日期都 >= ''，等于退化成"不按日期过滤"——宁可多拦，不可漏拦。
+    const conflictingFreeReturns = db.prepare(`
+      SELECT DISTINCT ro.id
+      FROM return_orders ro
+      JOIN return_order_items roi ON roi.return_order_id = ro.id
+      WHERE ro.status = 'approved'
+        AND ro.related_sales_order_id IS NULL
+        AND ro.warehouse_id = ?
+        AND ro.order_date >= ?
+        AND roi.product_id IN (SELECT product_id FROM sales_order_items WHERE sales_order_id = ?)
+      ORDER BY ro.id
+    `).all(order.warehouse_id, order.order_date || '', order.id);
+
+    const conflicts = linkedReturns.concat(conflictingFreeReturns);
+    if (conflicts.length > 0) {
+      const ids = conflicts.map(r => '#' + r.id).join('、');
       return res.status(400).send(
-        `反审核失败：这张销售单关联的退货单 ${ids} 已审核通过（退回的货已经加回库存了）。` +
-        `直接反审核会把同一批货重复加回、导致库存虚增。请先把这些退货单反审核，再来反审核本销售单。`
+        `反审核失败：本仓库（或直接关联本单）的已审核退货单 ${ids} 与这张销售单存在商品重叠。` +
+        `这些退货审核通过时已经把退回的货加回了库存，直接反审核本单会把同一批货重复加回、导致库存虚增。` +
+        `请先反审核这些退货单，再来反审核本销售单。`
       );
     }
   }

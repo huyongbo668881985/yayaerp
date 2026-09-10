@@ -5,7 +5,8 @@
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
-    "test": "node tests/regression.js"
+    "test": "node tests/regression.js",
+    "test:p1": "node tests/p1-fixes-verify.js"
   },
   "engines": {
     "node": ">=20 <21"

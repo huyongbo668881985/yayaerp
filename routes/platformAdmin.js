@@ -49,7 +49,12 @@ function parseQuotaFields(body) {
 }
 
 router.get('/platform-admin/login', (req, res) => {
-  if (req.session.platformAdmin) return res.redirect('/platform-admin');
+  // 已登录但还没改默认密码的会话，直接送去改密页，别让它先跳到后台再被守卫弹回来
+  if (req.session.platformAdmin) {
+    return res.redirect(
+      req.session.platformAdmin.mustChangePassword ? '/platform-admin/change-password' : '/platform-admin'
+    );
+  }
   res.render('platform_login', { error: null });
 });
 
@@ -66,8 +71,12 @@ router.post('/platform-admin/login', platformLoginLimiter, (req, res) => {
       return res.render('platform_login', { error: '登录失败，请重试' });
     }
     platformLoginLimiter.reset(req);
-    req.session.platformAdmin = { id: admin.id, username: admin.username, name: admin.name };
-    res.redirect('/platform-admin');
+    const mustChangePassword = !!admin.must_change_password;
+    req.session.platformAdmin = {
+      id: admin.id, username: admin.username, name: admin.name, mustChangePassword
+    };
+    // 默认口令（superadmin/super123）登录：不放行后台，先强制改密
+    res.redirect(mustChangePassword ? '/platform-admin/change-password' : '/platform-admin');
   });
 });
 
@@ -76,21 +85,38 @@ router.post('/platform-admin/logout', (req, res) => {
 });
 
 router.get('/platform-admin/change-password', requireSuperAdmin, (req, res) => {
-  res.render('platform_change_password', { error: null, success: false });
+  res.render('platform_change_password', {
+    error: null, success: false, forced: !!req.session.platformAdmin.mustChangePassword
+  });
 });
 
 router.post('/platform-admin/change-password', requireSuperAdmin, (req, res) => {
   const { old_password, new_password } = req.body;
+  // 会话里还有超管身份、但账号已被删除（或平台库被重置）时，清会话回登录页，
+  // 否则下面读 admin.password_hash 会抛 TypeError 变成 500
   const admin = getPlatformAdminByUsername(req.session.platformAdmin.username);
+  if (!admin) {
+    return req.session.destroy(() => res.redirect('/platform-admin/login'));
+  }
+  const forced = !!req.session.platformAdmin.mustChangePassword;
+  const renderError = (msg) => res.render('platform_change_password', { error: msg, success: false, forced });
+
   if (!bcrypt.compareSync(old_password || '', admin.password_hash)) {
-    return res.render('platform_change_password', { error: '原密码不正确', success: false });
+    return renderError('原密码不正确');
   }
   if (!new_password || new_password.length < 6) {
-    return res.render('platform_change_password', { error: '新密码至少6位', success: false });
+    return renderError('新密码至少6位');
+  }
+  // 否则强制改密可以直接把新密码填回原值（比如 super123），等于没改
+  if (new_password === old_password) {
+    return renderError('新密码不能与原密码相同');
   }
   const hash = bcrypt.hashSync(new_password, 10);
   updatePlatformAdminPassword(admin.id, hash);
-  res.render('platform_change_password', { error: null, success: true });
+  // 数据库里的标记由 updatePlatformAdminPassword 一起清掉，这里同步清会话里的副本，
+  // 否则本次会话还要被守卫拦到重新登录为止
+  req.session.platformAdmin.mustChangePassword = false;
+  res.render('platform_change_password', { error: null, success: true, forced });
 });
 
 // 高权限操作统一留痕：谁（admin_id/admin_username）在什么时候对哪个租户做了什么（action/detail）。

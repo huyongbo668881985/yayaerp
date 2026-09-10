@@ -4,6 +4,12 @@ const { todayLocalDate } = require('../utils/dates');
 const { isBlank, isValidDateString } = require('../lib/validators');
 const router = express.Router();
 
+// 调拨单表单只需要这几列。这里必须显式列列名，不能用 SELECT *：
+// views/transfer_form.ejs 会把整个 products 数组 JSON.stringify 后内联进 <script>，
+// 多查一列就等于把这一列（尤其是 cost_price 成本价）连同数据结构一起发给操作员浏览器。
+// 列清单与 routes/sales.js、routes/returns.js 的表单口径保持一致。
+const PRODUCT_FORM_SQL = 'SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name';
+
 // 状态机与销售单一致：draft -> submitted -> approved/rejected，submitted<->draft 撤回，approved/rejected -> submitted 反审核
 // 库存调拨也是在"审核通过"时才真正执行扣减/加回，草稿和待审核阶段不动库存。
 
@@ -17,7 +23,8 @@ function buildItemsFromRequest(db, body) {
   if (!Array.isArray(quantity)) quantity = [quantity];
   if (!Array.isArray(unit_choice)) unit_choice = [unit_choice];
 
-  const getProduct = db.prepare('SELECT * FROM products WHERE id = ?');
+  // 只取算数量/单位用得到的列，同样避免把成本价这类字段带进内存
+  const getProduct = db.prepare('SELECT id, name, unit, pack_unit, pack_size FROM products WHERE id = ?');
   const items = [];
   for (let i = 0; i < product_id.length; i++) {
     const pid = Number(product_id[i]);
@@ -57,7 +64,7 @@ router.get('/transfers', requireLogin, (req, res) => {
 router.get('/transfers/new', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
-  const products = db.prepare('SELECT * FROM products ORDER BY name').all();
+  const products = db.prepare(PRODUCT_FORM_SQL).all();
   res.render('transfer_form', { warehouses, products, error: null, order: null, existingItems: [], today: todayLocalDate() });
 });
 
@@ -67,7 +74,7 @@ router.post('/transfers/new', requireLogin, (req, res) => {
 
   const renderError = (msg) => {
     const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
-    const products = db.prepare('SELECT * FROM products ORDER BY name').all();
+    const products = db.prepare(PRODUCT_FORM_SQL).all();
     return res.render('transfer_form', { warehouses, products, error: msg, order: null, existingItems: [], today: todayLocalDate() });
   };
 
@@ -110,7 +117,7 @@ router.get('/transfers/:id/edit', requireLogin, (req, res) => {
   if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限编辑他人的调拨单');
 
   const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
-  const products = db.prepare('SELECT * FROM products ORDER BY name').all();
+  const products = db.prepare(PRODUCT_FORM_SQL).all();
   const existingItems = db.prepare('SELECT * FROM transfer_order_items WHERE transfer_order_id = ?').all(order.id);
   res.render('transfer_form', { warehouses, products, error: null, order, existingItems, today: todayLocalDate() });
 });
@@ -126,7 +133,7 @@ router.post('/transfers/:id/edit', requireLogin, (req, res) => {
 
   const renderError = (msg) => {
     const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
-    const products = db.prepare('SELECT * FROM products ORDER BY name').all();
+    const products = db.prepare(PRODUCT_FORM_SQL).all();
     const existingItems = db.prepare('SELECT * FROM transfer_order_items WHERE transfer_order_id = ?').all(order.id);
     return res.render('transfer_form', { warehouses, products, error: msg, order, existingItems, today: todayLocalDate() });
   };

@@ -125,7 +125,9 @@ function rowIdOf(html, name, pattern) {
 (async () => {
   section('0. 准备');
   const { platformDb } = require('../lib/platformDb');
-  platformDb.prepare('UPDATE platform_admins SET password_hash = ? WHERE username = ?')
+  // 一并清掉 must_change_password：回归测试要直接打后台接口，
+  // 不能被"默认超管强制改密"守卫重定向到改密页（那会让后面所有后台用例静默失败）
+  platformDb.prepare('UPDATE platform_admins SET password_hash = ?, must_change_password = 0 WHERE username = ?')
     .run(bcrypt.hashSync(PLATFORM_ADMIN_PASSWORD, 10), 'superadmin');
   await startTestServer();
   const plat = new Client();
