@@ -13,6 +13,7 @@ const {
   insertAuditLog,
   listAuditLogs
 } = require('../lib/platformDb');
+const apiKeys = require('../lib/apiKeys');
 const { openTenantDbByPath, getTenantUserCount } = require('../lib/tenantManager');
 const { bootstrapTenant } = require('../lib/schema');
 const { isTenantExpired } = require('../lib/platformDb');
@@ -264,6 +265,102 @@ function getTenantUsersSafe(tenant) {
     console.error('读取租户账号列表失败:', e);
     return [];
   }
+}
+
+// ===== API Key 管理（超管专属）=====
+// 供 n8n / Codex 等自动化工具调用的独立 REST API（/api/v1）在这里发 Key。
+// 租户自己的设置页面不暴露任何入口，生成/吊销/改档位只在平台超管后台完成。
+
+// 列表页 + 生成表单（?tenant_id= 可选过滤某个租户的 Key）
+router.get('/platform-admin/api-keys', requireSuperAdmin, (req, res) => {
+  const tenantId = req.query.tenant_id ? Number(req.query.tenant_id) : null;
+  const tenants = listTenants();
+  renderApiKeysPage(res, {
+    tenants,
+    filterTenantId: tenantId && tenants.some(t => t.id === tenantId) ? tenantId : null,
+    keys: apiKeys.listApiKeys(tenantId && tenants.some(t => t.id === tenantId) ? tenantId : null),
+    error: null,
+    newKey: null
+  });
+});
+
+// 生成新 Key：明文只在本次响应里展示一次（页面横幅提示"立即复制，关闭后无法再次查看"），
+// 库里只存哈希，之后任何页面都查不回来。
+router.post('/platform-admin/api-keys/generate', requireSuperAdmin, (req, res) => {
+  const tenants = listTenants();
+  const tenant = getTenantById(Number(req.body.tenant_id));
+  const permissionLevel = req.body.permission_level;
+  const renderPage = (page) => renderApiKeysPage(res, page);
+
+  if (!tenant) {
+    return renderPage({ tenants, filterTenantId: null, keys: apiKeys.listApiKeys(null), error: '请选择租户', newKey: null });
+  }
+  if (!apiKeys.isValidLevel(permissionLevel)) {
+    return renderPage({ tenants, filterTenantId: tenant.id, keys: apiKeys.listApiKeys(tenant.id), error: '请选择权限档位', newKey: null });
+  }
+
+  const admin = req.session.platformAdmin;
+  let created;
+  try {
+    created = apiKeys.generateApiKey({
+      tenantId: tenant.id,
+      permissionLevel,
+      adminId: admin.id,
+      adminUsername: admin.username
+    });
+  } catch (e) {
+    return renderPage({ tenants, filterTenantId: tenant.id, keys: apiKeys.listApiKeys(tenant.id), error: e.message, newKey: null });
+  }
+
+  // 审计只记前缀和档位，绝不记明文
+  audit(req, 'create_api_key', tenant,
+    `Key前缀=${created.keyPrefix}…；档位=${apiKeys.LEVEL_LABELS[created.permissionLevel]}`);
+
+  renderPage({
+    tenants,
+    filterTenantId: tenant.id,
+    keys: apiKeys.listApiKeys(tenant.id),
+    error: null,
+    newKey: { ...created, tenantName: tenant.name }
+  });
+});
+
+// 吊销：吊销后该 Key 立即无法调用任何 API 端点（下次请求哈希查不到未吊销记录，401）
+router.post('/platform-admin/api-keys/:id/revoke', requireSuperAdmin, (req, res) => {
+  const key = apiKeys.getApiKeyById(Number(req.params.id));
+  if (key && apiKeys.revokeApiKey(key.id)) {
+    const tenant = getTenantById(key.tenant_id);
+    audit(req, 'revoke_api_key', tenant, `Key前缀=${key.key_prefix}…；档位=${apiKeys.LEVEL_LABELS[key.permission_level]}`);
+  }
+  res.redirect('/platform-admin/api-keys');
+});
+
+// 改权限档位：操作者已是登录态超管，简单二次确认即可（前端 confirm 弹窗）
+router.post('/platform-admin/api-keys/:id/tier', requireSuperAdmin, (req, res) => {
+  const key = apiKeys.getApiKeyById(Number(req.params.id));
+  const newLevel = req.body.permission_level;
+  if (!key) return res.status(404).send('API Key 不存在');
+  if (!apiKeys.isValidLevel(newLevel)) return res.status(400).send('非法的权限档位');
+
+  if (newLevel !== key.permission_level && apiKeys.updateApiKeyTier(key.id, newLevel)) {
+    const tenant = getTenantById(key.tenant_id);
+    audit(req, 'change_api_tier', tenant,
+      `Key前缀=${key.key_prefix}…；档位：${apiKeys.LEVEL_LABELS[key.permission_level]} → ${apiKeys.LEVEL_LABELS[newLevel]}`);
+  }
+  res.redirect('/platform-admin/api-keys');
+});
+
+// Key 管理页统一渲染入口：列表始终带全租户名，表格按当前过滤条件展示
+function renderApiKeysPage(res, { tenants, filterTenantId, keys, error, newKey }) {
+  res.render('platform_api_keys', {
+    tenants,
+    filterTenantId,
+    keys,
+    error,
+    newKey,
+    levelLabels: apiKeys.LEVEL_LABELS,
+    levelRanks: apiKeys.LEVEL_RANK
+  });
 }
 
 module.exports = router;
