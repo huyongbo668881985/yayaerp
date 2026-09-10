@@ -150,3 +150,6 @@ router.get('/reports/export', requireAdmin, (req, res) => {
 });
 
 module.exports = router;
+
+// 供 API v1（routes/apiV1.js）复用：汇总口径唯一实现，API 路由不得重写 SQL
+module.exports.getSummary = getSummary;

@@ -40,6 +40,13 @@ app.use(express.static(path.join(__dirname, 'public')));
 // 访问地址：https://erp.yayaagent.com/welcome/
 app.use('/welcome', express.static(path.join(__dirname, 'public-site')));
 
+// 平台超管专属 REST API（v1）：给 n8n、Codex 等自动化工具调用（AI 日报、销售龙虎榜等场景）。
+// API Key 认证（Authorization: Bearer / X-API-Key，见 middleware/apiAuth.js），与 Web 的
+// session/Cookie 体系完全分开——挂在 session 之前，API 请求不创建、不读取任何会话；
+// 凭据走请求头而不是 Cookie，天然没有 CSRF 风险，因此也不经过下面针对浏览器请求的 Origin 校验。
+// Key 只能在平台超管后台 /platform-admin/api-keys 生成/吊销，租户设置页不暴露入口。
+app.use('/api/v1', require('./routes/apiV1'));
+
 app.use(session({
   store: new SqliteSessionStore(path.join(DATA_DIR, 'sessions.db')),
   secret: SESSION_SECRET,

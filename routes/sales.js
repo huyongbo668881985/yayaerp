@@ -576,3 +576,6 @@ router.get('/sales/:id', requireLogin, (req, res) => {
 });
 
 module.exports = router;
+
+// 供 API v1（routes/apiV1.js）复用：有效欠款/收款状态算法与 Web 列表页保持同一份实现
+module.exports.attachEffectivePayment = attachEffectivePayment;

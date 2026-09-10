@@ -3,11 +3,8 @@ const { requireLogin, requireAdmin } = require('../middleware/auth');
 const { sendCsv } = require('../utils/csv');
 const router = express.Router();
 
-router.get('/inventory', requireLogin, (req, res) => {
-  const db = req.tenantDb;
-  const warehouseId = req.query.warehouse_id || '';
-  const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
-
+// 当前库存快照（商品 × 仓库）：库存页面和 API v1 共用这一份查询
+function queryInventorySnapshot(db, warehouseId) {
   let sql = `
     SELECT p.id AS product_id, p.sku, p.name, p.spec, p.unit, p.pack_unit, p.pack_size, p.low_stock_threshold,
            w.id AS warehouse_id, w.name AS warehouse_name, inv.quantity
@@ -21,8 +18,14 @@ router.get('/inventory', requireLogin, (req, res) => {
     params.push(warehouseId);
   }
   sql += ' ORDER BY p.name, w.name';
-  const rows = db.prepare(sql).all(...params);
+  return db.prepare(sql).all(...params);
+}
 
+router.get('/inventory', requireLogin, (req, res) => {
+  const db = req.tenantDb;
+  const warehouseId = req.query.warehouse_id || '';
+  const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
+  const rows = queryInventorySnapshot(db, warehouseId || null);
   res.render('inventory', { rows, warehouses, warehouseId, isAdmin: req.session.user.role === 'admin' });
 });
 
@@ -154,3 +157,6 @@ router.post('/inventory/adjust', requireAdmin, (req, res) => {
 });
 
 module.exports = router;
+
+// 供 API v1（routes/apiV1.js）复用：库存快照查询与页面同一份 SQL
+module.exports.queryInventorySnapshot = queryInventorySnapshot;
