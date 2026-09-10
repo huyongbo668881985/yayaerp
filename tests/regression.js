@@ -286,7 +286,17 @@ function rowIdOf(html, name, pattern) {
   r = await A.raw(`/sales/approve/${soX}`, { body: f({ _: '1' }) });
   ok(r.status === 400 && (r.text.includes('不足以') || r.text.includes('库存不足')), '库存不足审核被拒');
   r = await A.raw('/sales/new', { body: f({ warehouse_id: String(w1), order_date: '2026-09-08', items_json: JSON.stringify([{ id: pA, quantity: 1, price: -5, unit_choice: 'base' }]) }) });
-  ok(r.text.includes('单价不能为负数'), '负价被拒');
+  ok(r.status === 400 && r.text.includes('销售单价'), '负价被拒');
+  for (const invalidPaid of ['-1', 'Infinity', 'not-a-number']) {
+    r = await A.raw('/sales/new', { body: f({ warehouse_id: String(w1), order_date: '2026-09-08', paid_amount: invalidPaid, items_json: JSON.stringify([{ id: pA, quantity: 1, price: 60, unit_choice: 'base' }]) }) });
+    ok(r.status === 400 && r.text.includes('已收款金额'), `非法已收款 ${invalidPaid} 被拒`);
+  }
+  for (const invalidRefunded of ['-1', 'Infinity', 'not-a-number']) {
+    r = await A.raw('/returns/new', { body: f({ warehouse_id: String(w1), order_date: '2026-09-08', refunded_amount: invalidRefunded, items_json: JSON.stringify([{ id: pA, quantity: 1, price: 60, unit_choice: 'base' }]) }) });
+    ok(r.status === 400 && r.text.includes('已退款金额'), `非法已退款 ${invalidRefunded} 被拒`);
+  }
+  r = await A.raw('/products/new', { body: f({ name: '非法价格商品', unit: '瓶', pack_size: '1', cost_price: 'Infinity', sale_price: '1', low_stock_threshold: '0' }) });
+  ok(r.status === 400 && r.text.includes('成本价'), '商品 Infinity 成本价被拒');
   // 改密码：错误旧密
   r = await A.raw('/change-password', { body: f({ old_password: 'nope', new_password: 'whatever1' }) });
   ok(r.text.includes('原密码不正确'), '改密旧密错误被拒');

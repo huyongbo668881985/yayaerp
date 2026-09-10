@@ -3,6 +3,7 @@ const { requireLogin } = require('../middleware/auth');
 const { sendCsv } = require('../utils/csv');
 const { todayLocalDate } = require('../utils/dates');
 const { costSnapshotPerBaseUnit } = require('../lib/priceCalc');
+const { isBlank, isValidNonNegativeAmount } = require('../lib/validators');
 const router = express.Router();
 
 // 状态机跟销售单一致：submitted --审核通过--> approved（这一步才真正把库存加回去）
@@ -62,7 +63,11 @@ function buildItemsFromRequest(db, body) {
     // 成本快照：与销售单一致（共用 lib/priceCalc.js），按箱录入且配了箱成本价时用 箱成本价÷箱规，
     // 退货毛利也按开单那一刻、不踩舍入误差的成本价计算
     const costSnapshot = costSnapshotPerBaseUnit(product, unit_choice[i]);
-    items.push({ pid, qty, price: price || 0, unitLabel, baseQty, costSnapshot, productName: product.name });
+    items.push({
+      pid, qty, price,
+      invalidPrice: !isValidNonNegativeAmount(unit_price[i]),
+      unitLabel, baseQty, costSnapshot, productName: product.name
+    });
   }
   return items;
 }
@@ -80,8 +85,8 @@ function checkRelatedSale(db, relatedId) {
 }
 
 // 明细里的人工负单价校验（与 sales.js 同口径）：负价退货会算出负的退款额和毛利
-function hasNegativePrice(items) {
-  return items.some(it => it.price < 0);
+function hasInvalidPrice(items) {
+  return items.some(it => it.invalidPrice || !Number.isFinite(it.price) || it.price < 0);
 }
 
 function queryOrders(db, user, start, end) {
@@ -197,17 +202,27 @@ router.post('/returns/new', requireLogin, (req, res) => {
   if (!warehouse_id || items.length === 0) {
     return renderError('请选择退回的仓库并至少填写一行有效商品明细');
   }
-  if (hasNegativePrice(items)) {
-    return renderError('单价不能为负数，请检查明细中的单价');
+  if (hasInvalidPrice(items)) {
+    res.status(400);
+    return renderError('退货单价必须是大于等于 0 的有效数字');
   }
   if (!isCustomerInScope(db, req.session.user, customer_id, null)) {
     return renderError('所选客户不在你的名下，无权使用：请选择自己负责的客户，或联系管理员处理');
   }
 
   const total = items.reduce((s, it) => s + it.qty * it.price, 0);
-  const refunded = parseFloat(refunded_amount) || 0;
+  if (!Number.isFinite(total) || total < 0) {
+    res.status(400);
+    return renderError('退货总额计算结果不合法，请检查商品数量和单价');
+  }
+  const refunded = isBlank(refunded_amount) ? 0 : Number(refunded_amount);
+  if (!isValidNonNegativeAmount(refunded)) {
+    res.status(400);
+    return renderError('已退款金额必须是大于等于 0 的有效数字');
+  }
   // 退款不能超过退货总额：多退的钱没有业务意义，还会把退款状态/报表搞乱
   if (refunded > total + 0.001) {
+    res.status(400);
     return renderError(`退款金额（¥${refunded.toFixed(2)}）不能超过退货总额（¥${total.toFixed(2)}）`);
   }
   let refundStatus = 'unrefunded';
@@ -274,8 +289,9 @@ router.post('/returns/:id/edit', requireLogin, (req, res) => {
   if (!warehouse_id || items.length === 0) {
     return renderError('请选择退回的仓库并至少填写一行有效商品明细');
   }
-  if (hasNegativePrice(items)) {
-    return renderError('单价不能为负数，请检查明细中的单价');
+  if (hasInvalidPrice(items)) {
+    res.status(400);
+    return renderError('退货单价必须是大于等于 0 的有效数字');
   }
   // 编辑时额外放行"单据当前已关联的客户"（与下拉框 customersForForm 的 OR id=? 同口径）
   if (!isCustomerInScope(db, req.session.user, customer_id, order.customer_id)) {
@@ -283,9 +299,18 @@ router.post('/returns/:id/edit', requireLogin, (req, res) => {
   }
 
   const total = items.reduce((s, it) => s + it.qty * it.price, 0);
-  const refunded = parseFloat(refunded_amount) || 0;
+  if (!Number.isFinite(total) || total < 0) {
+    res.status(400);
+    return renderError('退货总额计算结果不合法，请检查商品数量和单价');
+  }
+  const refunded = isBlank(refunded_amount) ? 0 : Number(refunded_amount);
+  if (!isValidNonNegativeAmount(refunded)) {
+    res.status(400);
+    return renderError('已退款金额必须是大于等于 0 的有效数字');
+  }
   // 与新建单一致：退款不能超过退货总额
   if (refunded > total + 0.001) {
+    res.status(400);
     return renderError(`退款金额（¥${refunded.toFixed(2)}）不能超过退货总额（¥${total.toFixed(2)}）`);
   }
   let refundStatus = 'unrefunded';
@@ -439,8 +464,8 @@ router.post('/returns/:id/record-refund', requireLogin, (req, res) => {
     return res.status(400).send('只有已审核的退货单可以记录退款');
   }
 
-  const amount = parseFloat(req.body.amount);
-  if (!(amount > 0)) return res.status(400).send('退款金额必须大于0');
+  const amount = Number(req.body.amount);
+  if (!Number.isFinite(amount) || !(amount > 0)) return res.status(400).send('退款金额必须是大于 0 的有效数字');
 
   // 退款累计不能超过退货总额（与 record-payment 的封顶逻辑对称，允许 0.001 浮点误差）
   const remaining = order.total_amount - (order.refunded_amount || 0);

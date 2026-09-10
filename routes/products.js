@@ -1,5 +1,6 @@
 const express = require('express');
 const { requireLogin, requireAdmin } = require('../middleware/auth');
+const { isBlank, isValidNonNegativeAmount } = require('../lib/validators');
 const router = express.Router();
 
 router.get('/products', requireLogin, (req, res) => {
@@ -24,12 +25,40 @@ function parsePackSize(raw) {
   return { value: n };
 }
 
+function parseProductNumbers(body) {
+  const fields = [
+    ['cost_price', '成本价', false],
+    ['sale_price', '销售价', false],
+    ['cost_price_pack', '箱成本价', true],
+    ['sale_price_pack', '箱销售价', true],
+    ['low_stock_threshold', '库存预警值', false]
+  ];
+  const values = {};
+  for (const [key, label, nullable] of fields) {
+    const raw = body[key];
+    if (isBlank(raw)) {
+      values[key] = nullable ? null : 0;
+      continue;
+    }
+    if (!isValidNonNegativeAmount(raw)) {
+      return { error: `${label}必须是大于等于 0 的有效数字` };
+    }
+    values[key] = Number(raw);
+  }
+  if (!Number.isInteger(values.low_stock_threshold)) {
+    return { error: '库存预警值必须是大于等于 0 的整数' };
+  }
+  return { values };
+}
+
 router.post('/products/new', requireAdmin, (req, res) => {
   const db = req.tenantDb;
   const { sku, name, spec, unit, pack_unit, pack_size, cost_price, sale_price, cost_price_pack, sale_price_pack, low_stock_threshold } = req.body;
   if (!name) return res.render('product_form', { product: req.body, error: '商品名称必填' });
   const pack = parsePackSize(pack_size);
   if (pack.error) return res.render('product_form', { product: req.body, error: pack.error });
+  const numbers = parseProductNumbers(req.body);
+  if (numbers.error) return res.status(400).render('product_form', { product: req.body, error: numbers.error });
   try {
     const info = db.prepare(
       `INSERT INTO products (sku, name, spec, unit, pack_unit, pack_size, cost_price, sale_price, cost_price_pack, sale_price_pack, low_stock_threshold)
@@ -37,10 +66,9 @@ router.post('/products/new', requireAdmin, (req, res) => {
     ).run(
       sku || null, name, spec || '', unit || '瓶',
       pack_unit || null, pack.value,
-      Number(cost_price) || 0, Number(sale_price) || 0,
-      cost_price_pack !== undefined && cost_price_pack !== '' ? Number(cost_price_pack) : null,
-      sale_price_pack !== undefined && sale_price_pack !== '' ? Number(sale_price_pack) : null,
-      Number(low_stock_threshold) || 0
+      numbers.values.cost_price, numbers.values.sale_price,
+      numbers.values.cost_price_pack, numbers.values.sale_price_pack,
+      numbers.values.low_stock_threshold
     );
     // 为所有已存在的仓库建立库存行（初始为0）
     const warehouses = db.prepare('SELECT id FROM warehouses').all();
@@ -66,16 +94,17 @@ router.post('/products/:id/edit', requireAdmin, (req, res) => {
   if (!name) return res.render('product_form', { product: req.body, error: '商品名称必填' });
   const pack = parsePackSize(pack_size);
   if (pack.error) return res.render('product_form', { product: req.body, error: pack.error });
+  const numbers = parseProductNumbers(req.body);
+  if (numbers.error) return res.status(400).render('product_form', { product: req.body, error: numbers.error });
   try {
     db.prepare(
       `UPDATE products SET sku=?, name=?, spec=?, unit=?, pack_unit=?, pack_size=?, cost_price=?, sale_price=?, cost_price_pack=?, sale_price_pack=?, low_stock_threshold=? WHERE id=?`
     ).run(
       sku || null, name, spec || '', unit || '瓶',
       pack_unit || null, pack.value,
-      Number(cost_price) || 0, Number(sale_price) || 0,
-      cost_price_pack !== undefined && cost_price_pack !== '' ? Number(cost_price_pack) : null,
-      sale_price_pack !== undefined && sale_price_pack !== '' ? Number(sale_price_pack) : null,
-      Number(low_stock_threshold) || 0,
+      numbers.values.cost_price, numbers.values.sale_price,
+      numbers.values.cost_price_pack, numbers.values.sale_price_pack,
+      numbers.values.low_stock_threshold,
       req.params.id
     );
     res.redirect('/products');

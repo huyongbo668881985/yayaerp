@@ -4,6 +4,7 @@ const { sendCsv } = require('../utils/csv');
 const { todayLocalDate } = require('../utils/dates');
 const { costSnapshotPerBaseUnit } = require('../lib/priceCalc');
 const { returnedAmountSubquery } = require('../lib/profitCalc');
+const { isBlank, isValidNonNegativeAmount } = require('../lib/validators');
 const router = express.Router();
 
 // 关联到某张销售单、且已审核的退货金额。
@@ -66,6 +67,7 @@ function buildItemsFromRequest(db, body) {
     if (!pid || !(qty > 0) || !Number.isInteger(qty)) continue;
     const product = getProduct.get(pid);
     if (!product) continue;
+    const invalidPrice = !gift && !isValidNonNegativeAmount(unit_price[i]);
     if (gift) price = 0;
     const usePack = unit_choice[i] === 'pack' && product.pack_unit;
     const unitLabel = usePack ? product.pack_unit : product.unit;
@@ -74,7 +76,7 @@ function buildItemsFromRequest(db, body) {
     // 按箱录入且配了箱成本价时用 箱成本价÷箱规（共用 lib/priceCalc.js，与 returns.js 同一份实现），
     // 否则按箱开单会踩回"瓶价由箱价反算"的舍入误差，毛利系统性偏低。
     const costSnapshot = costSnapshotPerBaseUnit(product, unit_choice[i]);
-    items.push({ pid, qty, price: price || 0, unitLabel, baseQty, costSnapshot, productName: product.name, gift });
+    items.push({ pid, qty, price, invalidPrice, unitLabel, baseQty, costSnapshot, productName: product.name, gift });
   }
   return items;
 }
@@ -208,8 +210,8 @@ router.get('/sales/export', requireLogin, (req, res) => {
 
 // 明细里是否有人工填入的负单价：数量、单价都没有下限校验的话，
 // 可以录出总额为负的销售单，欠款/收款状态判定也会跟着异常。赠品价格固定为 0，不受影响。
-function hasNegativePrice(items) {
-  return items.some(it => it.price < 0);
+function hasInvalidPrice(items) {
+  return items.some(it => it.invalidPrice || !Number.isFinite(it.price) || it.price < 0);
 }
 
 // 销售单表单里客户下拉的数据范围：管理员看全部客户；操作员只看自己名下的。
@@ -260,8 +262,9 @@ router.post('/sales/new', requireLogin, (req, res) => {
   if (!warehouse_id || items.length === 0) {
     return renderError('请选择仓库并至少填写一行有效商品明细');
   }
-  if (hasNegativePrice(items)) {
-    return renderError('单价不能为负数，请检查明细中的单价');
+  if (hasInvalidPrice(items)) {
+    res.status(400);
+    return renderError('销售单价必须是大于等于 0 的有效数字');
   }
   if (!isCustomerInScope(db, req.session.user, customer_id, null)) {
     return renderError('所选客户不在你的名下，无权使用：请选择自己负责的客户，或联系管理员处理');
@@ -270,9 +273,18 @@ router.post('/sales/new', requireLogin, (req, res) => {
   // 草稿/待审核阶段不动库存，这里只做数据落库，不检查库存、不生成出入库流水
   // 点"存草稿"按钮会带 save_draft=1 → 存为 draft，之后在详情页继续编辑/提交审核
   const total = items.reduce((s, it) => s + it.qty * it.price, 0);
-  const paid = parseFloat(paid_amount) || 0;
+  if (!Number.isFinite(total) || total < 0) {
+    res.status(400);
+    return renderError('销售总额计算结果不合法，请检查商品数量和单价');
+  }
+  const paid = isBlank(paid_amount) ? 0 : Number(paid_amount);
+  if (!isValidNonNegativeAmount(paid)) {
+    res.status(400);
+    return renderError('已收款金额必须是大于等于 0 的有效数字');
+  }
   // 收款不能超过单据总额：多收的钱没有业务意义，还会把应收/欠款统计搞乱
   if (paid > total + 0.001) {
+    res.status(400);
     return renderError(`收款金额（¥${paid.toFixed(2)}）不能超过单据总额（¥${total.toFixed(2)}）`);
   }
   let paymentStatus = 'unpaid';
@@ -332,8 +344,9 @@ router.post('/sales/:id/edit', requireLogin, (req, res) => {
   if (!warehouse_id || items.length === 0) {
     return renderError('请选择仓库并至少填写一行有效商品明细');
   }
-  if (hasNegativePrice(items)) {
-    return renderError('单价不能为负数，请检查明细中的单价');
+  if (hasInvalidPrice(items)) {
+    res.status(400);
+    return renderError('销售单价必须是大于等于 0 的有效数字');
   }
   // 编辑时额外放行"单据当前已关联的客户"：管理员可能已把客户转给别人，
   // 但创建人编辑自己草稿单时不应因此被拦（与下拉框 customersForForm 的 OR id=? 同口径）。
@@ -342,9 +355,18 @@ router.post('/sales/:id/edit', requireLogin, (req, res) => {
   }
 
   const total = items.reduce((s, it) => s + it.qty * it.price, 0);
-  const paid = parseFloat(paid_amount) || 0;
+  if (!Number.isFinite(total) || total < 0) {
+    res.status(400);
+    return renderError('销售总额计算结果不合法，请检查商品数量和单价');
+  }
+  const paid = isBlank(paid_amount) ? 0 : Number(paid_amount);
+  if (!isValidNonNegativeAmount(paid)) {
+    res.status(400);
+    return renderError('已收款金额必须是大于等于 0 的有效数字');
+  }
   // 与新建单一致：收款不能超过单据总额
   if (paid > total + 0.001) {
+    res.status(400);
     return renderError(`收款金额（¥${paid.toFixed(2)}）不能超过单据总额（¥${total.toFixed(2)}）`);
   }
   let paymentStatus = 'unpaid';
@@ -508,8 +530,8 @@ router.post('/sales/:id/record-payment', requireLogin, (req, res) => {
     return res.status(400).send('只有已审核的销售单可以记录收款');
   }
 
-  const amount = parseFloat(req.body.amount);
-  if (!(amount > 0)) return res.status(400).send('收款金额必须大于0');
+  const amount = Number(req.body.amount);
+  if (!Number.isFinite(amount) || !(amount > 0)) return res.status(400).send('收款金额必须是大于 0 的有效数字');
 
   // 收款累计不能超过"有效欠款"：总额 − 已收 − 关联已审核退货（允许 0.001 浮点误差）。
   // 必须与详情页展示的欠款（attachEffectivePayment 的 effective_debt）同一套算法：
