@@ -361,11 +361,15 @@
     display:flex;
     align-items:center;
     justify-content:center;
+    gap:18px;
+    padding:14px 22px;
     overflow:hidden;
     box-shadow:0 18px 42px rgba(20,33,61,0.16);
   }
   .phone-frame{
-    height:90%;
+    height:92%;
+    min-width:0;
+    flex:1 1 0;
     aspect-ratio:390/844;
     padding:5px;
     border-radius:18px;
@@ -374,6 +378,11 @@
     overflow:hidden;
   }
   .phone-frame img{width:100%;height:100%;object-fit:cover;object-position:top;border-radius:14px;}
+
+  @media (max-width: 860px){
+    .mobile-shot-stage{aspect-ratio:auto;min-height:390px;padding:16px 22px;}
+    .phone-frame{height:360px;flex:0 1 145px;}
+  }
 
   /* ============ WORKFLOW ============ */
   .flow{
@@ -645,7 +654,8 @@
     .nav-cta{display:none;}
     .brand{font-size:17px;white-space:nowrap;}
     .container{padding-left:18px;padding-right:18px;}
-    .phone-frame{height:92%;}
+    .mobile-shot-stage{min-height:360px;gap:10px;padding:12px;}
+    .phone-frame{height:330px;flex-basis:0;}
   }
 </style>
 </head>
@@ -830,6 +840,9 @@
       <div class="mobile-shot-stage">
         <div class="phone-frame">
           <img src="assets/screenshots/sales-mobile.png" width="390" height="844" loading="lazy" alt="鸭鸭进销存手机端销售单卡片界面">
+        </div>
+        <div class="phone-frame">
+          <img src="assets/screenshots/approval-mobile.png" width="390" height="844" loading="lazy" alt="鸭鸭进销存手机端待审核销售单界面">
         </div>
       </div>
     </div>
