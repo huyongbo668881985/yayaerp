@@ -13,7 +13,8 @@ node scripts/backup-run.js（手动 / 宿主机 crontab 每日触发）
    │                 密钥 = 环境变量 BACKUP_ENCRYPTION_KEY
    ├─ ④ 回读校验     解密 → 解压 → 校验 SQLite 文件头（保证当天快照 100% 可还原）
    ├─ ⑤ 本地清理     删除文件日期早于 今天-7天 的快照（逐条记日志）
-   └─ ⑥ rclone copy  整个备份目录同步到 Cloudflare R2（未配置 R2_* 则跳过）
+   ├─ ⓪ 启动校验     R2 四项环境变量 + BACKUP_ENCRYPTION_KEY 缺任一项 → 点名报错并拒绝执行
+   └─ ⑥ rclone copy  整个备份目录同步到 Cloudflare R2
                      R2 端过期删除由 bucket Lifecycle Rule 负责，应用层不删远端
    │
    └─ 任一环节失败 → 告警邮件（BACKUP_ALERT_EMAIL），退出码 1
@@ -31,17 +32,22 @@ node scripts/backup-run.js（手动 / 宿主机 crontab 每日触发）
 | `BACKUP_ENCRYPTION_KEY` | ✅（跑备份时） | 快照加密密钥，`openssl rand -hex 32` 生成。**丢失=备份永久不可解密** |
 | `BACKUP_DIR` | | 备份输出目录，默认 `data/backups` |
 | `BACKUP_RETENTION_DAYS` | | 本地保留天数，默认 7（保留 今天-7天 ~ 今天 共 8 个自然日） |
-| `R2_ACCOUNT_ID` | R2 四项 | Cloudflare 账户 ID（R2 概览页） |
-| `R2_ACCESS_KEY_ID` | | R2 API Token 的 Access Key ID |
-| `R2_SECRET_ACCESS_KEY` | | R2 API Token 的 Secret Access Key |
-| `R2_BUCKET` | | 目标 bucket 名，如 `jxc-backups` |
+| `R2_ACCOUNT_ID` | ✅（跑备份时） | Cloudflare 账户 ID（R2 概览页右侧） |
+| `R2_ACCESS_KEY_ID` | ✅（跑备份时） | R2 API Token 的 Access Key ID |
+| `R2_SECRET_ACCESS_KEY` | ✅（跑备份时） | R2 API Token 的 Secret Access Key |
+| `R2_BUCKET_NAME` | ✅（跑备份时） | 目标 bucket 名（本项目为 `jxcdata`）。旧变量名 `R2_BUCKET` 仍兼容，建议改名 |
+| `R2_ENDPOINT` | | 访问端点，留空由 `R2_ACCOUNT_ID` 自动推导为 `https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com` |
 | `R2_PREFIX` | | bucket 内前缀，如 `backups`，留空存根目录 |
 | `RCLONE_PATH` | | rclone 可执行文件路径，默认用 PATH 里的 `rclone` |
 | `R2_SYNC_TIMEOUT_MS` | | 同步超时（毫秒），默认 15 分钟，超时终止并告警 |
-| `BACKUP_ALERT_EMAIL` | | 告警收件邮箱；SMTP 发信复用 `SMTP_HOST/PORT/USER/PASS/FROM` |
+| `BACKUP_ALERT_EMAIL` | | 告警收件邮箱；SMTP 发信复用 `SMTP_HOST/PORT/USER/PASS/FROM`（见 lib/mailer.js，无重复定义） |
 | `JXC_DATA_DIR` | | 数据目录重定向，**仅测试用**，正常部署不要配 |
 
-四项 `R2_*` 全配才启用异地同步；缺任何一项只做本地备份并在日志中说明（不算失败、不发告警）。
+R2 四项 + `BACKUP_ENCRYPTION_KEY` 均为**跑备份任务的硬性前提**：备份任务启动时统一校验，
+缺任何一项立即报错退出并点名缺失的变量，**不再降级为"只做本地备份"**——
+静默跳过异地同步会让容灾形同虚设而没人发现。
+R2 临时故障期间不用慌：变量都配着、只是同步失败时，本地快照照常生成（任务报失败并发告警），
+等 R2 恢复后下一轮自动补齐。
 
 ## 3. 密钥管理（务必读）
 
@@ -78,18 +84,21 @@ crontab（**宿主机 cron 调容器**，每天凌晨 02:30）：
 - 日志追加到 `data/backups/backup-cron.log`，清理/同步/告警行为都在里面可查。
 - 同一天重复执行安全：本地同名文件覆盖；rclone copy 幂等（跳过远端相同文件）。
 
-## 5. Cloudflare R2 配置步骤（控制台操作）
+## 5. Cloudflare R2 配置步骤（控制台操作 + 服务器 .env 填写）
 
-1. **创建 bucket**：R2 → Create bucket，名字如 `jxc-backups`，区域随便（建议 APAC）。
-2. **创建 API Token**：R2 → Manage R2 API Tokens → Create API Token → 权限 **Object Read & Write**，范围限定到该 bucket。记下 Access Key ID / Secret Access Key，账户 ID 在 R2 概览页。
-3. **配置 .env**：填上第 2 节的四项 `R2_*`，`docker compose up -d` 重建容器生效。
-4. **配置 Lifecycle Rule（R2 端 7 天自动过期）**：
+1. **创建 bucket**：R2 → Create bucket，名字 `jxcdata`（与 `.env` 的 `R2_BUCKET_NAME` 一致），区域建议 APAC。
+2. **创建 API Token**：R2 → **管理 R2 API 令牌**（Manage R2 API Tokens）→ 创建 API 令牌 → 权限选 **对象读写（Object Read & Write）**，范围**限定到 `jxcdata` 这一个 bucket**。创建完成后页面会显示 Access Key ID / Secret Access Key——**只显示这一次**，直接进入第 3 步填进服务器 `.env`（不要经过聊天工具/文档中转）。账户 ID 在 R2 概览页右侧。
+3. **在服务器 `.env` 中手动填入真实值**：`R2_ACCOUNT_ID`、`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`（`R2_BUCKET_NAME=jxcdata` 默认已对齐）。
+   - `.env` 文件**绝对不能提交到 git**（仓库 `.gitignore` 已排除 `.env`，`.env.example` 只含变量名可安全提交）
+   - 密钥只存在服务器 `.env` 与你的密码管理器里，不要写进任何代码、commit、聊天记录
+4. **让配置生效**：`docker-compose` 通过 `env_file` 在**容器创建时**注入 `.env`——修改 `.env` 后必须执行 `docker compose up -d`（compose 检测到 env 变化会自动重建容器）；**`docker compose restart` 不会重新读取 `.env`**，光重启是无效的。
+5. **配置 Lifecycle Rule（R2 端 7 天自动过期）**：
    - bucket → Settings → Lifecycle rules → Add rule
    - 条件：**Apply to objects with prefix** = `backups/`（即 `.env` 里 `R2_PREFIX` 对应的前缀；若 R2_PREFIX 留空则规则作用于整个 bucket）
    - 动作：**Delete objects**，条件 **Object age > 7 days**（自上传时间起算）
    - 保存。R2 不支持直接"试跑"，验收方式：记录规则保存时的状态为 Enabled / 作用于正确前缀；本地与 R2 保留窗口略有出入（本地 8 个自然日、R2 严格 7×24h）属正常，双保险口径。
-5. **连通性验证**：容器内跑一次 `docker compose exec jxc node scripts/backup-run.js`，然后到 bucket 的 Objects 页确认出现 `backups/{label}_{日期}.db.gz.enc`。
-6. 顺手下载一个对象，用第 6 节命令解密成功 → 全链路闭环。
+6. **连通性验证**：容器内跑一次 `docker compose exec jxc node scripts/backup-run.js`，然后到 bucket 的 Objects 页确认出现 `backups/{label}_{日期}.db.gz.enc`。
+7. 顺手下载一个对象，用第 6 节命令解密成功 → 全链路闭环。
 
 ## 6. 恢复方法（解密）
 
@@ -135,6 +144,7 @@ sqlite3 demo.db "PRAGMA integrity_check;"
 
 | 现象 | 原因与处理 |
 |---|---|
+| `R2 备份同步配置缺失：R2_ACCOUNT_ID, ...` | 四项 `R2_*` 没配齐。在服务器 `.env` 补齐点名缺失的变量（获取方式见第 5 节），然后 `docker compose up -d` 重建容器（`restart` 不重读 `.env`） |
 | `缺少 BACKUP_ENCRYPTION_KEY` | .env 没配或容器没重建（`docker compose up -d` 重新注入） |
 | `openssl 退出码 1：bad decrypt` | 密钥不对或文件不完整；确认用的是加密时同一把密钥 |
 | `rclone 启动失败` | 容器内需镜像含 rclone（本仓库 Dockerfile 已装）；宿主机自行安装 |

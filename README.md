@@ -68,7 +68,7 @@ docker compose exec jxc node scripts/backup-run.js
 docker compose exec jxc node scripts/backup-restore.js data/backups/demo_2026-09-09.db.gz.enc ./restored
 ```
 
-环境变量（`BACKUP_ENCRYPTION_KEY` 必填、`R2_*` 可选启用异地同步、`BACKUP_ALERT_EMAIL` 告警收件）与 crontab 定时配置、R2 Lifecycle Rule 步骤、完整恢复命令，见 **[docs/BACKUP.md](docs/BACKUP.md)**。
+环境变量（`BACKUP_ENCRYPTION_KEY` 与 R2 四项 `R2_ACCOUNT_ID`/`R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY`/`R2_BUCKET_NAME` 均为**跑备份的硬性前提**，缺任一项任务启动即报错退出；`BACKUP_ALERT_EMAIL` 告警收件；真实密钥值只在服务器 `.env` 手动填写，不进 git）与 crontab 定时配置、Cloudflare 令牌创建步骤、R2 Lifecycle Rule、完整恢复命令，见 **[docs/BACKUP.md](docs/BACKUP.md)**。
 
 兜底冷备（可选）：停机窗口内整体拷贝 `data/` 目录仍完全有效（platform.db + 各租户 db；sessions.db 是临时会话，可不拷）。
 
