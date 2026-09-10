@@ -4,7 +4,8 @@
   "description": "极简进销存系统 - 多仓库 / 角色权限",
   "main": "app.js",
   "scripts": {
-    "start": "node app.js"
+    "start": "node app.js",
+    "test": "node tests/regression.js"
   },
   "engines": {
     "node": ">=20 <21"

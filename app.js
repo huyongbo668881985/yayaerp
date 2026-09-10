@@ -21,7 +21,7 @@ if (SESSION_SECRET.length < 32) {
   process.exit(1);
 }
 
-const DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = process.env.JXC_DATA_DIR || path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const app = express();

@@ -48,7 +48,8 @@ function purgeTenant(code, platformDb, getTenantByCode) {
     platformDb.prepare('DELETE FROM tenants WHERE id = ?').run(t.id);
   }
   for (const suffix of ['', '-wal', '-shm']) {
-    try { fs.unlinkSync(path.join(__dirname, '..', 'data', 'tenants', `${code}.db${suffix}`)); } catch (e) { /* 不存在 */ }
+    const dataDir = process.env.JXC_DATA_DIR || path.join(__dirname, '..', 'data');
+    try { fs.unlinkSync(path.join(dataDir, 'tenants', `${code}.db${suffix}`)); } catch (e) { /* 不存在 */ }
   }
 }
 

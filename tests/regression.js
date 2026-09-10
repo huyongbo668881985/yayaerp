@@ -1,10 +1,76 @@
 // ============ jxc-app 全量上线前回归测试 v2 ============
-const BASE = 'http://127.0.0.1:3115';
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const net = require('net');
+const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
+const { spawn } = require('child_process');
+
+const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'jxc-regression-'));
+process.env.JXC_DATA_DIR = TEST_DATA_DIR;
+process.env.SESSION_SECRET = crypto.randomBytes(32).toString('hex');
+const RUN_ID = crypto.randomBytes(5).toString('hex');
+const TENANT_A = `test_${RUN_ID}_a`;
+const TENANT_B = `test_${RUN_ID}_b`;
+const TENANT_C = `test_${RUN_ID}_c`;
+const TENANT_ADMIN_PASSWORD = crypto.randomBytes(16).toString('base64url');
+const PLATFORM_ADMIN_PASSWORD = crypto.randomBytes(16).toString('base64url');
+const OPERATOR_PASSWORD = crypto.randomBytes(16).toString('base64url');
+let BASE;
+let serverProcess;
+let serverOutput = '';
 let FAILS = 0, PASSES = 0;
 function ok(c, m) { if (c) { PASSES++; console.log('  PASS  ' + m); } else { FAILS++; console.log('  FAIL  ' + m); } }
 function section(t) { console.log('\n=== ' + t + ' ==='); }
 const enc = encodeURIComponent;
 const f = (o) => Object.entries(o).map(([k, v]) => enc(k) + '=' + enc(v)).join('&');
+
+function getFreePort() {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const port = probe.address().port;
+      probe.close(err => err ? reject(err) : resolve(port));
+    });
+  });
+}
+
+async function startTestServer() {
+  const port = await getFreePort();
+  BASE = `http://127.0.0.1:${port}`;
+  serverProcess = spawn(process.execPath, [path.join(__dirname, '..', 'app.js')], {
+    env: { ...process.env, PORT: String(port), NODE_ENV: 'test' },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  serverProcess.stdout.on('data', chunk => { serverOutput += chunk; });
+  serverProcess.stderr.on('data', chunk => { serverOutput += chunk; });
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (serverProcess.exitCode !== null) throw new Error(`测试服务启动失败:\n${serverOutput}`);
+    try {
+      const response = await fetch(BASE + '/api/csrf-token');
+      if (response.ok) return;
+    } catch (e) { /* 服务尚未监听 */ }
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  throw new Error(`测试服务启动超时:\n${serverOutput}`);
+}
+
+async function cleanup() {
+  if (serverProcess && serverProcess.exitCode === null) {
+    serverProcess.kill('SIGTERM');
+    await Promise.race([
+      new Promise(resolve => serverProcess.once('exit', resolve)),
+      new Promise(resolve => setTimeout(resolve, 3000))
+    ]);
+  }
+  try {
+    const { platformDb } = require('../lib/platformDb');
+    if (platformDb.open) platformDb.close();
+  } catch (e) { /* 初始化中途失败时可能尚无数据库句柄 */ }
+  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
+}
 
 class Client {
   constructor() { this.cookie = ''; this.csrfToken = ''; }
@@ -58,20 +124,24 @@ function rowIdOf(html, name, pattern) {
 
 (async () => {
   section('0. 准备');
+  const { platformDb } = require('../lib/platformDb');
+  platformDb.prepare('UPDATE platform_admins SET password_hash = ? WHERE username = ?')
+    .run(bcrypt.hashSync(PLATFORM_ADMIN_PASSWORD, 10), 'superadmin');
+  await startTestServer();
   const plat = new Client();
-  await plat.loginPlatform('superadmin', 'super123');
-  for (const [code, name] of [['rega', '回归租户A'], ['regb', '回归租户B'], ['regc', '回归租户C']]) {
-    const r = await plat.raw('/platform-admin/tenants/new', { body: f({ tenant_code: code, tenant_name: name, admin_username: 'admin', admin_password: 'pass12345', admin_name: '管理员' }) });
+  await plat.loginPlatform('superadmin', PLATFORM_ADMIN_PASSWORD);
+  for (const [code, name] of [[TENANT_A, `回归租户A-${RUN_ID}`], [TENANT_B, `回归租户B-${RUN_ID}`], [TENANT_C, `回归租户C-${RUN_ID}`]]) {
+    const r = await plat.raw('/platform-admin/tenants/new', { body: f({ tenant_code: code, tenant_name: name, admin_username: 'admin', admin_password: TENANT_ADMIN_PASSWORD, admin_name: '管理员' }) });
     ok(r.status === 302, `建租户 ${code}`);
   }
   let r = await plat.raw('/platform-admin');
-  const regcId = rowIdOf(r.text, 'regc', /tenants\/(\d+)\/toggle/);
+  const regcId = rowIdOf(r.text, TENANT_C, /tenants\/(\d+)\/toggle/);
   if (regcId) await plat.raw(`/platform-admin/tenants/${regcId}/toggle`, { body: f({ _: '1' }) });
-  ok(!!regcId, 'regc 已停用');
+  ok(!!regcId, `${TENANT_C} 已停用`);
 
   section('A. 管理员页面可达性');
   const A = new Client();
-  r = await A.login('rega', 'admin', 'pass12345');
+  r = await A.login(TENANT_A, 'admin', TENANT_ADMIN_PASSWORD);
   ok(r.loc === '/', '管理员登录');
   const pages = [
     ['/', '首页'], ['/sales', '销售列表'], ['/sales/new', '销售开单'], ['/returns', '退货列表'],
@@ -243,25 +313,25 @@ function rowIdOf(html, name, pattern) {
   const P = new Client();
   r = await P.raw('/platform-admin');
   ok(r.status === 302, '未登录平台后台重定向');
-  await P.loginPlatform('superadmin', 'super123');
+  await P.loginPlatform('superadmin', PLATFORM_ADMIN_PASSWORD);
   r = await P.raw('/platform-admin');
-  ok(r.text.includes('rega') && r.text.includes('regb'), '平台列表含租户');
+  ok(r.text.includes(TENANT_A) && r.text.includes(TENANT_B), '平台列表含租户');
   r = await P.raw('/platform-admin/audit-log');
   ok(r.text.includes('create_tenant'), '审计日志有记录');
   r = await P.raw('/platform-admin/change-password', { body: f({ old_password: 'wrong', new_password: 'x12345678' }) });
   ok(r.text.includes('原密码不正确'), '平台改密旧密错误被拒');
   for (let i = 0; i < 10; i++) await P.raw('/platform-admin/login', { body: f({ username: 'superadmin', password: 'bad' + i }) });
-  r = await P.raw('/platform-admin/login', { body: f({ username: 'superadmin', password: 'super123' }) });
+  r = await P.raw('/platform-admin/login', { body: f({ username: 'superadmin', password: PLATFORM_ADMIN_PASSWORD }) });
   ok(r.status === 429, '平台超管连续错 10 次被锁（独立桶，不影响租户）');
   // 租户账号登录仍正常（验证平台桶独立）
   const A2 = new Client();
-  r = await A2.login('rega', 'admin', 'pass12345');
+  r = await A2.login(TENANT_A, 'admin', TENANT_ADMIN_PASSWORD);
   ok(r.loc === '/', '平台桶被锁不影响租户登录');
 
   section('F. 操作员边界');
-  await A.raw('/users/new', { body: f({ username: 'opA', password: 'op123456', name: '操作员A', role: 'operator' }) });
+  await A.raw('/users/new', { body: f({ username: 'opA', password: OPERATOR_PASSWORD, name: '操作员A', role: 'operator' }) });
   const O = new Client();
-  r = await O.login('rega', 'opA', 'op123456');
+  r = await O.login(TENANT_A, 'opA', OPERATOR_PASSWORD);
   ok(r.loc === '/', '操作员登录');
   r = await O.raw('/returns/new', { body: f({ warehouse_id: String(w1), order_date: '2026-09-08', related_sales_order_id: String(so2), items_json: JSON.stringify([{ id: pB, quantity: 1, price: 150, unit_choice: 'base' }]) }) });
   ok(r.status === 400 && r.text.includes('无权关联销售单'), '操作员不能关联他人销售单');
@@ -282,7 +352,7 @@ function rowIdOf(html, name, pattern) {
 
   section('G. 多租户隔离');
   const B = new Client();
-  r = await B.login('regb', 'admin', 'pass12345');
+  r = await B.login(TENANT_B, 'admin', TENANT_ADMIN_PASSWORD);
   ok(r.loc === '/', '租户B登录');
   r = await B.raw('/products');
   ok(!r.text.includes('啤酒A'), '租户B无租户A商品');
@@ -292,7 +362,7 @@ function rowIdOf(html, name, pattern) {
   r = await X.login('no_such_tenant', 'a', 'b');
   ok(r.status === 200 && r.text.includes('租户代码不存在'), '无效租户提示');
   const CC = new Client();
-  r = await CC.login('regc', 'admin', 'pass12345');
+  r = await CC.login(TENANT_C, 'admin', TENANT_ADMIN_PASSWORD);
   ok(r.status === 200 && r.text.includes('已被暂停'), '停用租户登录被拦');
 
   section('H. 健壮性与安全');
@@ -332,13 +402,14 @@ function rowIdOf(html, name, pattern) {
   const opAId = rowIdOf(r.text, '操作员A', /users\/(\d+)\/toggle-active/);
   await A.raw(`/users/${opAId}/toggle-active`, { body: f({ _: '1' }) });
   const O2 = new Client();
-  r = await O2.login('rega', 'opA', 'op123456');
+  r = await O2.login(TENANT_A, 'opA', OPERATOR_PASSWORD);
   ok(r.text.includes('已被禁用'), '禁用账号登录被拒');
   await A.raw(`/users/${opAId}/toggle-active`, { body: f({ _: '1' }) });
 
   section('I. 数据一致性（DB 直查）');
-  const Database = require('/Users/huyongbo/Downloads/jxc-app/node_modules/better-sqlite3');
-  const db = new Database('/Users/huyongbo/Downloads/jxc-app/data/tenants/rega.db', { readonly: true });
+  const Database = require('better-sqlite3');
+  const tenantADbPath = path.join(TEST_DATA_DIR, 'tenants', `${TENANT_A}.db`);
+  const db = new Database(tenantADbPath, { readonly: true });
   const invRows = db.prepare('SELECT product_id, warehouse_id, quantity FROM inventory').all();
   const txnMap = {};
   for (const t of db.prepare('SELECT product_id, warehouse_id, SUM(change_qty) AS net FROM stock_transactions GROUP BY product_id, warehouse_id').all()) txnMap[t.product_id + '_' + t.warehouse_id] = t.net;
@@ -362,12 +433,12 @@ function rowIdOf(html, name, pattern) {
   const { getTenantByCode } = require('../lib/platformDb');
   const { todayLocalDate } = require('../utils/dates');
   const today = todayLocalDate();
-  const snapDb = new Database('/Users/huyongbo/Downloads/jxc-app/data/tenants/rega.db');
+  const snapDb = new Database(tenantADbPath);
   // 场景欠款：单1 = 2400-2400(已收)-600(已审核关联退货) = -600 → 负欠款排除；
   //           单2(散客) = 1500-0-0 = 1500 → 计入；soX submitted 不算
   let snap = snapshotTenantDb(snapDb, today);
   ok(snap.company_debt === 1500 && snap.company_debtors === 1, '快照口径=报表应收：全公司欠款 1500 / 欠款客户 1（负欠款不对冲）', `debt=${snap.company_debt}`);
-  ok(snap.rows === 3 && snap.user_rows === 2, '行数 = 全公司 1 + 操作员 2（rega 有 admin+操作员A）', `rows=${snap.rows}`);
+  ok(snap.rows === 3 && snap.user_rows === 2, '行数 = 全公司 1 + 操作员 2（租户A有 admin+操作员A）', `rows=${snap.rows}`);
   const snapRows = snapDb.prepare('SELECT user_id, total_debt, debtor_customer_count FROM debt_snapshots WHERE snapshot_date = ? ORDER BY user_id').all(today);
   ok(snapRows.length === 3 && snapRows[0].user_id === null && snapRows[0].total_debt === 1500, '全公司行 user_id=NULL、欠款 1500，排序在最前');
   ok(snapRows[1].user_id === 1 && snapRows[1].total_debt === 1500 && snapRows[2].user_id === 2 && snapRows[2].total_debt === 0, '操作员行：admin 1500 / 操作员A 0（无欠款记 0，Σ操作员=全公司）');
@@ -376,8 +447,8 @@ function rowIdOf(html, name, pattern) {
   ok(snapCount === 3, '重复执行幂等：行数不变（NULL 全公司行也被去重）', `count=${snapCount}`);
   snapDb.close();
 
-  // debt-trend API：rega 的 read_only Key（apiAuth 每次实时查 platform.db，外部进程生成即刻可用）
-  const tenantRega = getTenantByCode('rega');
+  // debt-trend API：租户 A 的 read_only Key（apiAuth 每次实时查 platform.db，外部进程生成即刻可用）
+  const tenantRega = getTenantByCode(TENANT_A);
   const snapKey = apiKeys.generateApiKey({ tenantId: tenantRega.id, permissionLevel: 'read_only', adminId: 1, adminUsername: 'superadmin' });
   r = await fetch(BASE + '/api/v1/reports/debt-trend', { headers: { Authorization: 'Bearer ' + snapKey.plaintext } });
   const jt = await r.json();
@@ -397,4 +468,9 @@ function rowIdOf(html, name, pattern) {
   console.log('\n========================================');
   console.log(`PASS: ${PASSES}   FAIL: ${FAILS}`);
   console.log(FAILS === 0 ? '全部通过' : '存在失败项');
-})().catch(e => { console.error('脚本异常:', e); process.exit(1); });
+  if (FAILS > 0) process.exitCode = 1;
+})().catch(e => {
+  console.error('脚本异常:', e);
+  if (serverOutput) console.error('测试服务输出:\n' + serverOutput);
+  process.exitCode = 1;
+}).finally(cleanup);
