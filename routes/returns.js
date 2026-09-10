@@ -72,14 +72,79 @@ function buildItemsFromRequest(db, body) {
   return items;
 }
 
-// 校验关联销售单：必须存在且已审核（库存已扣过），否则不允许关联退货。
-// 通过校验返回 null，否则返回给 renderError 的错误文案。
-function checkRelatedSale(db, relatedId) {
-  const related = db.prepare('SELECT id, status FROM sales_orders WHERE id = ?').get(relatedId);
-  if (!related) return `关联的销售单号 #${relatedId} 不存在，请检查单号是否正确`;
-  if (related.status !== 'approved') {
-    const statusLabel = SALE_STATUS_TEXT[related.status] || related.status;
-    return `关联的销售单 #${relatedId} 当前状态为"${statusLabel}"，只有已审核（库存已扣减）的销售单才能关联退货`;
+/**
+ * 关联退货的完整业务校验。自由退货不会调用这里。
+ * 创建/编辑时校验一次，审核前再校验一次，防止两张待审核退货同时占用同一可退额度。
+ */
+function validateLinkedReturn(db, {
+  relatedSaleId, customerId, items, sessionUser, excludeReturnId = null
+}) {
+  const sale = db.prepare('SELECT id, status, customer_id, user_id FROM sales_orders WHERE id = ?')
+    .get(relatedSaleId);
+  if (!sale) return `关联的销售单号 #${relatedSaleId} 不存在，请检查单号是否正确`;
+  if (sale.status !== 'approved') {
+    const statusLabel = SALE_STATUS_TEXT[sale.status] || sale.status;
+    return `关联的销售单 #${relatedSaleId} 当前状态为"${statusLabel}"，只有已审核（库存已扣减）的销售单才能关联退货`;
+  }
+  if (!canEditOrWithdraw(sale, sessionUser)) {
+    return `无权关联销售单 #${relatedSaleId}：操作员只能为自己录入的销售单办理关联退货`;
+  }
+
+  const normalizedCustomerId = isBlank(customerId) ? null : Number(customerId);
+  if (normalizedCustomerId !== sale.customer_id) {
+    return `退货客户必须与关联销售单 #${relatedSaleId} 的客户一致`;
+  }
+
+  const soldRows = db.prepare(`
+    SELECT soi.product_id, p.name AS product_name,
+           SUM(soi.base_quantity) AS sold_quantity,
+           SUM(soi.quantity * soi.unit_price) AS sold_amount
+    FROM sales_order_items soi
+    JOIN products p ON p.id = soi.product_id
+    WHERE soi.sales_order_id = ?
+    GROUP BY soi.product_id, p.name
+  `).all(sale.id);
+  const soldByProduct = new Map(soldRows.map(row => [row.product_id, row]));
+
+  const previousRows = db.prepare(`
+    SELECT roi.product_id,
+           SUM(roi.base_quantity) AS returned_quantity,
+           SUM(roi.quantity * roi.unit_price) AS returned_amount
+    FROM return_order_items roi
+    JOIN return_orders ro ON ro.id = roi.return_order_id
+    WHERE ro.related_sales_order_id = ? AND ro.status = 'approved' AND ro.id <> ?
+    GROUP BY roi.product_id
+  `).all(sale.id, excludeReturnId || -1);
+  const previousByProduct = new Map(previousRows.map(row => [row.product_id, row]));
+
+  const currentByProduct = new Map();
+  for (const item of items) {
+    const productId = Number(item.pid ?? item.product_id);
+    const quantity = Number(item.baseQty ?? item.base_quantity);
+    const amount = Number(item.qty ?? item.quantity) * Number(item.price ?? item.unit_price);
+    const current = currentByProduct.get(productId) || { quantity: 0, amount: 0 };
+    current.quantity += quantity;
+    current.amount += amount;
+    currentByProduct.set(productId, current);
+  }
+
+  for (const [productId, current] of currentByProduct) {
+    const sold = soldByProduct.get(productId);
+    if (!sold) {
+      const product = db.prepare('SELECT name FROM products WHERE id = ?').get(productId);
+      return `退货商品“${product ? product.name : productId}”不在关联销售单 #${sale.id} 中`;
+    }
+    const previous = previousByProduct.get(productId) || { returned_quantity: 0, returned_amount: 0 };
+    const cumulativeQuantity = Number(previous.returned_quantity || 0) + current.quantity;
+    if (cumulativeQuantity > Number(sold.sold_quantity)) {
+      const remaining = Math.max(0, Number(sold.sold_quantity) - Number(previous.returned_quantity || 0));
+      return `商品“${sold.product_name}”退货数量超过可退数量：本次 ${current.quantity}，最多还可退 ${remaining}`;
+    }
+    const cumulativeAmount = Number(previous.returned_amount || 0) + current.amount;
+    if (cumulativeAmount > Number(sold.sold_amount) + 0.001) {
+      const remaining = Math.max(0, Number(sold.sold_amount) - Number(previous.returned_amount || 0));
+      return `商品“${sold.product_name}”退货金额超过可退金额：本次 ¥${current.amount.toFixed(2)}，最多还可退 ¥${remaining.toFixed(2)}`;
+    }
   }
   return null;
 }
@@ -191,12 +256,8 @@ router.post('/returns/new', requireLogin, (req, res) => {
     return res.render('return_form', { customers, warehouses, products, error: msg, order: null, existingItems: [], today: todayLocalDate() });
   };
 
-  let relatedId = null;
-  if (related_sales_order_id && related_sales_order_id.trim()) {
-    relatedId = related_sales_order_id.trim();
-    const relatedError = checkRelatedSale(db, relatedId);
-    if (relatedError) return renderError(relatedError);
-  }
+  const relatedId = related_sales_order_id && related_sales_order_id.trim()
+    ? related_sales_order_id.trim() : null;
 
   const items = buildItemsFromRequest(db, req.body);
   if (!warehouse_id || items.length === 0) {
@@ -208,6 +269,18 @@ router.post('/returns/new', requireLogin, (req, res) => {
   }
   if (!isCustomerInScope(db, req.session.user, customer_id, null)) {
     return renderError('所选客户不在你的名下，无权使用：请选择自己负责的客户，或联系管理员处理');
+  }
+  if (relatedId) {
+    const relatedError = validateLinkedReturn(db, {
+      relatedSaleId: relatedId,
+      customerId: customer_id,
+      items,
+      sessionUser: req.session.user
+    });
+    if (relatedError) {
+      res.status(400);
+      return renderError(relatedError);
+    }
   }
 
   const total = items.reduce((s, it) => s + it.qty * it.price, 0);
@@ -278,12 +351,8 @@ router.post('/returns/:id/edit', requireLogin, (req, res) => {
     return res.render('return_form', { customers, warehouses, products, error: msg, order, existingItems, today: todayLocalDate() });
   };
 
-  let relatedId = null;
-  if (related_sales_order_id && related_sales_order_id.trim()) {
-    relatedId = related_sales_order_id.trim();
-    const relatedError = checkRelatedSale(db, relatedId);
-    if (relatedError) return renderError(relatedError);
-  }
+  const relatedId = related_sales_order_id && related_sales_order_id.trim()
+    ? related_sales_order_id.trim() : null;
 
   const items = buildItemsFromRequest(db, req.body);
   if (!warehouse_id || items.length === 0) {
@@ -296,6 +365,19 @@ router.post('/returns/:id/edit', requireLogin, (req, res) => {
   // 编辑时额外放行"单据当前已关联的客户"（与下拉框 customersForForm 的 OR id=? 同口径）
   if (!isCustomerInScope(db, req.session.user, customer_id, order.customer_id)) {
     return renderError('所选客户不在你的名下，无权使用：请选择自己负责的客户，或联系管理员处理');
+  }
+  if (relatedId) {
+    const relatedError = validateLinkedReturn(db, {
+      relatedSaleId: relatedId,
+      customerId: customer_id,
+      items,
+      sessionUser: req.session.user,
+      excludeReturnId: order.id
+    });
+    if (relatedError) {
+      res.status(400);
+      return renderError(relatedError);
+    }
   }
 
   const total = items.reduce((s, it) => s + it.qty * it.price, 0);
@@ -360,18 +442,20 @@ router.post('/returns/approve/:id', requireLogin, (req, res) => {
   if (!order) return res.status(404).send('单据不存在');
   if (order.status !== 'submitted') return res.status(400).send('只有待审核状态可以审核通过');
 
-  // 审核时再校验一遍关联销售单的状态：建单时销售单可能是 approved，但之后可能被反审核
-  // （退货单还是草稿/待审核时，销售单反审核不会被拦），这时审核退货会把从未扣过的库存加回去。
-  if (order.related_sales_order_id) {
-    const relatedError = checkRelatedSale(db, order.related_sales_order_id);
-    if (relatedError) {
-      return res.status(400).send(`审核失败：${relatedError}`);
-    }
-  }
-
-  const items = db.prepare('SELECT * FROM return_order_items WHERE return_order_id = ?').all(order.id);
-
+  let approvalError = null;
   const tx = db.transaction(() => {
+    const items = db.prepare('SELECT * FROM return_order_items WHERE return_order_id = ?').all(order.id);
+    // 校验与写库存放在同一事务里，避免两张待审核退货同时读取到相同的剩余额度后都通过。
+    if (order.related_sales_order_id) {
+      approvalError = validateLinkedReturn(db, {
+        relatedSaleId: order.related_sales_order_id,
+        customerId: order.customer_id,
+        items,
+        sessionUser: req.session.user,
+        excludeReturnId: order.id
+      });
+      if (approvalError) return;
+    }
     const upsertInv = db.prepare(`
       INSERT INTO inventory (product_id, warehouse_id, quantity) VALUES (?,?,?)
       ON CONFLICT(product_id, warehouse_id) DO UPDATE SET quantity = quantity + excluded.quantity
@@ -387,6 +471,7 @@ router.post('/returns/approve/:id', requireLogin, (req, res) => {
     db.prepare("UPDATE return_orders SET status = 'approved' WHERE id = ?").run(order.id);
   });
   tx();
+  if (approvalError) return res.status(400).send(`审核失败：${approvalError}`);
 
   res.redirect('/returns/' + order.id);
 });
@@ -509,3 +594,4 @@ router.get('/returns/:id', requireLogin, (req, res) => {
 });
 
 module.exports = router;
+module.exports.validateLinkedReturn = validateLinkedReturn;

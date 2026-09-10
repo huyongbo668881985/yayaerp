@@ -173,6 +173,15 @@ function rowIdOf(html, name, pattern) {
   r = await A.raw('/returns/' + ro1);
   ok(r.text.includes('已退款'), '退货退款 600 后已退款');
 
+  r = await A.raw('/returns/new', { body: f({ customer_id: String(custYi), warehouse_id: String(w1), order_date: '2026-09-08', related_sales_order_id: String(so1), items_json: JSON.stringify([{ id: pA, quantity: 1, price: 60, unit_choice: 'base' }]) }) });
+  ok(r.status === 400 && r.text.includes('客户必须与关联销售单'), '关联退货客户不一致被拒');
+  r = await A.raw('/returns/new', { body: f({ customer_id: String(custJia), warehouse_id: String(w1), order_date: '2026-09-08', related_sales_order_id: String(so1), items_json: JSON.stringify([{ id: pB, quantity: 1, price: 150, unit_choice: 'base' }]) }) });
+  ok(r.status === 400 && r.text.includes('不在关联销售单'), '关联退货包含原单外商品被拒');
+  r = await A.raw('/returns/new', { body: f({ customer_id: String(custJia), warehouse_id: String(w1), order_date: '2026-09-08', related_sales_order_id: String(so1), items_json: JSON.stringify([{ id: pA, quantity: 31, price: 60, unit_choice: 'base' }]) }) });
+  ok(r.status === 400 && r.text.includes('超过可退数量'), '多次关联退货累计超过原销售数量被拒');
+  r = await A.raw('/returns/new', { body: f({ customer_id: String(custJia), warehouse_id: String(w1), order_date: '2026-09-08', related_sales_order_id: String(so1), items_json: JSON.stringify([{ id: pA, quantity: 1, price: 99999, unit_choice: 'base' }]) }) });
+  ok(r.status === 400 && r.text.includes('超过可退金额'), '关联退货金额超过原销售可退金额被拒');
+
   await A.raw('/inventory/adjust', { body: f({ product_id: String(pC), warehouse_id: String(w1), new_quantity: '40', reason: '盘亏' }) });
   invh = await gi();
   ok(invOf(invh, '赠品C') === 40, '库存调整 45→40');
@@ -242,6 +251,8 @@ function rowIdOf(html, name, pattern) {
   const O = new Client();
   r = await O.login('rega', 'opA', 'op123456');
   ok(r.loc === '/', '操作员登录');
+  r = await O.raw('/returns/new', { body: f({ warehouse_id: String(w1), order_date: '2026-09-08', related_sales_order_id: String(so2), items_json: JSON.stringify([{ id: pB, quantity: 1, price: 150, unit_choice: 'base' }]) }) });
+  ok(r.status === 400 && r.text.includes('无权关联销售单'), '操作员不能关联他人销售单');
   for (const [p, label] of [['/', '首页'], ['/sales', '销售'], ['/inventory', '库存'], ['/stock-log', '流水'], ['/products', '商品只读'], ['/change-password', '改密'], ['/customers', '客户']]) {
     const rr = await O.raw(p);
     ok(rr.status === 200, `操作员可访问 ${label}(${rr.status})`);
