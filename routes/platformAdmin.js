@@ -1,11 +1,13 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const fs = require('fs');
 const router = express.Router();
 
 const {
   listTenants,
   getTenantById,
   createTenant,
+  deleteTenantRecord,
   setTenantStatus,
   updateTenantLimits,
   getPlatformAdminByUsername,
@@ -151,16 +153,41 @@ router.post('/platform-admin/tenants/new', requireSuperAdmin, (req, res) => {
 
   // 新建租户 db 文件并跑初始化 + 建第一个管理员账号
   // 用完必须关闭：这里不走 getTenantDb 的连接缓存，不关的话句柄会一直泄漏
-  const db = openTenantDbByPath(tenant.db_path);
+  let db;
   try {
+    db = openTenantDbByPath(tenant.db_path);
     bootstrapTenant(db, {
       adminUsername: admin_username.trim(),
       adminPassword: admin_password,
       adminName: admin_name || '管理员',
       warehouseName: warehouse_name || '总仓'
     });
+  } catch (e) {
+    console.error(`创建租户 ${tenant.tenant_code} 的数据库失败，正在回滚:`, e);
+    audit(req, 'create_tenant_failed', tenant, `初始化失败：${e.message}`);
+    try {
+      if (db) db.close();
+    } catch (closeError) {
+      console.error(`关闭失败租户 ${tenant.tenant_code} 的数据库连接时出错:`, closeError);
+    }
+    try {
+      deleteTenantRecord(tenant.id);
+      for (const suffix of ['', '-wal', '-shm']) {
+        try { fs.unlinkSync(tenant.db_path + suffix); } catch (unlinkError) {
+          if (unlinkError.code !== 'ENOENT') throw unlinkError;
+        }
+      }
+    } catch (cleanupError) {
+      console.error(`回滚失败租户 ${tenant.tenant_code} 时出错，需要人工处理:`, cleanupError);
+      return res.status(500).render('platform_tenant_form', {
+        error: '租户初始化失败且自动清理未完成，请查看服务日志并人工处理', form: req.body
+      });
+    }
+    return res.status(500).render('platform_tenant_form', {
+      error: '租户初始化失败，已自动回滚，请检查配置后重试', form: req.body
+    });
   } finally {
-    db.close();
+    if (db && db.open) db.close();
   }
 
   audit(req, 'create_tenant', tenant,

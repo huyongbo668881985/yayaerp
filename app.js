@@ -1,11 +1,13 @@
 require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
+const helmet = require('helmet');
 const SqliteSessionStore = require('./lib/sqliteSessionStore');
 const path = require('path');
 const fs = require('fs');
 
 const { resolveTenant } = require('./middleware/tenant');
+const { issueCsrfToken, csrfProtection } = require('./middleware/csrf');
 
 // SESSION_SECRET 是用来签 session cookie 的密钥，绝对不能用公开的默认值——
 // 否则任何看过源码的人都能伪造登录态。缺失或太弱就直接拒绝启动，把问题暴露在部署阶段。
@@ -23,6 +25,28 @@ const DATA_DIR = path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const app = express();
+
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrcAttr: ["'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+      imgSrc: ["'self'", 'data:'],
+      connectSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+      upgradeInsecureRequests: null
+    }
+  },
+  xFrameOptions: { action: 'deny' },
+  strictTransportSecurity: process.env.NODE_ENV === 'production' ? undefined : false,
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' }
+}));
 
 // 如果部署在 Nginx/Caddy 等反向代理后面、由代理终止 HTTPS，需要这行 Express 才能正确识别
 // 请求本来是走 HTTPS 来的（不然下面 cookie.secure 判断不出来），用环境变量 TRUST_PROXY=1 开启
@@ -61,29 +85,14 @@ app.use(session({
   }
 }));
 
+app.use(issueCsrfToken);
+app.get('/api/csrf-token', (req, res) => res.json({ token: req.session.csrfToken }));
+
 // 根据 session 里的 tenant_code 挂载对应租户的 db 连接到 req.tenantDb
 app.use(resolveTenant);
 
-// CSRF 防护（与 cookie 的 SameSite=Lax 形成双层防线）：
-// 现代浏览器发起跨站 POST 时都会带 Origin 头——只要 Origin 存在且与本站不同源就拒绝。
-// 表单请求不带 Origin 的场景（极老浏览器、服务器间调用）放行，由 SameSite=Lax 兜底；
-// 这个方案不用给全站几十个表单埋 token，模板零改动。
-// 对 JSON API（/api/ 开头，如官网试用注册接口）收紧一档：必须带 Origin 且同源——
-// 这类接口只被同源页面的 fetch 调用，没有"无 Origin 兼容"的需求，收紧后脚本工具无法直接打接口。
-app.use((req, res, next) => {
-  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
-  const origin = req.headers.origin;
-  const isJsonApi = req.path.startsWith('/api/');
-  if (!origin) {
-    if (isJsonApi) return res.status(403).json({ ok: false, message: '非法请求' });
-    return next();
-  }
-  try {
-    if (new URL(origin).host === req.headers.host) return next();
-  } catch (e) { /* 解析不了的 Origin 一律视为非法 */ }
-  if (isJsonApi) return res.status(403).json({ ok: false, message: '非法请求' });
-  return res.status(403).send('跨站请求被拒绝（CSRF 校验失败）');
-});
+// 浏览器表单和官网 JSON 接口统一使用 session 同步 token；API v1 在 session 之前挂载，继续使用 API Key。
+app.use(csrfProtection);
 
 // 所有已登录页面统一注入 currentUser，方便模板使用
 app.use((req, res, next) => {

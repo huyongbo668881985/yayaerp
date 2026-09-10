@@ -7,14 +7,26 @@ const enc = encodeURIComponent;
 const f = (o) => Object.entries(o).map(([k, v]) => enc(k) + '=' + enc(v)).join('&');
 
 class Client {
-  constructor() { this.cookie = ''; }
-  async raw(path, { body = null, method = null, origin = BASE } = {}) {
-    const headers = { Origin: origin };
-    if (this.cookie) headers.Cookie = this.cookie;
-    if (body !== null) headers['Content-Type'] = 'application/x-www-form-urlencoded';
-    const r = await fetch(BASE + path, { method: method || (body === null ? 'GET' : 'POST'), headers, body, redirect: 'manual' });
+  constructor() { this.cookie = ''; this.csrfToken = ''; }
+  async ensureCsrfToken() {
+    if (this.csrfToken) return;
+    const headers = this.cookie ? { Cookie: this.cookie } : {};
+    const r = await fetch(BASE + '/api/csrf-token', { headers, redirect: 'manual' });
     const sc = r.headers.getSetCookie ? r.headers.getSetCookie() : [];
     if (sc.length) this.cookie = sc.map(c => c.split(';')[0]).join('; ');
+    this.csrfToken = (await r.json()).token;
+  }
+  async raw(path, { body = null, method = null, origin = BASE } = {}) {
+    const requestMethod = method || (body === null ? 'GET' : 'POST');
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(requestMethod)) await this.ensureCsrfToken();
+    const headers = { Origin: origin };
+    if (this.cookie) headers.Cookie = this.cookie;
+    if (this.csrfToken) headers['X-CSRF-Token'] = this.csrfToken;
+    if (body !== null) headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    const r = await fetch(BASE + path, { method: requestMethod, headers, body, redirect: 'manual' });
+    const sc = r.headers.getSetCookie ? r.headers.getSetCookie() : [];
+    if (sc.length) this.cookie = sc.map(c => c.split(';')[0]).join('; ');
+    if (r.status === 302 && (path === '/login' || path === '/platform-admin/login')) this.csrfToken = '';
     const ct = r.headers.get('content-type') || '';
     let text = '';
     if (ct.includes('text') || ct.includes('json') || ct.includes('csv')) text = await r.text();

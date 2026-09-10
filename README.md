@@ -40,6 +40,8 @@ node app.js
 cd /opt/jxc-app
 cp .env.example .env
 vim .env    # SESSION_SECRET 必填；HTTPS 配好后 COOKIE_SECURE=true、TRUST_PROXY=1
+mkdir -p data
+sudo chown -R 1000:1000 data  # 容器内以非 root 的 node 用户运行，bind mount 必须可写
 docker compose up -d --build
 ```
 

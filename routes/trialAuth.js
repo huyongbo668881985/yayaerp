@@ -9,6 +9,7 @@ const { sendTrialNotificationEmail } = require('../lib/mailer');
 const rateLimiter = require('../lib/rateLimiter');
 
 const PHONE_PATTERN = /^1[3-9]\d{9}$/;
+const GENERIC_CODE_RESPONSE = { ok: true, message: '如果该手机号符合条件，验证码将发送到手机' };
 
 // 第一步：发送验证码
 router.post('/api/trial/send-code', express.json(), async (req, res) => {
@@ -21,10 +22,6 @@ router.post('/api/trial/send-code', express.json(), async (req, res) => {
   if (!PHONE_PATTERN.test(phone || '')) {
     return res.status(400).json({ ok: false, message: '手机号格式不正确' });
   }
-  if (isPhoneAlreadyTrialed(phone)) {
-    return res.status(409).json({ ok: false, message: '该手机号已经开通过试用了' });
-  }
-
   const ip = req.ip;
   if (!rateLimiter.hit(`code:phone:${phone}`, 60 * 1000, 1)) {
     return res.status(429).json({ ok: false, message: '发送太频繁，请 60 秒后再试' });
@@ -36,13 +33,19 @@ router.post('/api/trial/send-code', express.json(), async (req, res) => {
     return res.status(429).json({ ok: false, message: '请求过多，请稍后再试' });
   }
 
+  // 已注册与未注册手机号返回完全相同的成功响应，避免接口成为客户手机号枚举器。
+  // 已注册号码不重复发送短信，但不向调用者暴露这一事实。
+  if (isPhoneAlreadyTrialed(phone)) return res.json(GENERIC_CODE_RESPONSE);
+
   try {
     // 短信认证服务：验证码由阿里云生成和下发，我们不经手验证码本身
     await sendVerifyCode(phone);
-    res.json({ ok: true });
+    res.json(GENERIC_CODE_RESPONSE);
   } catch (err) {
     console.error('[trialAuth] 发送验证码失败:', err);
-    res.status(500).json({ ok: false, message: '验证码发送失败，请稍后重试' });
+    // 对公网仍返回同一通用响应，否则短信网关故障时“已注册=200、未注册=500”仍可被枚举。
+    // 真实失败只进服务端日志/监控，由运维告警发现。
+    res.json(GENERIC_CODE_RESPONSE);
   }
 });
 
@@ -55,10 +58,6 @@ router.post('/api/trial/verify-and-register', express.json(), async (req, res) =
   if (!PHONE_PATTERN.test(phone || '') || !code || !company || !contact || !teamsize) {
     return res.status(400).json({ ok: false, message: '请填写完整信息' });
   }
-  if (isPhoneAlreadyTrialed(phone)) {
-    return res.status(409).json({ ok: false, message: '该手机号已经开通过试用了' });
-  }
-
   // 校验次数限流：防止拿这个接口暴力猜验证码（6 位数字 + 阿里云 5 分钟有效期，
   // 每个手机号 10 分钟内最多试 10 次，远不够猜中）
   if (!rateLimiter.hit(`check:phone:${phone}`, 10 * 60 * 1000, 10)) {
@@ -74,6 +73,11 @@ router.post('/api/trial/verify-and-register', express.json(), async (req, res) =
   } catch (err) {
     console.error('[trialAuth] 验证码校验失败:', err);
     return res.status(500).json({ ok: false, message: '验证失败，请稍后重试' });
+  }
+
+  // 只有持有有效短信验证码的人才能走到这里；仍使用通用错误，不泄露历史注册状态。
+  if (isPhoneAlreadyTrialed(phone)) {
+    return res.status(409).json({ ok: false, message: '无法完成开通，请联系客服处理' });
   }
 
   try {
