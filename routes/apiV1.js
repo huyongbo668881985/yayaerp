@@ -15,6 +15,7 @@
  */
 
 const express = require('express');
+const { rateLimit } = require('express-rate-limit');
 const { apiAuth, requireApiTier } = require('../middleware/apiAuth');
 const { todayLocalDate } = require('../utils/dates');
 const { returnedAmountSubquery } = require('../lib/profitCalc');
@@ -24,6 +25,27 @@ const inventoryRoutes = require('./inventory');
 
 const router = express.Router();
 
+// 限流阈值走环境变量不写死：API_RATE_LIMIT_PER_MIN，默认每分钟 60 次（宽松起步值，
+// 后续按 n8n/Codex 实际用量调整，改 .env 即可，不用动代码）
+const API_RATE_LIMIT_PER_MIN = Math.max(1, Number(process.env.API_RATE_LIMIT_PER_MIN) || 60);
+
+// 按 api_key 维度限流（不按 IP）：n8n/Codex 的调用来源可能都是同一台服务器的固定 IP，
+// 按 IP 限流会把所有自动化任务锁进同一个桶互相误伤。
+// 本中间件挂在 apiAuth 之后，走到这里必然已有 req.apiKey（未认证的请求在 401 就被拦了）。
+const apiKeyLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: API_RATE_LIMIT_PER_MIN,
+  standardHeaders: 'draft-6', // 响应带 RateLimit-* 头，方便调用方自我节流
+  legacyHeaders: false,
+  keyGenerator: (req) => `apikey:${req.apiKey.id}`,
+  handler: (req, res) => {
+    console.warn(`[api-v1] 触发限流 key_prefix=${req.apiKey.keyPrefix} path=${req.originalUrl} ip=${req.ip}`);
+    res.status(429).json({
+      error: { code: 'rate_limited', message: `请求过于频繁（该 Key 每分钟最多 ${API_RATE_LIMIT_PER_MIN} 次），请稍后重试` }
+    });
+  }
+});
+
 // 口径唯一实现点：退货金额子查询与 Web 端共用 lib/profitCalc.js 的同一份定义
 const RETURNED_AMOUNT_SUBQUERY = returnedAmountSubquery('so');
 
@@ -32,9 +54,9 @@ const SALES_STATUSES = ['draft', 'submitted', 'approved', 'rejected'];
 const PAGE_SIZE_DEFAULT = 50;
 const PAGE_SIZE_MAX = 200;
 
-// ---- 所有 /api/v1 请求先过 API Key 认证 ----
+// ---- 所有 /api/v1 请求先过 API Key 认证，再按 Key 维度限流 ----
 router.use(apiAuth);
-// （限流中间件按 api_key 维度挂在这里，见下方 rateLimit 段）
+router.use(apiKeyLimiter);
 
 // ---- 参数校验/响应工具 ----
 
