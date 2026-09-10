@@ -328,25 +328,52 @@
   .feature-list li{display:flex;gap:8px;font-size:14px;color:var(--ink-soft);}
   .feature-list svg{flex-shrink:0;width:16px;height:16px;margin-top:3px;color:var(--green);}
 
-  .shot-placeholder{
+  .product-shot{
     aspect-ratio:16/10;
-    border:1.5px dashed var(--rule-dark);
-    border-radius:10px;
+    border:1px solid var(--rule);
+    border-radius:12px;
+    background:var(--white);
+    overflow:hidden;
+    box-shadow:0 18px 42px rgba(20,33,61,0.13), 0 2px 0 rgba(20,33,61,0.06);
+    position:relative;
+  }
+  .product-shot img{width:100%;height:100%;object-fit:cover;object-position:top left;}
+  .product-shot::after{
+    content:"真实系统界面";
+    position:absolute;
+    right:12px;
+    bottom:12px;
+    padding:5px 9px;
+    border-radius:999px;
+    background:rgba(20,33,61,0.88);
+    color:var(--white);
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:0.04em;
+  }
+  .mobile-shot-stage{
+    aspect-ratio:16/10;
+    border:1px solid var(--rule);
+    border-radius:12px;
     background:
-      repeating-linear-gradient(135deg, rgba(20,33,61,0.03) 0 10px, transparent 10px 20px),
-      var(--white);
+      radial-gradient(circle at 20% 20%, rgba(255,140,50,0.2), transparent 34%),
+      linear-gradient(145deg, var(--ink), var(--ink-soft));
     display:flex;
-    flex-direction:column;
     align-items:center;
     justify-content:center;
-    gap:10px;
-    color:var(--muted);
-    text-align:center;
-    padding:20px;
+    overflow:hidden;
+    box-shadow:0 18px 42px rgba(20,33,61,0.16);
   }
-  .shot-placeholder svg{width:34px;height:34px;opacity:0.5;}
-  .shot-placeholder .shot-label{font-size:13px;font-weight:700;color:var(--ink-soft);}
-  .shot-placeholder .shot-hint{font-family:var(--mono);font-size:11px;color:var(--muted);}
+  .phone-frame{
+    height:90%;
+    aspect-ratio:390/844;
+    padding:5px;
+    border-radius:18px;
+    background:#111827;
+    box-shadow:0 18px 32px rgba(0,0,0,0.38);
+    overflow:hidden;
+  }
+  .phone-frame img{width:100%;height:100%;object-fit:cover;object-position:top;border-radius:14px;}
 
   /* ============ WORKFLOW ============ */
   .flow{
@@ -570,6 +597,7 @@
   .contact-icon svg{width:22px;height:22px;}
   .contact-card h4{font-size:14px;color:var(--muted);font-weight:700;letter-spacing:0.02em;}
   .contact-value{
+    display:block;
     font-family:var(--mono);
     font-size:19px;
     font-weight:700;
@@ -577,22 +605,6 @@
     color:var(--ink);
   }
   .contact-hint{font-size:12.5px;color:var(--muted);margin-top:6px;}
-  .qr-placeholder{
-    width:112px;height:112px;
-    margin:14px auto 0;
-    border:1.5px dashed var(--rule-dark);
-    border-radius:8px;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    background:var(--paper-dim);
-    font-family:var(--mono);
-    font-size:10px;
-    color:var(--muted);
-    text-align:center;
-    padding:8px;
-  }
-
   /* ============ FOOTER ============ */
   footer{
     background:var(--ink);
@@ -627,6 +639,13 @@
     .form-row{grid-template-columns:1fr;}
     .contact-wrap{grid-template-columns:1fr;}
     section{padding:56px 0;}
+  }
+  @media (max-width: 560px){
+    .nav-inner{padding:12px 18px;}
+    .nav-cta{display:none;}
+    .brand{font-size:17px;white-space:nowrap;}
+    .container{padding-left:18px;padding-right:18px;}
+    .phone-frame{height:92%;}
   }
 </style>
 </head>
@@ -754,11 +773,9 @@
       </ul>
     </div>
     <div class="feature-shot">
-      <div class="shot-placeholder">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11"/></svg>
-        <div class="shot-label">库存管理界面截图</div>
-        <div class="shot-hint">&lt;!-- 替换为实际运行截图 --&gt;</div>
-      </div>
+      <figure class="product-shot">
+        <img src="/welcome/assets/screenshots/inventory-desktop.png" width="1280" height="800" loading="lazy" alt="鸭鸭进销存多仓库库存查询界面，展示箱瓶换算和低库存提醒">
+      </figure>
     </div>
   </div>
 
@@ -774,11 +791,9 @@
       </ul>
     </div>
     <div class="feature-shot">
-      <div class="shot-placeholder">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
-        <div class="shot-label">订单审批流程截图</div>
-        <div class="shot-hint">&lt;!-- 替换为实际运行截图 --&gt;</div>
-      </div>
+      <figure class="product-shot">
+        <img src="/welcome/assets/screenshots/approval-desktop.png" width="1280" height="800" loading="lazy" alt="鸭鸭进销存销售单审批界面，展示待审核状态、商品明细和审批操作">
+      </figure>
     </div>
   </div>
 
@@ -794,11 +809,9 @@
       </ul>
     </div>
     <div class="feature-shot">
-      <div class="shot-placeholder">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 19h16"/><path d="M6 15l4-5 4 3 4-7"/></svg>
-        <div class="shot-label">业务报表界面截图</div>
-        <div class="shot-hint">&lt;!-- 替换为实际运行截图 --&gt;</div>
-      </div>
+      <figure class="product-shot">
+        <img src="/welcome/assets/screenshots/reports-desktop.png" width="1280" height="800" loading="lazy" alt="鸭鸭进销存经营报表界面，展示销售额、应收金额和毛利指标">
+      </figure>
     </div>
   </div>
 
@@ -814,10 +827,10 @@
       </ul>
     </div>
     <div class="feature-shot">
-      <div class="shot-placeholder">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/></svg>
-        <div class="shot-label">手机端界面截图</div>
-        <div class="shot-hint">&lt;!-- 替换为实际运行截图 --&gt;</div>
+      <div class="mobile-shot-stage">
+        <div class="phone-frame">
+          <img src="/welcome/assets/screenshots/sales-mobile.png" width="390" height="844" loading="lazy" alt="鸭鸭进销存手机端销售单卡片界面">
+        </div>
       </div>
     </div>
   </div>
@@ -986,7 +999,7 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
       </div>
       <h4>电话咨询</h4>
-      <div class="contact-value">138-XXXX-XXXX</div>
+      <a class="contact-value" href="tel:17513358588">17513358588</a>
       <p class="contact-hint">工作日 9:00–19:00，欢迎直接来电</p>
     </div>
     <div class="contact-card reveal">
@@ -995,8 +1008,7 @@
       </div>
       <h4>微信联系</h4>
       <div class="contact-value">yayaerp-support</div>
-      <p class="contact-hint">扫码添加，备注“试用咨询”</p>
-      <div class="qr-placeholder">替换为<br>微信二维码<br>截图</div>
+      <p class="contact-hint">微信内搜索添加，备注“试用咨询”</p>
     </div>
     <div class="contact-card reveal">
       <div class="contact-icon">
