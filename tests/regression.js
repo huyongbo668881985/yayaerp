@@ -319,6 +319,44 @@ function rowIdOf(html, name, pattern) {
   console.log('  销售单1 毛利 =', profitA, '(含退货冲减前)');
   db.close();
 
+  section('J. 欠款每日快照（debt_snapshots + debt-trend API）');
+  const { snapshotTenantDb } = require('../lib/debtSnapshot');
+  const apiKeys = require('../lib/apiKeys');
+  const { getTenantByCode } = require('../lib/platformDb');
+  const { todayLocalDate } = require('../utils/dates');
+  const today = todayLocalDate();
+  const snapDb = new Database('/Users/huyongbo/Downloads/jxc-app/data/tenants/rega.db');
+  // 场景欠款：单1 = 2400-2400(已收)-600(已审核关联退货) = -600 → 负欠款排除；
+  //           单2(散客) = 1500-0-0 = 1500 → 计入；soX submitted 不算
+  let snap = snapshotTenantDb(snapDb, today);
+  ok(snap.company_debt === 1500 && snap.company_debtors === 1, '快照口径=报表应收：全公司欠款 1500 / 欠款客户 1（负欠款不对冲）', `debt=${snap.company_debt}`);
+  ok(snap.rows === 3 && snap.user_rows === 2, '行数 = 全公司 1 + 操作员 2（rega 有 admin+操作员A）', `rows=${snap.rows}`);
+  const snapRows = snapDb.prepare('SELECT user_id, total_debt, debtor_customer_count FROM debt_snapshots WHERE snapshot_date = ? ORDER BY user_id').all(today);
+  ok(snapRows.length === 3 && snapRows[0].user_id === null && snapRows[0].total_debt === 1500, '全公司行 user_id=NULL、欠款 1500，排序在最前');
+  ok(snapRows[1].user_id === 1 && snapRows[1].total_debt === 1500 && snapRows[2].user_id === 2 && snapRows[2].total_debt === 0, '操作员行：admin 1500 / 操作员A 0（无欠款记 0，Σ操作员=全公司）');
+  snapshotTenantDb(snapDb, today); // 手动重跑一次
+  const snapCount = snapDb.prepare('SELECT COUNT(*) c FROM debt_snapshots WHERE snapshot_date = ?').get(today).c;
+  ok(snapCount === 3, '重复执行幂等：行数不变（NULL 全公司行也被去重）', `count=${snapCount}`);
+  snapDb.close();
+
+  // debt-trend API：rega 的 read_only Key（apiAuth 每次实时查 platform.db，外部进程生成即刻可用）
+  const tenantRega = getTenantByCode('rega');
+  const snapKey = apiKeys.generateApiKey({ tenantId: tenantRega.id, permissionLevel: 'read_only', adminId: 1, adminUsername: 'superadmin' });
+  r = await fetch(BASE + '/api/v1/reports/debt-trend', { headers: { Authorization: 'Bearer ' + snapKey.plaintext } });
+  const jt = await r.json();
+  ok(r.status === 200 && jt.items.length === 3, 'debt-trend: 返回当天 3 行', `status=${r.status}, items=${jt.items.length}`);
+  ok(jt.items[0].user_id === null && jt.items[0].user_name === '全公司' && jt.items[0].total_debt === 1500, 'debt-trend: 首行=全公司汇总 1500');
+  ok(jt.items.every(i => i.date === today), 'debt-trend: 日期全部为今天');
+  r = await fetch(BASE + `/api/v1/reports/debt-trend?start=${today}&end=${today}`, { headers: { Authorization: 'Bearer ' + snapKey.plaintext } });
+  ok((await r.json()).items.length === 3, 'debt-trend: start/end 范围过滤命中');
+  r = await fetch(BASE + '/api/v1/reports/debt-trend?start=2099-01-01', { headers: { Authorization: 'Bearer ' + snapKey.plaintext } });
+  ok(r.status === 200 && (await r.json()).items.length === 0, 'debt-trend: 范围外返回空列表');
+  r = await fetch(BASE + '/api/v1/reports/debt-trend?start=bad-date', { headers: { Authorization: 'Bearer ' + snapKey.plaintext } });
+  ok(r.status === 400, 'debt-trend: 非法日期参数 400');
+  r = await fetch(BASE + '/api/v1/reports/debt-trend');
+  ok(r.status === 401, 'debt-trend: 无 Key 401');
+  apiKeys.revokeApiKey(snapKey.id); // 临时 Key 用完即吊销
+
   console.log('\n========================================');
   console.log(`PASS: ${PASSES}   FAIL: ${FAILS}`);
   console.log(FAILS === 0 ? '全部通过' : '存在失败项');

@@ -149,6 +149,39 @@ router.get('/reports/leaderboard', requireApiTier('read_only'), (req, res) => {
   res.json({ date: d, rows });
 });
 
+// ---- 欠款趋势：按日期范围查每日快照，含全公司汇总 + 分操作员 ----
+// 数据来源：lib/debtSnapshot.js 每天写入的 debt_snapshots 表（口径与报表页"应收账款"一致）。
+// 快照是"当天营业结束时的欠款水位"，一天一行；date 端点没跑到当天就没有当天数据（空档，
+// 不补算），调用方按返回的 date 序列画趋势即可。user_id=NULL 的行是全公司汇总，
+// 排序上 NULL 在前，天然排在每个日期的第一条。
+router.get('/reports/debt-trend', requireApiTier('read_only'), (req, res) => {
+  const start = parseDateParam(req.query.start);
+  const end = parseDateParam(req.query.end);
+  if (start === null) return badRequest(res, 'start 参数格式错误，应为 YYYY-MM-DD');
+  if (end === null) return badRequest(res, 'end 参数格式错误，应为 YYYY-MM-DD');
+
+  // start/end 都可省略 = 查全部历史。'0000-00-00' / '9999-99-99' 是 YYYY-MM-DD 文本比较
+  // 的安全哨兵值（快照日期恒为合法日期，字符串比较语义等价于日期比较）
+  const rows = req.tenantDb.prepare(`
+    SELECT ds.snapshot_date, ds.user_id, u.name AS user_name,
+           ds.total_debt, ds.debtor_customer_count
+    FROM debt_snapshots ds
+    LEFT JOIN users u ON u.id = ds.user_id
+    WHERE ds.snapshot_date >= ? AND ds.snapshot_date <= ?
+    ORDER BY ds.snapshot_date ASC, ds.user_id ASC
+  `).all(start || '0000-00-00', end || '9999-99-99');
+
+  res.json({
+    items: rows.map(r => ({
+      date: r.snapshot_date,
+      user_id: r.user_id,
+      user_name: r.user_name || '全公司',
+      total_debt: r2(r.total_debt),
+      debtor_customer_count: r.debtor_customer_count
+    }))
+  });
+});
+
 // ---- 销售单列表（分页）----
 // 收款/欠款状态复用销售列表页的 attachEffectivePayment（有效欠款口径），不重写第二份算法。
 // 分页在 SQL 层做（LIMIT/OFFSET），page 超出范围时返回空 items（调用方以 total/total_pages 为准）。
