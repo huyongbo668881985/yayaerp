@@ -1,7 +1,7 @@
 const express = require('express');
 const { requireAdmin } = require('../middleware/auth');
 const { todayLocalDate } = require('../utils/dates');
-const { isValidNonNegativeAmount } = require('../lib/validators');
+const { isValidNonNegativeAmount, roundToCents } = require('../lib/validators');
 const router = express.Router();
 
 // 设计说明（2026-09-06 定版）：采购入库没有审核流，录单即加库存。
@@ -55,7 +55,7 @@ router.post('/purchases/new', requireAdmin, (req, res) => {
     const unitLabel = usePack ? product.pack_unit : product.unit;
     const baseQty = usePack ? qty * product.pack_size : qty;
     items.push({
-      pid, qty, price,
+      pid, qty, price: Number.isFinite(price) ? roundToCents(price) : price,
       invalidPrice: !isValidNonNegativeAmount(unit_price[i]),
       unitLabel, baseQty
     });
@@ -73,7 +73,7 @@ router.post('/purchases/new', requireAdmin, (req, res) => {
     return res.status(400).render('purchase_form', { suppliers, warehouses, products, error: '采购单价必须是大于等于 0 的有效数字', today: todayLocalDate() });
   }
 
-  const total = items.reduce((s, it) => s + it.qty * it.price, 0);
+  const total = roundToCents(items.reduce((s, it) => s + it.qty * it.price, 0));
   if (!Number.isFinite(total) || total < 0) {
     const suppliers = db.prepare('SELECT * FROM suppliers ORDER BY name').all();
     const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();

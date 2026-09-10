@@ -1,6 +1,6 @@
 const express = require('express');
 const { requireLogin, requireAdmin } = require('../middleware/auth');
-const { isBlank, isValidNonNegativeAmount } = require('../lib/validators');
+const { isBlank, isValidNonNegativeAmount, roundToCents } = require('../lib/validators');
 const router = express.Router();
 
 router.get('/products', requireLogin, (req, res) => {
@@ -43,7 +43,7 @@ function parseProductNumbers(body) {
     if (!isValidNonNegativeAmount(raw)) {
       return { error: `${label}必须是大于等于 0 的有效数字` };
     }
-    values[key] = Number(raw);
+    values[key] = key === 'low_stock_threshold' ? Number(raw) : roundToCents(raw);
   }
   if (!Number.isInteger(values.low_stock_threshold)) {
     return { error: '库存预警值必须是大于等于 0 的整数' };

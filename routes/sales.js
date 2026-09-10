@@ -4,7 +4,7 @@ const { sendCsv } = require('../utils/csv');
 const { todayLocalDate } = require('../utils/dates');
 const { costSnapshotPerBaseUnit } = require('../lib/priceCalc');
 const { returnedAmountSubquery } = require('../lib/profitCalc');
-const { isBlank, isValidNonNegativeAmount } = require('../lib/validators');
+const { isBlank, isValidNonNegativeAmount, roundToCents } = require('../lib/validators');
 const router = express.Router();
 
 // 关联到某张销售单、且已审核的退货金额。
@@ -69,6 +69,7 @@ function buildItemsFromRequest(db, body) {
     if (!product) continue;
     const invalidPrice = !gift && !isValidNonNegativeAmount(unit_price[i]);
     if (gift) price = 0;
+    else if (Number.isFinite(price)) price = roundToCents(price);
     const usePack = unit_choice[i] === 'pack' && product.pack_unit;
     const unitLabel = usePack ? product.pack_unit : product.unit;
     const baseQty = usePack ? qty * product.pack_size : qty;
@@ -272,16 +273,17 @@ router.post('/sales/new', requireLogin, (req, res) => {
 
   // 草稿/待审核阶段不动库存，这里只做数据落库，不检查库存、不生成出入库流水
   // 点"存草稿"按钮会带 save_draft=1 → 存为 draft，之后在详情页继续编辑/提交审核
-  const total = items.reduce((s, it) => s + it.qty * it.price, 0);
+  const total = roundToCents(items.reduce((s, it) => s + it.qty * it.price, 0));
   if (!Number.isFinite(total) || total < 0) {
     res.status(400);
     return renderError('销售总额计算结果不合法，请检查商品数量和单价');
   }
-  const paid = isBlank(paid_amount) ? 0 : Number(paid_amount);
-  if (!isValidNonNegativeAmount(paid)) {
+  const paidRaw = isBlank(paid_amount) ? 0 : Number(paid_amount);
+  if (!isValidNonNegativeAmount(paidRaw)) {
     res.status(400);
     return renderError('已收款金额必须是大于等于 0 的有效数字');
   }
+  const paid = roundToCents(paidRaw);
   // 收款不能超过单据总额：多收的钱没有业务意义，还会把应收/欠款统计搞乱
   if (paid > total + 0.001) {
     res.status(400);
@@ -354,16 +356,17 @@ router.post('/sales/:id/edit', requireLogin, (req, res) => {
     return renderError('所选客户不在你的名下，无权使用：请选择自己负责的客户，或联系管理员处理');
   }
 
-  const total = items.reduce((s, it) => s + it.qty * it.price, 0);
+  const total = roundToCents(items.reduce((s, it) => s + it.qty * it.price, 0));
   if (!Number.isFinite(total) || total < 0) {
     res.status(400);
     return renderError('销售总额计算结果不合法，请检查商品数量和单价');
   }
-  const paid = isBlank(paid_amount) ? 0 : Number(paid_amount);
-  if (!isValidNonNegativeAmount(paid)) {
+  const paidRaw = isBlank(paid_amount) ? 0 : Number(paid_amount);
+  if (!isValidNonNegativeAmount(paidRaw)) {
     res.status(400);
     return renderError('已收款金额必须是大于等于 0 的有效数字');
   }
+  const paid = roundToCents(paidRaw);
   // 与新建单一致：收款不能超过单据总额
   if (paid > total + 0.001) {
     res.status(400);
@@ -530,8 +533,10 @@ router.post('/sales/:id/record-payment', requireLogin, (req, res) => {
     return res.status(400).send('只有已审核的销售单可以记录收款');
   }
 
-  const amount = Number(req.body.amount);
-  if (!Number.isFinite(amount) || !(amount > 0)) return res.status(400).send('收款金额必须是大于 0 的有效数字');
+  const amountRaw = Number(req.body.amount);
+  if (!Number.isFinite(amountRaw) || !(amountRaw > 0)) return res.status(400).send('收款金额必须是大于 0 的有效数字');
+  const amount = roundToCents(amountRaw);
+  if (!(amount > 0)) return res.status(400).send('收款金额四舍五入到分后必须大于 0');
 
   // 收款累计不能超过"有效欠款"：总额 − 已收 − 关联已审核退货（允许 0.001 浮点误差）。
   // 必须与详情页展示的欠款（attachEffectivePayment 的 effective_debt）同一套算法：
@@ -558,7 +563,7 @@ router.post('/sales/:id/record-payment', requireLogin, (req, res) => {
   // 见 lib/profitCalc.js 的 salesSettledExpr，列表页/详情页/首页/报表全部走那一套。
   // 以前让 payment_status 兼职"结清判定"，落库快照追不上退货单的审核/反审核，
   // 定金 + 退货抵扣结清的单子会永远停在 partial，两边对不上账。
-  const newPaid = (order.paid_amount || 0) + amount;
+  const newPaid = roundToCents((order.paid_amount || 0) + amount);
   let paymentStatus = 'unpaid';
   if (order.total_amount > 0 && newPaid >= order.total_amount) paymentStatus = 'paid';
   else if (newPaid > 0) paymentStatus = 'partial';
