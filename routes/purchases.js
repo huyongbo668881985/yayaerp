@@ -49,14 +49,15 @@ router.post('/purchases/new', requireAdmin, (req, res) => {
 
   const getProduct = db.prepare('SELECT * FROM products WHERE id = ?');
   const items = [];
+  let invalidDetailCount = 0;
   for (let i = 0; i < product_id.length; i++) {
     const pid = Number(product_id[i]);
     const qty = Number(quantity[i]);
     const price = Number(unit_price[i]);
     // 数量必须是正整数（与 sales.js 同规则）
-    if (!pid || !(qty > 0) || !Number.isInteger(qty)) continue;
+    if (!pid || !(qty > 0) || !Number.isInteger(qty)) { invalidDetailCount++; continue; }
     const product = getProduct.get(pid);
-    if (!product) continue;
+    if (!product) { invalidDetailCount++; continue; }
     // unit_choice: 'pack' 表示按大单位（箱）录入，否则按基本单位（瓶）
     const usePack = unit_choice[i] === 'pack' && product.pack_unit;
     const unitLabel = usePack ? product.pack_unit : product.unit;
@@ -66,6 +67,12 @@ router.post('/purchases/new', requireAdmin, (req, res) => {
       invalidPrice: !isValidNonNegativeAmount(unit_price[i]),
       unitLabel, baseQty
     });
+  }
+  if (invalidDetailCount > 0) {
+    const suppliers = db.prepare('SELECT * FROM suppliers ORDER BY name').all();
+    const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
+    const products = db.prepare('SELECT * FROM products ORDER BY name').all();
+    return res.status(400).render('purchase_form', { suppliers, warehouses, products, error: '商品明细包含无效行（商品、数量必须填写且数量为正整数），请修正后再提交', today: todayLocalDate() });
   }
   if (!warehouse_id || items.length === 0) {
     const suppliers = db.prepare('SELECT * FROM suppliers ORDER BY name').all();

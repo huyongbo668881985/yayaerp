@@ -58,15 +58,16 @@ function buildItemsFromRequest(db, body) {
 
   const getProduct = db.prepare('SELECT * FROM products WHERE id = ?');
   const items = [];
+  let invalidDetailCount = 0;
   for (let i = 0; i < product_id.length; i++) {
     const pid = Number(product_id[i]);
     const qty = Number(quantity[i]);
     let price = Number(unit_price[i]);
     const gift = is_gift[i] === '1' || is_gift[i] === true;
     // 数量必须是正整数：瓶/箱都不存在"半瓶"的录入场景，小数会让库存和金额统计出碎片（四处单据同规则）
-    if (!pid || !(qty > 0) || !Number.isInteger(qty)) continue;
+    if (!pid || !(qty > 0) || !Number.isInteger(qty)) { invalidDetailCount++; continue; }
     const product = getProduct.get(pid);
-    if (!product) continue;
+    if (!product) { invalidDetailCount++; continue; }
     const invalidPrice = !gift && !isValidNonNegativeAmount(unit_price[i]);
     if (gift) price = 0;
     else if (Number.isFinite(price)) price = roundToCents(price);
@@ -79,6 +80,7 @@ function buildItemsFromRequest(db, body) {
     const costSnapshot = costSnapshotPerBaseUnit(product, unit_choice[i]);
     items.push({ pid, qty, price, invalidPrice, unitLabel, baseQty, costSnapshot, productName: product.name, gift });
   }
+  items.invalidDetailCount = invalidDetailCount;
   return items;
 }
 
@@ -265,6 +267,10 @@ router.post('/sales/new', requireLogin, (req, res) => {
   }
 
   const items = buildItemsFromRequest(db, req.body);
+  if (items.invalidDetailCount > 0) {
+    res.status(400);
+    return renderError('商品明细包含无效行（商品、数量必须填写且数量为正整数），请修正后再提交');
+  }
   if (!warehouse_id || items.length === 0) {
     return renderError('请选择仓库并至少填写一行有效商品明细');
   }
@@ -353,6 +359,10 @@ router.post('/sales/:id/edit', requireLogin, (req, res) => {
   }
 
   const items = buildItemsFromRequest(db, req.body);
+  if (items.invalidDetailCount > 0) {
+    res.status(400);
+    return renderError('商品明细包含无效行（商品、数量必须填写且数量为正整数），请修正后再提交');
+  }
   if (!warehouse_id || items.length === 0) {
     return renderError('请选择仓库并至少填写一行有效商品明细');
   }
@@ -492,16 +502,13 @@ router.post('/sales/unapprove/:id', requireLogin, (req, res) => {
   // 退货审核通过时会把退回的货加进它自己的仓库（见 returns.js 的 approve），
   // 这里如果再把整单的库存加回去，同一批货就被加了两次，库存凭空多出来。
   //   1) 直接关联本单的已审核退货 —— 必然是同一批货，无条件拦；
-  //   2) 同一仓库、未关联销售单的"自由退货"，且与本单商品有交集、日期不早于本单
-  //      —— 这类退货很可能就是本单退回来的货（当时没填关联单号），同样会重复加回。
-  //      加"商品有交集 + 日期 >= 本单日期"这两个条件，是为了不误伤更早的、明显无关的历史退货单，
-  //      否则一个仓库里只要有过任何一张自由退货，该仓库所有销售单就永远无法反审核了。
+  //   2) 同一仓库、未关联销售单的"自由退货"，且与本单商品有交集
+  //      —— 自由退货没有可靠的来源单据，无法证明不是本单退回的货；宁可要求先反审核退货，
+  //      也不能依赖可手填的日期作推断，否则回填旧日期即可绕过库存保护。
   if (order.status === 'approved') {
     const linkedReturns = db.prepare(
       `SELECT id FROM return_orders WHERE related_sales_order_id = ? AND status = 'approved' ORDER BY id`
     ).all(order.id);
-    // order_date 建单时有 todayLocalDate() 兜底，理论上有值；万一为空则传 ''，
-    // 字符串比较下所有非空日期都 >= ''，等于退化成"不按日期过滤"——宁可多拦，不可漏拦。
     const conflictingFreeReturns = db.prepare(`
       SELECT DISTINCT ro.id
       FROM return_orders ro
@@ -509,10 +516,9 @@ router.post('/sales/unapprove/:id', requireLogin, (req, res) => {
       WHERE ro.status = 'approved'
         AND ro.related_sales_order_id IS NULL
         AND ro.warehouse_id = ?
-        AND ro.order_date >= ?
         AND roi.product_id IN (SELECT product_id FROM sales_order_items WHERE sales_order_id = ?)
       ORDER BY ro.id
-    `).all(order.warehouse_id, order.order_date || '', order.id);
+    `).all(order.warehouse_id, order.id);
 
     const conflicts = linkedReturns.concat(conflictingFreeReturns);
     if (conflicts.length > 0) {

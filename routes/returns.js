@@ -49,14 +49,15 @@ function buildItemsFromRequest(db, body) {
 
   const getProduct = db.prepare('SELECT * FROM products WHERE id = ?');
   const items = [];
+  let invalidDetailCount = 0;
   for (let i = 0; i < product_id.length; i++) {
     const pid = Number(product_id[i]);
     const qty = Number(quantity[i]);
     const price = Number(unit_price[i]);
     // 数量必须是正整数（与 sales.js 同规则）
-    if (!pid || !(qty > 0) || !Number.isInteger(qty)) continue;
+    if (!pid || !(qty > 0) || !Number.isInteger(qty)) { invalidDetailCount++; continue; }
     const product = getProduct.get(pid);
-    if (!product) continue;
+    if (!product) { invalidDetailCount++; continue; }
     const usePack = unit_choice[i] === 'pack' && product.pack_unit;
     const unitLabel = usePack ? product.pack_unit : product.unit;
     const baseQty = usePack ? qty * product.pack_size : qty;
@@ -69,6 +70,7 @@ function buildItemsFromRequest(db, body) {
       unitLabel, baseQty, costSnapshot, productName: product.name
     });
   }
+  items.invalidDetailCount = invalidDetailCount;
   return items;
 }
 
@@ -265,6 +267,7 @@ router.post('/returns/new', requireLogin, (req, res) => {
     ? related_sales_order_id.trim() : null;
 
   const items = buildItemsFromRequest(db, req.body);
+  if (items.invalidDetailCount > 0) { res.status(400); return renderError('商品明细包含无效行（商品、数量必须填写且数量为正整数），请修正后再提交'); }
   if (!warehouse_id || items.length === 0) {
     return renderError('请选择退回的仓库并至少填写一行有效商品明细');
   }
@@ -366,6 +369,7 @@ router.post('/returns/:id/edit', requireLogin, (req, res) => {
     ? related_sales_order_id.trim() : null;
 
   const items = buildItemsFromRequest(db, req.body);
+  if (items.invalidDetailCount > 0) { res.status(400); return renderError('商品明细包含无效行（商品、数量必须填写且数量为正整数），请修正后再提交'); }
   if (!warehouse_id || items.length === 0) {
     return renderError('请选择退回的仓库并至少填写一行有效商品明细');
   }

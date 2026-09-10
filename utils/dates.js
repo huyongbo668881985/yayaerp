@@ -9,4 +9,13 @@ function todayLocalDate() {
   return new Date(Date.now() + CST_OFFSET_MS).toISOString().slice(0, 10);
 }
 
-module.exports = { todayLocalDate, CST_OFFSET_MS };
+/** 将 SQLite datetime('now') 产生的 UTC 时间显示为北京时间。 */
+function formatDateTime(value) {
+  if (!value) return '';
+  const raw = String(value).trim();
+  const parsed = new Date(/Z$|[+-]\d\d:?\d\d$/.test(raw) ? raw : raw.replace(' ', 'T') + 'Z');
+  if (Number.isNaN(parsed.getTime())) return raw;
+  return new Date(parsed.getTime() + CST_OFFSET_MS).toISOString().slice(0, 19).replace('T', ' ');
+}
+
+module.exports = { todayLocalDate, formatDateTime, CST_OFFSET_MS };

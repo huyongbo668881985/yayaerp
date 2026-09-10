@@ -1,6 +1,7 @@
 const express = require('express');
 const { requireLogin, requireAdmin } = require('../middleware/auth');
 const { sendCsv } = require('../utils/csv');
+const { formatDateTime } = require('../utils/dates');
 const router = express.Router();
 
 // 当前库存快照（商品 × 仓库）：库存页面和 API v1 共用这一份查询
@@ -43,8 +44,8 @@ function queryStockLogs(db, user, start, end, limit) {
   `;
   const params = [];
   if (user && user.role !== 'admin') { sql += ' AND st.user_id = ?'; params.push(user.id); }
-  if (start) { sql += ' AND date(st.created_at) >= ?'; params.push(start); }
-  if (end) { sql += ' AND date(st.created_at) <= ?'; params.push(end); }
+  if (start) { sql += " AND date(st.created_at, '+8 hours') >= ?"; params.push(start); }
+  if (end) { sql += " AND date(st.created_at, '+8 hours') <= ?"; params.push(end); }
   sql += ' ORDER BY st.id DESC';
   if (limit) { sql += ' LIMIT ?'; params.push(limit); }
   return db.prepare(sql).all(...params);
@@ -67,7 +68,7 @@ router.get('/stock-log/export', requireLogin, (req, res) => {
   // 会被 CSV 公式注入防护加 ' 前缀（纯数字才放行），Excel 里复制出来会带着引号。
   const headers = ['时间', '商品', '仓库', '类型', '数量变化', '单位', '操作人'];
   const rows = logs.map(l => [
-    l.created_at,
+    formatDateTime(l.created_at),
     l.product_name,
     l.warehouse_name,
     typeLabels[l.type] || l.type,

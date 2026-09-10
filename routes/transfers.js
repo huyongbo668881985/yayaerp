@@ -26,18 +26,20 @@ function buildItemsFromRequest(db, body) {
   // 只取算数量/单位用得到的列，同样避免把成本价这类字段带进内存
   const getProduct = db.prepare('SELECT id, name, unit, pack_unit, pack_size FROM products WHERE id = ?');
   const items = [];
+  let invalidDetailCount = 0;
   for (let i = 0; i < product_id.length; i++) {
     const pid = Number(product_id[i]);
     const qty = Number(quantity[i]);
     // 数量必须是正整数（与 sales.js 同规则）
-    if (!pid || !(qty > 0) || !Number.isInteger(qty)) continue;
+    if (!pid || !(qty > 0) || !Number.isInteger(qty)) { invalidDetailCount++; continue; }
     const product = getProduct.get(pid);
-    if (!product) continue;
+    if (!product) { invalidDetailCount++; continue; }
     const usePack = unit_choice[i] === 'pack' && product.pack_unit;
     const unitLabel = usePack ? product.pack_unit : product.unit;
     const baseQty = usePack ? qty * product.pack_size : qty;
     items.push({ pid, qty, unitLabel, baseQty, productName: product.name });
   }
+  items.invalidDetailCount = invalidDetailCount;
   return items;
 }
 
@@ -87,6 +89,7 @@ router.post('/transfers/new', requireLogin, (req, res) => {
   if (from_warehouse_id === to_warehouse_id) return renderError('调出仓库和调入仓库不能是同一个');
 
   const items = buildItemsFromRequest(db, req.body);
+  if (items.invalidDetailCount > 0) { return renderError('商品明细包含无效行（商品、数量必须填写且数量为正整数），请修正后再提交'); }
   if (items.length === 0) return renderError('请至少填写一行有效商品明细');
 
   // 草稿/待审核阶段不动库存
@@ -147,6 +150,7 @@ router.post('/transfers/:id/edit', requireLogin, (req, res) => {
   if (from_warehouse_id === to_warehouse_id) return renderError('调出仓库和调入仓库不能是同一个');
 
   const items = buildItemsFromRequest(db, req.body);
+  if (items.invalidDetailCount > 0) { return renderError('商品明细包含无效行（商品、数量必须填写且数量为正整数），请修正后再提交'); }
   if (items.length === 0) return renderError('请至少填写一行有效商品明细');
 
   const tx = db.transaction(() => {

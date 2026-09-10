@@ -29,7 +29,7 @@
         <tr><th>时间</th><th>操作人</th><th>操作</th><th>目标租户</th><th>详情</th></tr>
         <% logs.forEach(function(l) { %>
           <tr>
-            <td><%= l.created_at %></td>
+            <td><%= formatDateTime(l.created_at) %></td>
             <td><%= l.admin_username %></td>
             <td><%= l.action %></td>
             <td><%= l.target_tenant_code ? `#${l.target_tenant_id} ${l.target_tenant_code}` : '-' %></td>

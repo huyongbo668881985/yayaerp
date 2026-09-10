@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const { formatDateTime } = require('./utils/dates');
 const session = require('express-session');
 const helmet = require('helmet');
 const SqliteSessionStore = require('./lib/sqliteSessionStore');
@@ -96,6 +97,7 @@ app.use(csrfProtection);
 
 // 所有已登录页面统一注入 currentUser，方便模板使用
 app.use((req, res, next) => {
+  res.locals.formatDateTime = formatDateTime;
   res.locals.currentUser = req.session.user || null;
   res.locals.currentTenant = req.tenant || null;
   next();

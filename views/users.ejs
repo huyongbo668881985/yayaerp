@@ -41,7 +41,7 @@
             <span class="badge badge-low">已禁用</span>
           <% } %>
         </td>
-        <td><%= u.created_at %></td>
+        <td><%= formatDateTime(u.created_at) %></td>
         <td>
           <form method="POST" action="/users/<%= u.id %>/reset-password" style="display:inline-flex; gap:4px" onsubmit="return confirm('确认重置该账号密码？')">
             <input type="password" name="new_password" placeholder="新密码" minlength="6" required style="width:110px">
@@ -71,7 +71,7 @@
         <span class="badge <%= u.role === 'admin' ? 'badge-admin' : 'badge-operator' %>"><%= u.role === 'admin' ? '管理员' : '操作员' %></span>
       </div>
       <div class="order-card-mid">
-        <span class="muted">创建于 <%= u.created_at %></span>
+        <span class="muted">创建于 <%= formatDateTime(u.created_at) %></span>
         <% if (u.active) { %>
           <span class="badge badge-operator">正常</span>
         <% } else { %>

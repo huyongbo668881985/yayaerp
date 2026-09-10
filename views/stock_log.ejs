@@ -25,7 +25,7 @@
     <tr><th>时间</th><th>商品</th><th>仓库</th><th>类型</th><th>数量变化</th><th>操作人</th></tr>
     <% logs.forEach(function(l) { %>
       <tr>
-        <td><%= l.created_at %></td>
+        <td><%= formatDateTime(l.created_at) %></td>
         <td><%= l.product_name %></td>
         <td><%= l.warehouse_name %></td>
         <td>
@@ -58,7 +58,7 @@
         <span><%= logTypeLabels[l.type] || l.type %></span>
       </div>
       <div class="order-card-bottom">
-        <span class="muted"><%= l.created_at %></span>
+        <span class="muted"><%= formatDateTime(l.created_at) %></span>
         <span class="muted"><%= l.user_name || '-' %></span>
       </div>
     </div>

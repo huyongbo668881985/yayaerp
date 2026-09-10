@@ -189,7 +189,7 @@ async function main() {
   ok(r.status === 302, `S2（商品不重叠）反审核放行（HTTP ${r.status}）—— 没有一刀切误伤`);
   ok(tdb.prepare('SELECT status FROM sales_orders WHERE id = ?').get(s2).status === 'submitted', 'S2 已回到待审核状态');
 
-  // 场景 3（反向对照）：同商品，但退货日期早于本销售单 -> 属于无关历史单，放过
+  // 场景 3：自由退货来源不可证明，日期可被手工回填，因此同商品同仓库仍必须拦截
   tdb.prepare('DELETE FROM return_order_items WHERE return_order_id = ?').run(freeRet);
   tdb.prepare('DELETE FROM return_orders WHERE id = ?').run(freeRet);
   const s3 = await mkSale(pA.id, 3);
@@ -197,7 +197,7 @@ async function main() {
   const oldRet = await mkReturn(pA.id, 1, { order_date: '2020-01-01' });
   approveReturn(oldRet);
   r = await T.post(`/sales/unapprove/${s3}`);
-  ok(r.status === 302, `S3（仅存在更早日期的同商品退货）反审核放行（HTTP ${r.status}）—— 日期过滤生效`);
+  ok(r.status === 400, `S3（同商品自由退货即使日期较早）反审核被拦（HTTP ${r.status}）—— 不依赖可篡改日期`);
 
   // 场景 4（回归对照）：直接关联本单的已审核退货 -> 原有拦截能力不能退化
   const s4 = await mkSale(pA.id, 4);

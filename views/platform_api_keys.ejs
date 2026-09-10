@@ -89,13 +89,13 @@
             <td><%= levelLabels[k.permission_level] %></td>
             <td>
               <% if (k.revoked_at) { %>
-                <span class="badge badge-low">已吊销 <%= k.revoked_at %></span>
+                <span class="badge badge-low">已吊销 <%= formatDateTime(k.revoked_at) %></span>
               <% } else { %>
                 <span class="badge badge-operator">启用中</span>
               <% } %>
             </td>
-            <td><%= k.created_at %><br><span class="muted">by <%= k.created_by_username %></span></td>
-            <td><%= k.last_used_at || '从未使用' %></td>
+            <td><%= formatDateTime(k.created_at) %><br><span class="muted">by <%= k.created_by_username %></span></td>
+            <td><%= k.last_used_at ? formatDateTime(k.last_used_at) : '从未使用' %></td>
             <td>
               <% if (!k.revoked_at) { %>
                 <form method="POST" action="/platform-admin/api-keys/<%= k.id %>/tier" style="display:flex; gap:6px" onsubmit="return confirm('确认修改该 Key 的权限档位？修改立即生效并记入审计日志。')">

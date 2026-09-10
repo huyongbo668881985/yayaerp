@@ -43,7 +43,7 @@
           </td>
           <td><%= t.expires_at || '不限' %></td>
           <td><%= t.userCount === null ? '-' : t.userCount %> / <%= t.max_users || '不限' %></td>
-          <td><%= t.created_at %></td>
+          <td><%= formatDateTime(t.created_at) %></td>
           <td>
             <a href="/platform-admin/tenants/<%= t.id %>/edit" class="btn btn-sm btn-secondary">编辑</a>
             <form action="/platform-admin/tenants/<%= t.id %>/toggle" method="POST" style="display:inline" onsubmit="return confirm('<%= t.status === 'active' ? '确认暂停该租户？暂停后该租户所有用户都无法登录。' : '确认恢复该租户的访问？' %>')">
@@ -76,7 +76,7 @@
         </div>
         <div class="order-card-bottom">
           <span class="muted">账号 <%= t.userCount === null ? '-' : t.userCount %> / <%= t.max_users || '不限' %></span>
-          <span class="muted"><%= t.created_at %></span>
+          <span class="muted"><%= formatDateTime(t.created_at) %></span>
         </div>
         <div style="display:flex; gap:8px; margin-top:10px">
           <a href="/platform-admin/tenants/<%= t.id %>/edit" class="btn btn-sm btn-secondary" style="flex:1; text-align:center">编辑</a>
