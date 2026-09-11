@@ -338,6 +338,36 @@
     position:relative;
   }
   .product-shot img{width:100%;height:100%;object-fit:cover;object-position:top left;}
+  .zoomable-image{
+    position:relative;
+    display:block;
+    width:100%;
+    height:100%;
+    padding:0;
+    border:0;
+    background:transparent;
+    color:inherit;
+    cursor:zoom-in;
+    text-align:inherit;
+  }
+  .zoomable-image::after{
+    content:'点击放大';
+    position:absolute;
+    right:12px;
+    top:12px;
+    padding:4px 8px;
+    border-radius:999px;
+    background:rgba(20,33,61,0.82);
+    color:var(--white);
+    font-size:11px;
+    font-weight:700;
+    opacity:0;
+    transform:translateY(-4px);
+    transition:opacity .2s ease, transform .2s ease;
+    pointer-events:none;
+  }
+  .zoomable-image:hover::after,
+  .zoomable-image:focus-visible::after{opacity:1;transform:none;}
   .product-shot::after{
     content:"真实系统界面";
     position:absolute;
@@ -369,7 +399,8 @@
   .phone-frame{
     height:92%;
     min-width:0;
-    flex:1 1 0;
+    width:auto;
+    flex:0 1 auto;
     aspect-ratio:390/844;
     padding:5px;
     border-radius:18px;
@@ -377,11 +408,11 @@
     box-shadow:0 18px 32px rgba(0,0,0,0.38);
     overflow:hidden;
   }
-  .phone-frame img{width:100%;height:100%;object-fit:cover;object-position:top;border-radius:14px;}
+  .phone-frame img{width:100%;height:100%;object-fit:contain;object-position:center;border-radius:14px;}
 
   @media (max-width: 860px){
     .mobile-shot-stage{aspect-ratio:auto;min-height:390px;padding:16px 22px;}
-    .phone-frame{height:360px;flex:0 1 145px;}
+    .phone-frame{height:360px;flex-basis:auto;}
   }
 
   /* ============ WORKFLOW ============ */
@@ -655,7 +686,47 @@
     .brand{font-size:17px;white-space:nowrap;}
     .container{padding-left:18px;padding-right:18px;}
     .mobile-shot-stage{min-height:360px;gap:10px;padding:12px;}
-    .phone-frame{height:330px;flex-basis:0;}
+    .phone-frame{height:330px;flex-basis:auto;}
+  }
+
+  .image-lightbox{
+    position:fixed;
+    inset:0;
+    z-index:300;
+    display:grid;
+    place-items:center;
+    padding:32px;
+    background:rgba(10,17,35,0.86);
+    opacity:0;
+    visibility:hidden;
+    transition:opacity .2s ease, visibility .2s ease;
+  }
+  .image-lightbox.is-open{opacity:1;visibility:visible;}
+  .lightbox-content{max-width:96vw;max-height:90vh;text-align:center;}
+  .lightbox-content img{
+    display:block;
+    max-width:96vw;
+    max-height:82vh;
+    width:auto;
+    height:auto;
+    object-fit:contain;
+    border-radius:8px;
+    background:var(--white);
+    box-shadow:0 24px 70px rgba(0,0,0,0.42);
+  }
+  .lightbox-caption{margin-top:10px;color:var(--white);font-size:13px;}
+  .lightbox-close{
+    position:absolute;
+    top:18px;
+    right:22px;
+    width:42px;
+    height:42px;
+    border:1px solid rgba(255,255,255,0.45);
+    border-radius:50%;
+    background:rgba(20,33,61,0.72);
+    color:var(--white);
+    font-size:28px;
+    line-height:1;
   }
 </style>
 </head>
@@ -784,7 +855,9 @@
     </div>
     <div class="feature-shot">
       <figure class="product-shot">
-        <img src="assets/screenshots/inventory-desktop.png" width="1280" height="800" loading="lazy" alt="鸭鸭进销存多仓库库存查询界面，展示箱瓶换算和低库存提醒">
+        <button class="zoomable-image" type="button" aria-label="放大查看多仓库库存查询界面">
+          <img src="assets/screenshots/inventory-desktop.png" width="1280" height="800" loading="lazy" alt="鸭鸭进销存多仓库库存查询界面，展示箱瓶换算和低库存提醒">
+        </button>
       </figure>
     </div>
   </div>
@@ -802,7 +875,9 @@
     </div>
     <div class="feature-shot">
       <figure class="product-shot">
-        <img src="assets/screenshots/approval-desktop.png" width="1280" height="800" loading="lazy" alt="鸭鸭进销存销售单审批界面，展示待审核状态、商品明细和审批操作">
+        <button class="zoomable-image" type="button" aria-label="放大查看销售单审批界面">
+          <img src="assets/screenshots/approval-desktop.png" width="1280" height="800" loading="lazy" alt="鸭鸭进销存销售单审批界面，展示待审核状态、商品明细和审批操作">
+        </button>
       </figure>
     </div>
   </div>
@@ -820,7 +895,9 @@
     </div>
     <div class="feature-shot">
       <figure class="product-shot">
-        <img src="assets/screenshots/reports-desktop.png" width="1280" height="800" loading="lazy" alt="鸭鸭进销存经营报表界面，展示销售额、应收金额和毛利指标">
+        <button class="zoomable-image" type="button" aria-label="放大查看经营报表界面">
+          <img src="assets/screenshots/reports-desktop.png" width="1280" height="800" loading="lazy" alt="鸭鸭进销存经营报表界面，展示销售额、应收金额和毛利指标">
+        </button>
       </figure>
     </div>
   </div>
@@ -839,10 +916,14 @@
     <div class="feature-shot">
       <div class="mobile-shot-stage">
         <div class="phone-frame">
-          <img src="assets/screenshots/sales-mobile.png" width="390" height="844" loading="lazy" alt="鸭鸭进销存手机端销售单卡片界面">
+          <button class="zoomable-image" type="button" aria-label="放大查看手机端销售单卡片界面">
+            <img src="assets/screenshots/sales-mobile.png" width="390" height="844" loading="lazy" alt="鸭鸭进销存手机端销售单卡片界面">
+          </button>
         </div>
         <div class="phone-frame">
-          <img src="assets/screenshots/approval-mobile.png" width="390" height="844" loading="lazy" alt="鸭鸭进销存手机端待审核销售单界面">
+          <button class="zoomable-image" type="button" aria-label="放大查看手机端待审核销售单界面">
+            <img src="assets/screenshots/approval-mobile.png" width="390" height="844" loading="lazy" alt="鸭鸭进销存手机端待审核销售单界面">
+          </button>
         </div>
       </div>
     </div>
@@ -1046,7 +1127,53 @@
   </div>
 </footer>
 
+<div class="image-lightbox" id="imageLightbox" role="dialog" aria-modal="true" aria-hidden="true" aria-label="图片预览">
+  <button class="lightbox-close" type="button" aria-label="关闭图片预览">×</button>
+  <div class="lightbox-content">
+    <img id="lightboxImage" alt="">
+    <div class="lightbox-caption" id="lightboxCaption"></div>
+  </div>
+</div>
+
 <script>
+  // 截图放大预览
+  const imageLightbox = document.getElementById('imageLightbox');
+  const lightboxImage = document.getElementById('lightboxImage');
+  const lightboxCaption = document.getElementById('lightboxCaption');
+  const lightboxClose = imageLightbox.querySelector('.lightbox-close');
+  let lastZoomTrigger = null;
+
+  function closeImageLightbox() {
+    imageLightbox.classList.remove('is-open');
+    imageLightbox.setAttribute('aria-hidden', 'true');
+    lightboxImage.removeAttribute('src');
+    if (lastZoomTrigger) lastZoomTrigger.focus();
+  }
+
+  document.querySelectorAll('.zoomable-image').forEach(trigger => {
+    trigger.addEventListener('click', () => {
+      const image = trigger.querySelector('img');
+      if (!image) return;
+      lastZoomTrigger = trigger;
+      lightboxImage.src = image.currentSrc || image.src;
+      lightboxImage.alt = image.alt;
+      lightboxCaption.textContent = image.alt;
+      imageLightbox.classList.add('is-open');
+      imageLightbox.setAttribute('aria-hidden', 'false');
+      lightboxClose.focus();
+    });
+  });
+
+  lightboxClose.addEventListener('click', closeImageLightbox);
+  imageLightbox.addEventListener('click', event => {
+    if (event.target === imageLightbox) closeImageLightbox();
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && imageLightbox.classList.contains('is-open')) {
+      closeImageLightbox();
+    }
+  });
+
   // 移动端导航切换
   const navToggle = document.getElementById('navToggle');
   const mobileNav = document.getElementById('mobileNav');
