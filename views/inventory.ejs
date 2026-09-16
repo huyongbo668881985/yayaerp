@@ -23,7 +23,7 @@
         <td><%= r.spec || '-' %></td>
         <td><%= r.warehouse_name %></td>
         <td>
-          <% const qtyText = r.quantity + ' ' + r.unit + (r.pack_unit ? ' (≈' + Math.floor(r.quantity / r.pack_size) + r.pack_unit + (r.quantity % r.pack_size ? '余' + (r.quantity % r.pack_size) + r.unit : '') + ')' : ''); %>
+          <% const qtyText = r.quantity + ' ' + r.unit + (r.pack_unit ? ' (' + Math.floor(r.quantity / r.pack_size) + r.pack_unit + (r.quantity % r.pack_size ? '余' + (r.quantity % r.pack_size) + r.unit : '') + ')' : ''); %>
           <% if (r.low_stock_threshold > 0 && r.quantity <= r.low_stock_threshold) { %>
             <span class="badge badge-low"><%= qtyText %></span>
           <% } else { %>
@@ -37,7 +37,7 @@
 
 <div class="mobile-order-cards">
   <% rows.forEach(function(r) { %>
-    <% const qtyText = r.quantity + ' ' + r.unit + (r.pack_unit ? ' (≈' + Math.floor(r.quantity / r.pack_size) + r.pack_unit + (r.quantity % r.pack_size ? '余' + (r.quantity % r.pack_size) + r.unit : '') + ')' : ''); %>
+    <% const qtyText = r.quantity + ' ' + r.unit + (r.pack_unit ? ' (' + Math.floor(r.quantity / r.pack_size) + r.pack_unit + (r.quantity % r.pack_size ? '余' + (r.quantity % r.pack_size) + r.unit : '') + ')' : ''); %>
     <% const isLow = r.low_stock_threshold > 0 && r.quantity <= r.low_stock_threshold; %>
     <div class="order-card">
       <div class="order-card-top">
