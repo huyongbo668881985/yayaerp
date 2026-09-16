@@ -3,7 +3,7 @@
 <div class="card" style="max-width:520px">
   <% if (error) { %><div class="error"><%= error %></div><% } %>
   <form method="POST" action="/customers/<%= customer.id %>/edit">
-    <div class="form-row"><label>名称 *</label><input type="text" name="name" required value="<%= customer.name %>"></div>
+    <div class="form-row"><label>名称 *</label><input type="text" name="name" required pattern="\S+" title="客户名称不能包含空格" value="<%= customer.name %>"></div>
     <div class="form-row"><label>联系人</label><input type="text" name="contact" value="<%= customer.contact || '' %>"></div>
     <div class="form-row"><label>电话</label><input type="text" name="phone" value="<%= customer.phone || '' %>"></div>
     <div class="form-row"><label>地址</label><input type="text" name="address" placeholder="送货地址" value="<%= customer.address || '' %>"></div>

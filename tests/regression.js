@@ -183,6 +183,14 @@ function rowIdOf(html, name, pattern) {
   r = await A.raw('/customers');
   const custJia = rowIdOf(r.text, '客户甲', /customers\/(\d+)\/edit/);
   const custYi = rowIdOf(r.text, '客户乙', /customers\/(\d+)\/edit/);
+  r = await A.raw('/customers/new', { body: f({ name: '客户甲', contact: '重复' }) });
+  ok(r.status === 302 && r.loc && r.loc.includes('error='), '客户名称重复新增被拒并回到客户页提示');
+  r = await A.raw(r.loc);
+  ok(r.text.includes('客户名称已存在，不能重复使用'), '客户新增重名提示正常显示');
+  r = await A.raw('/customers/new', { body: f({ name: '客户 丙', contact: '空格' }) });
+  ok(r.status === 302 && r.loc && r.loc.includes('error='), '客户名称含空格被拒并回到客户页提示');
+  r = await A.raw(`/customers/${custYi}/edit`, { body: f({ name: '客户甲', contact: '李' }) });
+  ok(r.status === 200 && r.text.includes('客户名称已存在'), '客户名称改为重复名被拒');
   r = await A.raw('/customers?q=13800000001');
   ok(r.text.includes('客户甲') && !r.text.includes('客户乙') && r.text.includes('查询结果 1 位'), '客户查询覆盖电话并显示结果数量');
   r = await A.raw('/sales/new');

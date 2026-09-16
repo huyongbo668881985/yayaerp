@@ -2,8 +2,9 @@
 <h1>客户管理</h1>
 <div class="card">
   <h2>新增客户</h2>
+  <% if (error) { %><div class="error"><%= error %></div><% } %>
   <form method="POST" action="/customers/new" class="grid-3">
-    <div class="form-row"><label>名称 *</label><input type="text" name="name" required></div>
+    <div class="form-row"><label>名称 *</label><input type="text" name="name" required pattern="\S+" title="客户名称不能包含空格"></div>
     <div class="form-row"><label>联系人</label><input type="text" name="contact"></div>
     <div class="form-row"><label>电话</label><input type="text" name="phone"></div>
     <div class="form-row" style="grid-column: 1 / -1"><label>地址</label><input type="text" name="address" placeholder="送货地址"></div>

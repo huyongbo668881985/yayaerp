@@ -2,6 +2,21 @@ const express = require('express');
 const { requireLogin, requireAdmin } = require('../middleware/auth');
 const router = express.Router();
 
+// 客户名称是业务识别键：同一租户内不允许重名，也不接受任何空白字符。
+// 必须由服务端校验，不能只依赖页面的 required/pattern，否则接口调用能绕过限制。
+function validateCustomerName(db, rawName, excludeCustomerId = null) {
+  const suppliedName = typeof rawName === 'string' ? rawName : '';
+  const name = suppliedName.trim();
+  if (!name) return { error: '客户名称必填' };
+  if (/\s/u.test(suppliedName)) return { error: '客户名称不能包含空格' };
+
+  const duplicate = excludeCustomerId === null
+    ? db.prepare('SELECT id FROM customers WHERE name = ?').get(name)
+    : db.prepare('SELECT id FROM customers WHERE name = ? AND id != ?').get(name, excludeCustomerId);
+  if (duplicate) return { error: '客户名称已存在，不能重复使用' };
+  return { name };
+}
+
 // 供应商 - 仅管理员可管理（对应采购权限）
 router.get('/suppliers', requireAdmin, (req, res) => {
   const db = req.tenantDb;
@@ -52,20 +67,22 @@ router.get('/customers', requireLogin, (req, res) => {
   const users = db.prepare('SELECT id, name, role FROM users ORDER BY name').all();
   res.render('customers', {
     customers, users, isAdmin: user.role === 'admin', query,
-    totalCustomerCount, displayedCustomerCount: customers.length
+    totalCustomerCount, displayedCustomerCount: customers.length,
+    error: typeof req.query.error === 'string' ? req.query.error : null
   });
 });
 
 router.post('/customers/new', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  const { name, contact, phone, address } = req.body;
-  if (!name) return res.redirect('/customers');
+  const { contact, phone, address } = req.body;
+  const nameCheck = validateCustomerName(db, req.body.name);
+  if (nameCheck.error) return res.redirect('/customers?error=' + encodeURIComponent(nameCheck.error));
   // 管理员可以指定归属业务员；操作员新增的客户默认归到自己名下
   const operatorId = req.session.user.role === 'admin'
     ? (req.body.operator_id || null)
     : req.session.user.id;
   db.prepare('INSERT INTO customers (name, contact, phone, address, operator_id) VALUES (?,?,?,?,?)')
-    .run(name, contact || '', phone || '', address || '', operatorId);
+    .run(nameCheck.name, contact || '', phone || '', address || '', operatorId);
   res.redirect('/customers');
 });
 
@@ -94,19 +111,20 @@ router.post('/customers/:id/edit', requireLogin, (req, res) => {
   if (!canEditCustomer(customer, req.session.user)) {
     return res.status(403).send('只能编辑自己名下的客户，如需修改请联系管理员');
   }
-  const { name, contact, phone, address } = req.body;
-  if (!name) {
+  const { contact, phone, address } = req.body;
+  const nameCheck = validateCustomerName(db, req.body.name, customer.id);
+  if (nameCheck.error) {
     const users = db.prepare('SELECT id, name, role FROM users ORDER BY name').all();
-    return res.render('customer_form', { customer, users, error: '名称必填', isAdmin: req.session.user.role === 'admin' });
+    return res.render('customer_form', { customer, users, error: nameCheck.error, isAdmin: req.session.user.role === 'admin' });
   }
   if (req.session.user.role === 'admin') {
     // 管理员可以改归属业务员
     db.prepare('UPDATE customers SET name=?, contact=?, phone=?, address=?, operator_id=? WHERE id=?')
-      .run(name, contact || '', phone || '', address || '', req.body.operator_id || null, req.params.id);
+      .run(nameCheck.name, contact || '', phone || '', address || '', req.body.operator_id || null, req.params.id);
   } else {
     // 操作员编辑不改归属人，避免误操作把客户转给别人
     db.prepare('UPDATE customers SET name=?, contact=?, phone=?, address=? WHERE id=?')
-      .run(name, contact || '', phone || '', address || '', req.params.id);
+      .run(nameCheck.name, contact || '', phone || '', address || '', req.params.id);
   }
   res.redirect('/customers');
 });
