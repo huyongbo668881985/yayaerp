@@ -113,50 +113,86 @@ input[type=text], input[type=password], input[type=number], input[type=date], in
 }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
-.customer-picker { position: relative; }
+.customer-picker-field { grid-column: span 2; }
+.customer-picker { position: relative; width: 100%; }
 .customer-picker-control {
   position: relative;
   display: flex;
   align-items: center;
+  width: 100%;
 }
 .customer-picker-icon {
   position: absolute;
-  left: 10px;
+  left: 14px;
   z-index: 1;
-  color: var(--muted);
-  font-size: 24px;
+  color: #64748b;
+  font-size: 27px;
   line-height: 1;
+  pointer-events: none;
 }
-.customer-picker-search { margin: 0; padding-left: 38px !important; padding-right: 34px !important; }
+.customer-picker-search {
+  height: 48px;
+  margin: 0;
+  padding-left: 46px !important;
+  padding-right: 42px !important;
+  border-color: #cbd5e1 !important;
+  border-radius: 10px !important;
+  background: #fff;
+  font-size: 16px !important;
+  line-height: 1.4;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.customer-picker-search:focus {
+  border-color: var(--primary) !important;
+  outline: 3px solid rgba(47, 111, 235, 0.16);
+  box-shadow: none;
+}
+.customer-picker-search::-webkit-search-decoration,
+.customer-picker-search::-webkit-search-cancel-button,
+.customer-picker-search::-webkit-search-results-button,
+.customer-picker-search::-webkit-search-results-decoration { -webkit-appearance: none; appearance: none; }
 .customer-picker-clear {
   position: absolute;
-  right: 8px;
-  width: 26px;
-  height: 26px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
   border: 0;
   border-radius: 50%;
-  background: #e5e7eb;
-  color: var(--muted);
+  background: #e2e8f0;
+  color: #475569;
   cursor: pointer;
-  font-size: 20px;
+  font-size: 22px;
   line-height: 1;
 }
 .customer-picker-results {
   position: absolute;
   z-index: 20;
-  top: calc(100% + 4px);
+  top: calc(100% + 8px);
   width: 100%;
-  max-height: 280px;
+  max-height: 336px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 20px rgba(31, 36, 48, 0.16);
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  box-shadow: 0 12px 28px rgba(31, 36, 48, 0.18);
+}
+.customer-picker-result-summary {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid var(--border);
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 600;
 }
 .customer-picker-option {
   display: block;
   width: 100%;
-  padding: 10px 12px;
+  min-height: 62px;
+  padding: 11px 14px;
   border: 0;
   border-bottom: 1px solid var(--border);
   background: transparent;
@@ -164,12 +200,13 @@ input[type=text], input[type=password], input[type=number], input[type=date], in
   cursor: pointer;
   text-align: left;
 }
+.customer-picker-option[hidden] { display: none; }
 .customer-picker-option:last-of-type { border-bottom: 0; }
 .customer-picker-option:hover, .customer-picker-option.active { background: #eff6ff; }
 .customer-picker-name, .customer-picker-meta { display: block; }
-.customer-picker-name { font-weight: 600; }
-.customer-picker-meta { margin-top: 3px; color: var(--muted); font-size: 12px; line-height: 1.4; }
-.customer-picker-empty { margin: 0; padding: 14px 12px; color: var(--muted); font-size: 13px; }
+.customer-picker-name { font-size: 15px; font-weight: 650; line-height: 1.35; }
+.customer-picker-meta { margin-top: 4px; color: var(--muted); font-size: 13px; line-height: 1.35; }
+.customer-picker-empty { margin: 0; padding: 16px 14px; color: var(--muted); font-size: 14px; }
 
 .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
 .badge-admin { background: #e0e7ff; color: #3730a3; }
@@ -275,8 +312,11 @@ input[type=text], input[type=password], input[type=number], input[type=date], in
     flex: 1;
     text-align: center;
   }
-  .customer-picker-results { max-height: min(42vh, 320px); }
-  .customer-picker-option { padding: 12px; }
+  .customer-picker-field { grid-column: auto; }
+  .customer-picker-search { height: 52px; font-size: 16px !important; }
+  .customer-picker-results { max-height: min(36dvh, 300px); }
+  .customer-picker-option { min-height: 66px; padding: 12px 14px; }
+  .customer-picker-name { font-size: 16px; }
   .customer-picker-meta { font-size: 13px; }
 
   /* 单据明细行：桌面多列网格 → 手机上堆叠成一张张小卡片 */

@@ -5,7 +5,7 @@
   <% if (order) { %><p class="muted">编辑后仍是草稿状态，保存后需要重新点"提交审核"。</p><% } %>
   <form method="POST" action="<%= order ? '/sales/' + order.id + '/edit' : '/sales/new' %>" id="saleForm">
     <div class="grid-3">
-      <div class="form-row">
+      <div class="form-row customer-picker-field">
         <label>客户（可选）</label>
         <div class="customer-picker" id="customerPicker">
           <div class="customer-picker-control">
@@ -14,6 +14,7 @@
             <button type="button" id="clearCustomer" class="customer-picker-clear" aria-label="清除已选客户" hidden>×</button>
           </div>
           <div id="customerPickerResults" class="customer-picker-results" role="listbox" hidden>
+            <div id="customerSearchCount" class="customer-picker-result-summary">共 <%= customers.length %> 位客户</div>
             <button type="button" class="customer-picker-option" role="option" data-customer-id="" data-search="散客">
               <span class="customer-picker-name">散客</span>
             </button>
@@ -27,7 +28,6 @@
           </div>
           <input type="hidden" name="customer_id" id="customerId" value="<%= order && order.customer_id ? order.customer_id : '' %>">
         </div>
-        <span id="customerSearchCount" class="muted" style="font-size:12px">共 <%= customers.length %> 位客户</span>
       </div>
       <div class="form-row">
         <label>出库仓库 *</label>
