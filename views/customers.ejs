@@ -24,27 +24,32 @@
 </div>
 
 <% if (isAdmin) { %>
-<div class="card">
-  <h2>批量转移客户归属</h2>
-  <p class="muted">业务员离职或换岗时，一次性把他名下所有客户转给接手的人，不用一个个改。</p>
-  <form method="POST" action="/customers/reassign" style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap" onsubmit="return confirm('确认要把这些客户全部转移吗？')">
-    <div class="form-row" style="margin-bottom:0">
-      <label>原业务员</label>
-      <select name="from_user_id" required>
-        <option value="">-- 请选择 --</option>
-        <% users.forEach(function(u) { %><option value="<%= u.id %>"><%= u.name %></option><% }) %>
-      </select>
-    </div>
-    <div class="form-row" style="margin-bottom:0">
-      <label>转给</label>
-      <select name="to_user_id" required>
-        <option value="">-- 请选择 --</option>
-        <% users.forEach(function(u) { %><option value="<%= u.id %>"><%= u.name %></option><% }) %>
-      </select>
-    </div>
-    <button type="submit" class="btn">批量转移</button>
-  </form>
-</div>
+<details class="card customer-reassign">
+  <summary>
+    <span>批量转移客户归属</span>
+    <span class="customer-reassign-hint">按需展开</span>
+  </summary>
+  <div class="customer-reassign-content">
+    <p class="muted">业务员离职或换岗时，一次性把他名下所有客户转给接手的人，不用一个个改。</p>
+    <form method="POST" action="/customers/reassign" style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap" onsubmit="return confirm('确认要把这些客户全部转移吗？')">
+      <div class="form-row" style="margin-bottom:0">
+        <label>原业务员</label>
+        <select name="from_user_id" required>
+          <option value="">-- 请选择 --</option>
+          <% users.forEach(function(u) { %><option value="<%= u.id %>"><%= u.name %></option><% }) %>
+        </select>
+      </div>
+      <div class="form-row" style="margin-bottom:0">
+        <label>转给</label>
+        <select name="to_user_id" required>
+          <option value="">-- 请选择 --</option>
+          <% users.forEach(function(u) { %><option value="<%= u.id %>"><%= u.name %></option><% }) %>
+        </select>
+      </div>
+      <button type="submit" class="btn">批量转移</button>
+    </form>
+  </div>
+</details>
 <% } %>
 
 <div class="card">

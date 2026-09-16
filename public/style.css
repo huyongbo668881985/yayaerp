@@ -208,6 +208,26 @@ input[type=text], input[type=password], input[type=number], input[type=date], in
 .customer-picker-meta { margin-top: 4px; color: var(--muted); font-size: 13px; line-height: 1.35; }
 .customer-picker-empty { margin: 0; padding: 16px 14px; color: var(--muted); font-size: 14px; }
 
+.customer-reassign { padding: 0; overflow: hidden; }
+.customer-reassign summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 650;
+  list-style: none;
+}
+.customer-reassign summary::-webkit-details-marker { display: none; }
+.customer-reassign summary::before { content: '›'; color: var(--muted); font-size: 22px; line-height: 1; transition: transform .15s ease; }
+.customer-reassign[open] summary::before { transform: rotate(90deg); }
+.customer-reassign summary > span:first-child { margin-right: auto; }
+.customer-reassign-hint { color: var(--muted); font-size: 13px; font-weight: 400; }
+.customer-reassign-content { padding: 0 16px 16px; border-top: 1px solid var(--border); }
+.customer-reassign-content .muted { margin: 12px 0; }
+
 .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
 .badge-admin { background: #e0e7ff; color: #3730a3; }
 .badge-operator { background: #dcfce7; color: #166534; }
@@ -318,6 +338,8 @@ input[type=text], input[type=password], input[type=number], input[type=date], in
   .customer-picker-option { min-height: 66px; padding: 12px 14px; }
   .customer-picker-name { font-size: 16px; }
   .customer-picker-meta { font-size: 13px; }
+  .customer-reassign summary { padding: 14px; }
+  .customer-reassign-content { padding: 0 14px 14px; }
 
   /* 单据明细行：桌面多列网格 → 手机上堆叠成一张张小卡片 */
   .item-row, .item-row-5, .item-row-4 {

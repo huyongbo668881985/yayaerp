@@ -183,6 +183,7 @@ function rowIdOf(html, name, pattern) {
   r = await A.raw('/customers');
   const custJia = rowIdOf(r.text, '客户甲', /customers\/(\d+)\/edit/);
   const custYi = rowIdOf(r.text, '客户乙', /customers\/(\d+)\/edit/);
+  ok(r.text.includes('<details class="card customer-reassign">'), '批量转移客户归属默认折叠');
   r = await A.raw('/customers/new', { body: f({ name: '客户甲', contact: '重复' }) });
   ok(r.status === 302 && r.loc && r.loc.includes('error='), '客户名称重复新增被拒并回到客户页提示');
   r = await A.raw(r.loc);
