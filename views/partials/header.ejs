@@ -29,7 +29,7 @@
 <% if (currentUser) { %>
 <div class="topbar">
   <div class="brand">
-    🦆 鸭鸭进销存<% if (currentTenant) { %> · <%= currentTenant.name %><% } %>
+    <a href="/" aria-label="返回首页">🦆 鸭鸭进销存</a><% if (currentTenant) { %> · <%= currentTenant.name %><% } %>
   </div>
   <button class="nav-toggle" id="navToggle" aria-label="菜单" onclick="document.getElementById('mainNav').classList.toggle('open')">☰</button>
   <nav id="mainNav">
@@ -42,10 +42,10 @@
       <a href="/purchases">采购</a>
       <a href="/reports">经营报表</a>
     <% } %>
-    <a href="/products">基础信息</a>
     <% if (currentUser.role === 'admin') { %>
       <a href="/users">账号</a>
     <% } %>
+    <a href="/products">基础信息</a>
     <div class="nav-userbox">
       <span><%= currentUser.name %>（<%= currentUser.role === 'admin' ? '管理员' : '操作员' %>）</span>
       <a href="/change-password">修改密码</a>

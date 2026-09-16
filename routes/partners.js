@@ -33,16 +33,27 @@ router.post('/suppliers/:id/delete', requireAdmin, (req, res) => {
 router.get('/customers', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const user = req.session.user;
+  const query = typeof req.query.q === 'string' ? req.query.q.trim() : '';
   const baseSql = `
     SELECT c.*, u.name AS operator_name
     FROM customers c
     LEFT JOIN users u ON u.id = c.operator_id
   `;
-  const customers = user.role === 'admin'
-    ? db.prepare(baseSql + ' ORDER BY c.id DESC').all()
-    : db.prepare(baseSql + ' WHERE c.operator_id = ? ORDER BY c.id DESC').all(user.id);
+  const scopeClause = user.role === 'admin' ? '' : ' WHERE c.operator_id = ?';
+  const scopeParams = user.role === 'admin' ? [] : [user.id];
+  const searchClause = query
+    ? `${scopeClause ? ' AND' : ' WHERE'} (c.name LIKE ? OR c.contact LIKE ? OR c.phone LIKE ? OR c.address LIKE ?)`
+    : '';
+  const searchParams = query ? Array(4).fill(`%${query}%`) : [];
+  const customers = db.prepare(baseSql + scopeClause + searchClause + ' ORDER BY c.id DESC')
+    .all(...scopeParams, ...searchParams);
+  const totalCustomerCount = db.prepare(`SELECT COUNT(*) AS count FROM customers c${scopeClause}`)
+    .get(...scopeParams).count;
   const users = db.prepare('SELECT id, name, role FROM users ORDER BY name').all();
-  res.render('customers', { customers, users, isAdmin: user.role === 'admin' });
+  res.render('customers', {
+    customers, users, isAdmin: user.role === 'admin', query,
+    totalCustomerCount, displayedCustomerCount: customers.length
+  });
 });
 
 router.post('/customers/new', requireLogin, (req, res) => {

@@ -102,7 +102,7 @@ function attachEffectivePayment(order) {
   return order;
 }
 
-function queryOrders(db, user, start, end, unpaidOnly) {
+function queryOrders(db, user, start, end, unpaidOnly, pendingOnly) {
   let sql = `
     SELECT so.*, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name,
            ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount
@@ -119,13 +119,15 @@ function queryOrders(db, user, start, end, unpaidOnly) {
   }
   if (start) { sql += ' AND so.order_date >= ?'; params.push(start); }
   if (end) { sql += ' AND so.order_date <= ?'; params.push(end); }
+  if (pendingOnly) sql += " AND so.status = 'submitted'";
   sql += ' ORDER BY so.id DESC';
   let orders = db.prepare(sql).all(...params).map(attachEffectivePayment);
   if (unpaidOnly) orders = orders.filter(o => o.effective_status !== 'paid');
   return orders;
 }
 
-// 销售单列表 - 管理员看全部，操作员看自己的；支持 ?start=&end= 按日期范围筛选，?unpaid=1 只看未结清
+// 销售单列表 - 管理员看全部，操作员看自己的；支持 ?start=&end= 按日期范围筛选，?unpaid=1 只看未结清。
+// 管理员可使用 ?pending=1 集中查看所有待审核销售单，避免遗漏审核；操作员即使手动拼接该参数也不会生效。
 // 分页：每页 50 条。"只看未结清"是查询后按有效欠款在内存里过滤的，
 // 所以先全量查询+过滤，再内存切片分页，保证筛选和分页的组合结果正确。
 // （SQLite 本地查询几千行很快，真正的开销是渲染 HTML，只渲染当页即可。）
@@ -136,8 +138,9 @@ router.get('/sales', requireLogin, (req, res) => {
   const user = req.session.user;
   const { start, end } = req.query;
   const unpaidOnly = req.query.unpaid === '1';
+  const pendingOnly = user.role === 'admin' && req.query.pending === '1';
 
-  const allOrders = queryOrders(db, user, start, end, unpaidOnly);
+  const allOrders = queryOrders(db, user, start, end, unpaidOnly, pendingOnly);
   const totalOrders = allOrders.length;
   const totalPages = Math.max(1, Math.ceil(totalOrders / SALES_PAGE_SIZE));
 
@@ -147,7 +150,7 @@ router.get('/sales', requireLogin, (req, res) => {
 
   const orders = allOrders.slice((page - 1) * SALES_PAGE_SIZE, page * SALES_PAGE_SIZE);
   res.render('sales', {
-    orders, user, start: start || '', end: end || '', unpaidOnly,
+    orders, user, start: start || '', end: end || '', unpaidOnly, pendingOnly,
     page, totalPages, totalOrders
   });
 });
@@ -158,6 +161,7 @@ router.get('/sales/export', requireLogin, (req, res) => {
   const user = req.session.user;
   const { start, end } = req.query;
   const unpaidOnly = req.query.unpaid === '1';
+  const pendingOnly = user.role === 'admin' && req.query.pending === '1';
 
   let sql = `
     SELECT so.id AS order_id, so.order_date, so.warehouse_id, so.status,
@@ -177,6 +181,7 @@ router.get('/sales/export', requireLogin, (req, res) => {
   if (user.role !== 'admin') { sql += ' AND so.user_id = ?'; params.push(user.id); }
   if (start) { sql += ' AND so.order_date >= ?'; params.push(start); }
   if (end) { sql += ' AND so.order_date <= ?'; params.push(end); }
+  if (pendingOnly) sql += " AND so.status = 'submitted'";
   sql += ' ORDER BY so.id DESC';
   let rows_raw = db.prepare(sql).all(...params).map(r => {
     const effectiveTotal = r.total_amount - r.returned_amount;

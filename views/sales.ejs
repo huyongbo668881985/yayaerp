@@ -4,7 +4,12 @@
   <a href="/returns">退货</a>
 </div>
 <h1>销售出库</h1>
-<div style="margin-bottom:12px"><a class="btn" href="/sales/new">+ 新建销售单</a></div>
+<div style="margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap">
+  <a class="btn" href="/sales/new">+ 新建销售单</a>
+  <% if (currentUser.role === 'admin') { %>
+    <a class="btn <%= pendingOnly ? '' : 'btn-secondary' %>" href="/sales?pending=1">未审核订单</a>
+  <% } %>
+</div>
 
 <div class="card">
   <form method="GET" action="/sales" style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap">
@@ -20,9 +25,10 @@
       <input type="checkbox" name="unpaid" value="1" id="unpaidCheck" <%= unpaidOnly ? 'checked' : '' %> style="width:auto">
       <label for="unpaidCheck" style="margin:0">只看未结清（欠款）</label>
     </div>
+    <% if (pendingOnly) { %><input type="hidden" name="pending" value="1"><% } %>
     <button type="submit" class="btn btn-secondary">筛选</button>
     <a class="btn btn-secondary" href="/sales">清除</a>
-    <a class="btn" href="/sales/export?start=<%= start %>&end=<%= end %><%= unpaidOnly ? '&unpaid=1' : '' %>">导出CSV</a>
+    <a class="btn" href="/sales/export?start=<%= start %>&end=<%= end %><%= unpaidOnly ? '&unpaid=1' : '' %><%= pendingOnly ? '&pending=1' : '' %>">导出CSV</a>
   </form>
 </div>
 <div class="card desktop-table-wrap">
@@ -73,10 +79,10 @@
   <span class="muted">共 <%= totalOrders %> 单，第 <%= page %> / <%= totalPages %> 页</span>
   <div style="display:flex; gap:8px">
     <% if (page > 1) { %>
-      <a class="btn btn-secondary btn-sm" href="/sales?page=<%= page - 1 %>&start=<%= start %>&end=<%= end %><%= unpaidOnly ? '&unpaid=1' : '' %>">上一页</a>
+      <a class="btn btn-secondary btn-sm" href="/sales?page=<%= page - 1 %>&start=<%= start %>&end=<%= end %><%= unpaidOnly ? '&unpaid=1' : '' %><%= pendingOnly ? '&pending=1' : '' %>">上一页</a>
     <% } %>
     <% if (page < totalPages) { %>
-      <a class="btn btn-secondary btn-sm" href="/sales?page=<%= page + 1 %>&start=<%= start %>&end=<%= end %><%= unpaidOnly ? '&unpaid=1' : '' %>">下一页</a>
+      <a class="btn btn-secondary btn-sm" href="/sales?page=<%= page + 1 %>&start=<%= start %>&end=<%= end %><%= unpaidOnly ? '&unpaid=1' : '' %><%= pendingOnly ? '&pending=1' : '' %>">下一页</a>
     <% } %>
   </div>
 </div>

@@ -7,10 +7,16 @@
     <div class="grid-3">
       <div class="form-row">
         <label>客户（可选）</label>
-        <select name="customer_id">
+        <input id="customerSearch" class="customer-picker-search" type="search" placeholder="搜索名称、联系人、电话或地址" autocomplete="off">
+        <select name="customer_id" id="customerSelect">
           <option value="">-- 散客 --</option>
-          <% customers.forEach(function(c) { %><option value="<%= c.id %>" <%= order && order.customer_id === c.id ? 'selected' : '' %>><%= c.name %></option><% }) %>
+          <% customers.forEach(function(c) { %>
+            <option value="<%= c.id %>" data-search="<%= [c.name, c.contact, c.phone, c.address].filter(Boolean).join(' ').toLocaleLowerCase() %>" <%= order && order.customer_id === c.id ? 'selected' : '' %>>
+              <%= c.name %><%= c.contact ? ' · ' + c.contact : '' %><%= c.phone ? ' · ' + c.phone : '' %><%= c.address ? ' · ' + c.address : '' %>
+            </option>
+          <% }) %>
         </select>
+        <span id="customerSearchCount" class="muted" style="font-size:12px">共 <%= customers.length %> 位客户</span>
       </div>
       <div class="form-row">
         <label>出库仓库 *</label>
@@ -59,6 +65,25 @@
 
 <script>
   const PRODUCTS = <%- JSON.stringify(products).replace(/</g, '\\u003c') %>;
+
+  // 客户资料可能较多，按名称、联系人、电话或地址即时过滤；提交值仍是原有 customer_id，
+  // 所以服务端既有的客户归属校验不受影响。
+  const customerSearch = document.getElementById('customerSearch');
+  const customerSelect = document.getElementById('customerSelect');
+  const customerSearchCount = document.getElementById('customerSearchCount');
+  function filterCustomers() {
+    const keyword = customerSearch.value.trim().toLocaleLowerCase();
+    let matched = 0;
+    Array.from(customerSelect.options).forEach(function(option) {
+      if (!option.value) return;
+      const visible = !keyword || option.dataset.search.includes(keyword) || option.selected;
+      option.hidden = !visible;
+      if (visible) matched++;
+    });
+    customerSearchCount.textContent = keyword ? `匹配 ${matched} 位客户` : `共 ${matched} 位客户`;
+  }
+  customerSearch.addEventListener('input', filterCustomers);
+
   // 编辑模式下，把已有明细转换成和新建表单一致的结构（quantity 用录入时的原始数量，配合 unit_choice 换算）
   const EXISTING_ITEMS = <%- JSON.stringify((typeof existingItems !== 'undefined' ? existingItems : []).map(function(it) {
     const p = products.find(function(pr) { return pr.id === it.product_id; });

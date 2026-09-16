@@ -46,6 +46,21 @@
 </div>
 <% } %>
 
+<div class="card">
+  <form method="GET" action="/customers" class="customer-search-form" style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap">
+    <div class="form-row" style="margin-bottom:0; flex:1; min-width:220px">
+      <label for="customerQuery">查询客户</label>
+      <input id="customerQuery" type="search" name="q" value="<%= query %>" placeholder="名称、联系人、电话或地址">
+    </div>
+    <button type="submit" class="btn btn-secondary">查询</button>
+    <% if (query) { %><a class="btn btn-secondary" href="/customers">清除</a><% } %>
+  </form>
+  <p class="muted" style="margin:12px 0 0">
+    <%= query ? '查询结果 ' + displayedCustomerCount + ' 位' : '客户数量 ' + totalCustomerCount + ' 位' %>
+    <% if (query) { %>（共 <%= totalCustomerCount %> 位客户）<% } %>
+  </p>
+</div>
+
 <div class="card desktop-table-wrap">
   <table>
     <tr><th>名称</th><th>联系人</th><th>电话</th><th>地址</th><th>归属业务员</th><th>操作</th></tr>
