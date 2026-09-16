@@ -113,7 +113,63 @@ input[type=text], input[type=password], input[type=number], input[type=date], in
 }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
-.customer-picker-search { margin-bottom: 6px; }
+.customer-picker { position: relative; }
+.customer-picker-control {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.customer-picker-icon {
+  position: absolute;
+  left: 10px;
+  z-index: 1;
+  color: var(--muted);
+  font-size: 24px;
+  line-height: 1;
+}
+.customer-picker-search { margin: 0; padding-left: 38px !important; padding-right: 34px !important; }
+.customer-picker-clear {
+  position: absolute;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 50%;
+  background: #e5e7eb;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+}
+.customer-picker-results {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  width: 100%;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(31, 36, 48, 0.16);
+}
+.customer-picker-option {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+.customer-picker-option:last-of-type { border-bottom: 0; }
+.customer-picker-option:hover, .customer-picker-option.active { background: #eff6ff; }
+.customer-picker-name, .customer-picker-meta { display: block; }
+.customer-picker-name { font-weight: 600; }
+.customer-picker-meta { margin-top: 3px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.customer-picker-empty { margin: 0; padding: 14px 12px; color: var(--muted); font-size: 13px; }
 
 .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
 .badge-admin { background: #e0e7ff; color: #3730a3; }
@@ -219,6 +275,9 @@ input[type=text], input[type=password], input[type=number], input[type=date], in
     flex: 1;
     text-align: center;
   }
+  .customer-picker-results { max-height: min(42vh, 320px); }
+  .customer-picker-option { padding: 12px; }
+  .customer-picker-meta { font-size: 13px; }
 
   /* 单据明细行：桌面多列网格 → 手机上堆叠成一张张小卡片 */
   .item-row, .item-row-5, .item-row-4 {

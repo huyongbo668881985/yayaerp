@@ -7,15 +7,26 @@
     <div class="grid-3">
       <div class="form-row">
         <label>客户（可选）</label>
-        <input id="customerSearch" class="customer-picker-search" type="search" placeholder="搜索名称、联系人、电话或地址" autocomplete="off">
-        <select name="customer_id" id="customerSelect">
-          <option value="">-- 散客 --</option>
-          <% customers.forEach(function(c) { %>
-            <option value="<%= c.id %>" data-search="<%= [c.name, c.contact, c.phone, c.address].filter(Boolean).join(' ').toLocaleLowerCase() %>" <%= order && order.customer_id === c.id ? 'selected' : '' %>>
-              <%= c.name %><%= c.contact ? ' · ' + c.contact : '' %><%= c.phone ? ' · ' + c.phone : '' %><%= c.address ? ' · ' + c.address : '' %>
-            </option>
-          <% }) %>
-        </select>
+        <div class="customer-picker" id="customerPicker">
+          <div class="customer-picker-control">
+            <span class="customer-picker-icon" aria-hidden="true">⌕</span>
+            <input id="customerSearch" class="customer-picker-search" type="search" placeholder="搜索名称、联系人、电话或地址" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="customerPickerResults" aria-autocomplete="list">
+            <button type="button" id="clearCustomer" class="customer-picker-clear" aria-label="清除已选客户" hidden>×</button>
+          </div>
+          <div id="customerPickerResults" class="customer-picker-results" role="listbox" hidden>
+            <button type="button" class="customer-picker-option" role="option" data-customer-id="" data-search="散客">
+              <span class="customer-picker-name">散客</span>
+            </button>
+            <% customers.forEach(function(c) { %>
+              <button type="button" class="customer-picker-option" role="option" data-customer-id="<%= c.id %>" data-search="<%= [c.name, c.contact, c.phone, c.address].filter(Boolean).join(' ').toLocaleLowerCase() %>">
+                <span class="customer-picker-name"><%= c.name %></span>
+                <span class="customer-picker-meta"><%= [c.contact, c.phone, c.address].filter(Boolean).join(' · ') || '未填写联系方式' %></span>
+              </button>
+            <% }) %>
+            <p id="customerPickerEmpty" class="customer-picker-empty" hidden>没有匹配的客户</p>
+          </div>
+          <input type="hidden" name="customer_id" id="customerId" value="<%= order && order.customer_id ? order.customer_id : '' %>">
+        </div>
         <span id="customerSearchCount" class="muted" style="font-size:12px">共 <%= customers.length %> 位客户</span>
       </div>
       <div class="form-row">
@@ -66,23 +77,121 @@
 <script>
   const PRODUCTS = <%- JSON.stringify(products).replace(/</g, '\\u003c') %>;
 
-  // 客户资料可能较多，按名称、联系人、电话或地址即时过滤；提交值仍是原有 customer_id，
-  // 所以服务端既有的客户归属校验不受影响。
+  // 客户选择器：搜索、结果与选中值是同一个组件，避免移动端原生 select 无法受外部搜索框控制。
+  // 最终只向服务端提交 customer_id，既有客户归属权限校验不变。
   const customerSearch = document.getElementById('customerSearch');
-  const customerSelect = document.getElementById('customerSelect');
+  const customerPicker = document.getElementById('customerPicker');
+  const customerResults = document.getElementById('customerPickerResults');
+  const customerId = document.getElementById('customerId');
   const customerSearchCount = document.getElementById('customerSearchCount');
+  const customerEmpty = document.getElementById('customerPickerEmpty');
+  const clearCustomer = document.getElementById('clearCustomer');
+  const customerOptions = Array.from(customerPicker.querySelectorAll('.customer-picker-option'));
+  let activeCustomerOption = -1;
+
+  function selectedCustomerOption() {
+    return customerOptions.find(function(option) {
+      return option.dataset.customerId === customerId.value;
+    });
+  }
+
+  function customerLabel(option) {
+    return option ? option.querySelector('.customer-picker-name').textContent.trim() : '';
+  }
+
+  function openCustomerPicker() {
+    customerResults.hidden = false;
+    customerSearch.setAttribute('aria-expanded', 'true');
+    filterCustomers();
+  }
+
+  function closeCustomerPicker() {
+    customerResults.hidden = true;
+    customerSearch.setAttribute('aria-expanded', 'false');
+    activeCustomerOption = -1;
+    customerOptions.forEach(function(option) { option.classList.remove('active'); });
+  }
+
+  function selectCustomer(option) {
+    customerId.value = option.dataset.customerId;
+    customerSearch.value = customerLabel(option);
+    clearCustomer.hidden = !customerId.value;
+    customerOptions.forEach(function(item) {
+      item.setAttribute('aria-selected', item === option ? 'true' : 'false');
+    });
+    closeCustomerPicker();
+  }
+
   function filterCustomers() {
-    const keyword = customerSearch.value.trim().toLocaleLowerCase();
+    const selected = selectedCustomerOption();
+    const rawKeyword = customerSearch.value.trim().toLocaleLowerCase();
+    // 已选客户重新点开时展示完整列表；输入新文字后再开始过滤。
+    const keyword = selected && rawKeyword === customerLabel(selected).toLocaleLowerCase() ? '' : rawKeyword;
     let matched = 0;
-    Array.from(customerSelect.options).forEach(function(option) {
-      if (!option.value) return;
-      const visible = !keyword || option.dataset.search.includes(keyword) || option.selected;
+    customerOptions.forEach(function(option) {
+      const visible = !keyword || option.dataset.search.includes(keyword);
       option.hidden = !visible;
       if (visible) matched++;
     });
-    customerSearchCount.textContent = keyword ? `匹配 ${matched} 位客户` : `共 ${matched} 位客户`;
+    customerEmpty.hidden = matched > 0;
+    customerSearchCount.textContent = keyword ? `匹配 ${matched} 位客户` : `共 ${customerOptions.length - 1} 位客户`;
+    activeCustomerOption = -1;
   }
-  customerSearch.addEventListener('input', filterCustomers);
+  customerSearch.addEventListener('focus', function() {
+    openCustomerPicker();
+    if (customerId.value) customerSearch.select();
+  });
+  customerSearch.addEventListener('input', openCustomerPicker);
+  customerSearch.addEventListener('keydown', function(event) {
+    const visibleOptions = customerOptions.filter(function(option) { return !option.hidden; });
+    if (event.key === 'Escape') {
+      closeCustomerPicker();
+      customerSearch.blur();
+      return;
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (!visibleOptions.length) return;
+      activeCustomerOption = event.key === 'ArrowDown'
+        ? Math.min(activeCustomerOption + 1, visibleOptions.length - 1)
+        : Math.max(activeCustomerOption - 1, 0);
+      visibleOptions.forEach(function(option, index) { option.classList.toggle('active', index === activeCustomerOption); });
+      visibleOptions[activeCustomerOption].scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      const option = visibleOptions[activeCustomerOption] || visibleOptions[0];
+      if (option) selectCustomer(option);
+    }
+  });
+  customerOptions.forEach(function(option) {
+    option.addEventListener('click', function() { selectCustomer(option); });
+  });
+  clearCustomer.addEventListener('click', function() {
+    customerId.value = '';
+    customerSearch.value = '';
+    clearCustomer.hidden = true;
+    openCustomerPicker();
+    customerSearch.focus();
+  });
+  document.addEventListener('click', function(event) {
+    if (!customerPicker.contains(event.target)) closeCustomerPicker();
+  });
+  const initialCustomer = selectedCustomerOption();
+  if (initialCustomer && customerId.value) {
+    customerSearch.value = customerLabel(initialCustomer);
+    clearCustomer.hidden = false;
+    initialCustomer.setAttribute('aria-selected', 'true');
+  }
+  // iOS 键盘的“搜索/完成”可能直接触发表单 submit；焦点仍在客户搜索框时，
+  // 把它当作客户选择动作处理，不能让浏览器跳到后面的商品必填项。
+  document.getElementById('saleForm').addEventListener('submit', function(event) {
+    if (document.activeElement !== customerSearch) return;
+    event.preventDefault();
+    const option = customerOptions.find(function(item) { return !item.hidden; });
+    if (option) selectCustomer(option);
+  });
 
   // 编辑模式下，把已有明细转换成和新建表单一致的结构（quantity 用录入时的原始数量，配合 unit_choice 换算）
   const EXISTING_ITEMS = <%- JSON.stringify((typeof existingItems !== 'undefined' ? existingItems : []).map(function(it) {

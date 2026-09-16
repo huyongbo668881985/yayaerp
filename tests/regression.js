@@ -185,6 +185,8 @@ function rowIdOf(html, name, pattern) {
   const custYi = rowIdOf(r.text, '客户乙', /customers\/(\d+)\/edit/);
   r = await A.raw('/customers?q=13800000001');
   ok(r.text.includes('客户甲') && !r.text.includes('客户乙') && r.text.includes('查询结果 1 位'), '客户查询覆盖电话并显示结果数量');
+  r = await A.raw('/sales/new');
+  ok(r.text.includes('id="customerPicker"') && r.text.includes('name="customer_id"') && !r.text.includes('id="customerSelect"'), '销售单使用一体化可搜索客户选择器');
   ok(custJia && custYi, `客户创建 id=${custJia}/${custYi}`);
   await A.raw('/suppliers/new', { body: f({ name: '供应商一' }) });
   await A.raw('/suppliers/new', { body: f({ name: '供应商二' }) });
