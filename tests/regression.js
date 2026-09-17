@@ -122,6 +122,13 @@ function rowIdOf(html, name, pattern) {
   return null;
 }
 
+// 新建单据后，列表的排序方式可能随业务功能调整而变化，不能把页面上的第一条
+// 当成刚创建的记录。测试数据在每次运行时都是全新的，因此最大 ID 就是本次新建的单据。
+function latestIdInList(html, pattern) {
+  const ids = [...html.matchAll(pattern)].map(match => Number(match[1])).filter(Number.isInteger);
+  return ids.length ? Math.max(...ids) : null;
+}
+
 (async () => {
   section('0. 准备');
   const { platformDb } = require('../lib/platformDb');
@@ -240,7 +247,7 @@ function rowIdOf(html, name, pattern) {
 
   await A.raw('/sales/new', { body: f({ warehouse_id: String(w1), order_date: '2026-09-08', items_json: JSON.stringify([{ id: pB, quantity: 10, price: 150, unit_choice: 'base' }]) }) });
   r = await A.raw('/sales');
-  const so2 = Number(r.text.match(/\/sales\/(\d+)"/)[1]);
+  const so2 = latestIdInList(r.text, /\/sales\/(\d+)"/g);
   await A.raw(`/sales/submit/${so2}`, { body: f({ _: '1' }) });
   await A.raw(`/sales/approve/${so2}`, { body: f({ _: '1' }) });
   r = await A.raw(`/sales?customer_id=${custJia}`);
@@ -259,7 +266,7 @@ function rowIdOf(html, name, pattern) {
 
   await A.raw('/transfers/new', { body: f({ from_warehouse_id: String(w1), to_warehouse_id: String(w2), order_date: '2026-09-08', product_id: String(pB), quantity: '30', unit_choice: 'base' }) });
   r = await A.raw('/transfers');
-  const tf1 = Number(r.text.match(/\/transfers\/(\d+)"/)[1]);
+  const tf1 = latestIdInList(r.text, /\/transfers\/(\d+)"/g);
   await A.raw(`/transfers/submit/${tf1}`, { body: f({ _: '1' }) });
   r = await A.raw(`/transfers/approve/${tf1}`, { body: f({ _: '1' }) });
   ok(r.status === 302, '调拨审核通过');
@@ -269,7 +276,7 @@ function rowIdOf(html, name, pattern) {
   // 关联退货：客户甲 退 啤酒A 10 关联销售单1
   await A.raw('/returns/new', { body: f({ customer_id: String(custJia), warehouse_id: String(w1), order_date: '2026-09-08', related_sales_order_id: String(so1), refunded_amount: '0', items_json: JSON.stringify([{ id: pA, quantity: 10, price: 60, unit_choice: 'base' }]) }) });
   r = await A.raw('/returns');
-  const ro1 = Number(r.text.match(/\/returns\/(\d+)"/)[1]);
+  const ro1 = latestIdInList(r.text, /\/returns\/(\d+)"/g);
   await A.raw(`/returns/submit/${ro1}`, { body: f({ _: '1' }) });
   r = await A.raw(`/returns/approve/${ro1}`, { body: f({ _: '1' }) });
   ok(r.status === 302, '关联退货审核通过');
@@ -306,7 +313,7 @@ function rowIdOf(html, name, pattern) {
   // 自由退货
   await A.raw('/returns/new', { body: f({ warehouse_id: String(w2), order_date: '2026-09-08', items_json: JSON.stringify([{ id: pB, quantity: 5, price: 150, unit_choice: 'base' }]) }) });
   r = await A.raw('/returns');
-  const ro2 = Number(r.text.match(/\/returns\/(\d+)"/)[1]);
+  const ro2 = latestIdInList(r.text, /\/returns\/(\d+)"/g);
   await A.raw(`/returns/submit/${ro2}`, { body: f({ _: '1' }) });
   r = await A.raw(`/returns/approve/${ro2}`, { body: f({ _: '1' }) });
   ok(r.status === 302, '自由退货可审核');
@@ -418,7 +425,7 @@ function rowIdOf(html, name, pattern) {
   ok(apiNoOrigin.status === 403, '/api/ 无Origin被拒');
   await A.raw('/sales/new', { body: f({ warehouse_id: String(w1), order_date: '2026-09-08', items_json: JSON.stringify([{ id: pB, quantity: 99999, price: 150, unit_choice: 'base' }]) }) });
   r = await A.raw('/sales');
-  const soX = Number(r.text.match(/\/sales\/(\d+)"/)[1]);
+  const soX = latestIdInList(r.text, /\/sales\/(\d+)"/g);
   await A.raw(`/sales/submit/${soX}`, { body: f({ _: '1' }) });
   r = await A.raw(`/sales/approve/${soX}`, { body: f({ _: '1' }) });
   ok(r.status === 400 && (r.text.includes('不足以') || r.text.includes('库存不足')), '库存不足审核被拒');
