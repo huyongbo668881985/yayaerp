@@ -5,6 +5,7 @@ const { todayLocalDate } = require('../utils/dates');
 const { costSnapshotPerBaseUnit } = require('../lib/priceCalc');
 const { returnedAmountSubquery } = require('../lib/profitCalc');
 const { isBlank, isValidDateString, isValidNonNegativeAmount, roundToCents } = require('../lib/validators');
+const { warehousesForUser, isWarehouseInScope } = require('../lib/warehouseAccess');
 const router = express.Router();
 
 // 关联到某张销售单、且已审核的退货金额。
@@ -257,7 +258,7 @@ function isCustomerInScope(db, sessionUser, customerId, currentCustomerId) {
 router.get('/sales/new', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const customers = customersForForm(db, req.session.user, null);
-  const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
+  const warehouses = warehousesForUser(db, req.session.user);
   const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
   res.render('sale_form', { customers, warehouses, products, error: null, order: null, existingItems: [], today: todayLocalDate() });
 });
@@ -268,7 +269,7 @@ router.post('/sales/new', requireLogin, (req, res) => {
 
   const renderError = (msg) => {
     const customers = customersForForm(db, req.session.user, null);
-    const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
+    const warehouses = warehousesForUser(db, req.session.user);
     const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
     return res.render('sale_form', { customers, warehouses, products, error: msg, order: null, existingItems: [], today: todayLocalDate() });
   };
@@ -285,6 +286,10 @@ router.post('/sales/new', requireLogin, (req, res) => {
   }
   if (!warehouse_id || items.length === 0) {
     return renderError('请选择仓库并至少填写一行有效商品明细');
+  }
+  if (!isWarehouseInScope(db, req.session.user, warehouse_id)) {
+    res.status(403);
+    return renderError('所选仓库不属于你的车辆，无权使用');
   }
   if (hasInvalidPrice(items)) {
     res.status(400);
@@ -340,9 +345,10 @@ router.get('/sales/:id/edit', requireLogin, (req, res) => {
   if (!order) return res.status(404).send('单据不存在');
   if (order.status !== 'draft') return res.status(400).send('只有草稿状态的订单可以编辑，请先撤回');
   if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限编辑他人的订单');
+  if (!isWarehouseInScope(db, req.session.user, order.warehouse_id)) return res.status(403).send('无权限编辑非本人车辆的订单');
 
   const customers = customersForForm(db, req.session.user, order.customer_id);
-  const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
+  const warehouses = warehousesForUser(db, req.session.user);
   const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
   const existingItems = db.prepare('SELECT * FROM sales_order_items WHERE sales_order_id = ?').all(order.id);
   res.render('sale_form', { customers, warehouses, products, error: null, order, existingItems, today: todayLocalDate() });
@@ -354,12 +360,13 @@ router.post('/sales/:id/edit', requireLogin, (req, res) => {
   if (!order) return res.status(404).send('单据不存在');
   if (order.status !== 'draft') return res.status(400).send('只有草稿状态的订单可以编辑，请先撤回');
   if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限编辑他人的订单');
+  if (!isWarehouseInScope(db, req.session.user, order.warehouse_id)) return res.status(403).send('无权限编辑非本人车辆的订单');
 
   const { customer_id, warehouse_id, order_date, note, paid_amount, remarks } = req.body;
 
   const renderError = (msg) => {
     const customers = customersForForm(db, req.session.user, order.customer_id);
-    const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
+    const warehouses = warehousesForUser(db, req.session.user);
     const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
     const existingItems = db.prepare('SELECT * FROM sales_order_items WHERE sales_order_id = ?').all(order.id);
     return res.render('sale_form', { customers, warehouses, products, error: msg, order, existingItems, today: todayLocalDate() });
@@ -377,6 +384,10 @@ router.post('/sales/:id/edit', requireLogin, (req, res) => {
   }
   if (!warehouse_id || items.length === 0) {
     return renderError('请选择仓库并至少填写一行有效商品明细');
+  }
+  if (!isWarehouseInScope(db, req.session.user, warehouse_id)) {
+    res.status(403);
+    return renderError('所选仓库不属于你的车辆，无权使用');
   }
   if (hasInvalidPrice(items)) {
     res.status(400);

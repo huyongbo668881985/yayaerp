@@ -11,6 +11,13 @@
   <form method="POST" action="/warehouses/new" class="grid-2">
     <div class="form-row"><label>仓库名称</label><input type="text" name="name" required></div>
     <div class="form-row"><label>地址（可选）</label><input type="text" name="address"></div>
+    <div class="form-row">
+      <label>归属操作员（车辆负责人）</label>
+      <select name="operator_id">
+        <option value="">未分配（仅管理员可见）</option>
+        <% operators.forEach(function(operator) { %><option value="<%= operator.id %>"><%= operator.name %></option><% }) %>
+      </select>
+    </div>
     <div><button class="btn" type="submit">新增</button></div>
   </form>
 </div>
@@ -18,12 +25,21 @@
 
 <div class="card desktop-table-wrap">
   <table>
-    <tr><th>名称</th><th>地址</th><% if (isAdmin) { %><th>操作</th><% } %></tr>
+    <tr><th>名称</th><th>地址</th><% if (isAdmin) { %><th>归属操作员</th><th>操作</th><% } %></tr>
     <% warehouses.forEach(function(w) { %>
       <tr>
         <td><%= w.name %></td>
         <td><%= w.address || '-' %></td>
         <% if (isAdmin) { %>
+          <td>
+            <form method="POST" action="/warehouses/<%= w.id %>/operator" style="display:flex; gap:6px; align-items:center">
+              <select name="operator_id" aria-label="<%= w.name %> 的归属操作员" style="min-width:140px">
+                <option value="">未分配（仅管理员）</option>
+                <% operators.forEach(function(operator) { %><option value="<%= operator.id %>" <%= w.operator_id === operator.id ? 'selected' : '' %>><%= operator.name %></option><% }) %>
+              </select>
+              <button type="submit" class="btn btn-secondary btn-sm">保存</button>
+            </form>
+          </td>
           <td>
             <form method="POST" action="/warehouses/<%= w.id %>/delete" style="display:inline" onsubmit="return confirm('确认删除？若该仓库仍有库存将无法删除')">
               <button type="submit" style="background:none;border:none;color:#e5484d;cursor:pointer;padding:0">删除</button>
@@ -43,6 +59,16 @@
       </div>
       <% if (w.address) { %><div class="muted" style="margin-bottom:<%= isAdmin ? '8px' : '0' %>"><%= w.address %></div><% } %>
       <% if (isAdmin) { %>
+        <form method="POST" action="/warehouses/<%= w.id %>/operator" style="margin:8px 0">
+          <label class="muted" for="warehouseOperator<%= w.id %>">归属操作员</label>
+          <div style="display:flex; gap:8px; margin-top:4px">
+            <select name="operator_id" id="warehouseOperator<%= w.id %>" style="flex:1">
+              <option value="">未分配（仅管理员）</option>
+              <% operators.forEach(function(operator) { %><option value="<%= operator.id %>" <%= w.operator_id === operator.id ? 'selected' : '' %>><%= operator.name %></option><% }) %>
+            </select>
+            <button type="submit" class="btn btn-secondary btn-sm">保存</button>
+          </div>
+        </form>
         <form method="POST" action="/warehouses/<%= w.id %>/delete" onsubmit="return confirm('确认删除？若该仓库仍有库存将无法删除')">
           <button type="submit" class="btn btn-sm btn-danger" style="width:100%">删除</button>
         </form>

@@ -352,6 +352,10 @@ function rowIdOf(html, name, pattern) {
 
   section('F. 操作员边界');
   await A.raw('/users/new', { body: f({ username: 'opA', password: OPERATOR_PASSWORD, name: '操作员A', role: 'operator' }) });
+  const { getTenantDb } = require('../lib/tenantManager');
+  const opAId = getTenantDb(TENANT_A).db.prepare("SELECT id FROM users WHERE username = 'opA'").get().id;
+  r = await A.raw(`/warehouses/${w1}/operator`, { body: f({ operator_id: String(opAId) }) });
+  ok(r.loc === '/warehouses', '管理员可将车辆仓库分配给操作员');
   const O = new Client();
   r = await O.login(TENANT_A, 'opA', OPERATOR_PASSWORD);
   ok(r.loc === '/', '操作员登录');
@@ -361,6 +365,20 @@ function rowIdOf(html, name, pattern) {
     const rr = await O.raw(p);
     ok(rr.status === 200, `操作员可访问 ${label}(${rr.status})`);
   }
+  r = await O.raw('/warehouses');
+  ok(r.status === 200 && r.text.includes('总仓') && !r.text.includes('分仓'), '操作员仅可查看自己车辆仓库');
+  r = await O.raw('/inventory');
+  ok(r.text.includes('总仓') && !r.text.includes('分仓'), '操作员库存仅显示自己车辆');
+  r = await O.raw(`/inventory?warehouse_id=${w2}`);
+  ok(r.text.includes('总仓') && !r.text.includes('分仓'), '操作员手动指定他人仓库仍不可查看');
+  r = await O.raw('/sales/new');
+  ok(r.text.includes('总仓') && !r.text.includes('分仓'), '操作员销售开单仅可选择自己车辆仓库');
+  r = await O.raw('/sales/new', { body: f({ warehouse_id: String(w2), order_date: '2026-09-08', items_json: JSON.stringify([{ id: pB, quantity: 1, price: 150, unit_choice: 'base' }]) }) });
+  ok(r.status === 403 && r.text.includes('不属于你的车辆'), '操作员伪造他人仓库销售被拒');
+  r = await O.raw('/transfers/new');
+  ok(r.text.includes('总仓') && r.text.includes('分仓'), '操作员调拨申请可选择自己车辆和未分配总库');
+  r = await O.raw('/transfers/new', { body: f({ from_warehouse_id: String(w2), to_warehouse_id: String(w1), order_date: '2026-09-08', product_id: String(pB), quantity: '1', unit_choice: 'base', save_draft: '1' }) });
+  ok(r.loc === '/transfers', '操作员可从总库向自己车辆发起调拨申请');
   for (const [p, label] of [['/reports', '报表'], ['/users', '账号'], ['/purchases', '采购'], ['/products/1/edit', '商品编辑'], ['/inventory/adjust', '库存调整'], ['/customers/1/edit', '客户编辑'], ['/suppliers', '供应商']]) {
     const rr = await O.raw(p);
     ok(rr.status === 403, `操作员访问${label} 403(${rr.status})`);
@@ -421,12 +439,12 @@ function rowIdOf(html, name, pattern) {
   ok(r.text.includes('原密码不正确'), '改密旧密错误被拒');
   // 禁用操作员
   r = await A.raw('/users');
-  const opAId = rowIdOf(r.text, '操作员A', /users\/(\d+)\/toggle-active/);
-  await A.raw(`/users/${opAId}/toggle-active`, { body: f({ _: '1' }) });
+  const opAIdForToggle = rowIdOf(r.text, '操作员A', /users\/(\d+)\/toggle-active/);
+  await A.raw(`/users/${opAIdForToggle}/toggle-active`, { body: f({ _: '1' }) });
   const O2 = new Client();
   r = await O2.login(TENANT_A, 'opA', OPERATOR_PASSWORD);
   ok(r.text.includes('已被禁用'), '禁用账号登录被拒');
-  await A.raw(`/users/${opAId}/toggle-active`, { body: f({ _: '1' }) });
+  await A.raw(`/users/${opAIdForToggle}/toggle-active`, { body: f({ _: '1' }) });
 
   section('I. 数据一致性（DB 直查）');
   const Database = require('better-sqlite3');

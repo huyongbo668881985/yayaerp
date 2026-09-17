@@ -4,7 +4,7 @@
   <form method="GET" action="/inventory" class="form-row" style="max-width:260px">
     <label>按仓库筛选</label>
     <select name="warehouse_id" onchange="this.form.submit()">
-      <option value="">-- 全部仓库 --</option>
+      <option value="">-- <%= isAdmin ? '全部仓库' : '我的车辆仓库' %> --</option>
       <% warehouses.forEach(function(w) { %>
         <option value="<%= w.id %>" <%= String(warehouseId) === String(w.id) ? 'selected' : '' %>><%= w.name %></option>
       <% }) %>

@@ -2,6 +2,7 @@ const express = require('express');
 const { requireLogin } = require('../middleware/auth');
 const { todayLocalDate } = require('../utils/dates');
 const { isBlank, isValidDateString } = require('../lib/validators');
+const { warehousesForTransfer, areWarehousesTransferable } = require('../lib/warehouseAccess');
 const router = express.Router();
 
 // 调拨单表单只需要这几列。这里必须显式列列名，不能用 SELECT *：
@@ -15,6 +16,12 @@ const PRODUCT_FORM_SQL = 'SELECT id, sku, name, spec, unit, pack_unit, pack_size
 
 function canEditOrWithdraw(order, sessionUser) {
   return sessionUser.role === 'admin' || order.user_id === sessionUser.id;
+}
+
+function canAccessTransfer(db, order, sessionUser) {
+  return canEditOrWithdraw(order, sessionUser) && areWarehousesTransferable(
+    db, sessionUser, [order.from_warehouse_id, order.to_warehouse_id]
+  );
 }
 
 function buildItemsFromRequest(db, body) {
@@ -55,8 +62,8 @@ router.get('/transfers', requireLogin, (req, res) => {
   `;
   const params = [];
   if (user.role !== 'admin') {
-    sql += ' WHERE t.user_id = ?';
-    params.push(user.id);
+    sql += ' WHERE t.user_id = ? AND (wf.operator_id = ? OR wf.operator_id IS NULL) AND (wt.operator_id = ? OR wt.operator_id IS NULL)';
+    params.push(user.id, user.id, user.id);
   }
   sql += ' ORDER BY t.id DESC';
   const orders = db.prepare(sql).all(...params);
@@ -65,7 +72,7 @@ router.get('/transfers', requireLogin, (req, res) => {
 
 router.get('/transfers/new', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
+  const warehouses = warehousesForTransfer(db, req.session.user);
   const products = db.prepare(PRODUCT_FORM_SQL).all();
   res.render('transfer_form', { warehouses, products, error: null, order: null, existingItems: [], today: todayLocalDate() });
 });
@@ -75,7 +82,7 @@ router.post('/transfers/new', requireLogin, (req, res) => {
   const { from_warehouse_id, to_warehouse_id, order_date, note, remarks } = req.body;
 
   const renderError = (msg) => {
-    const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
+    const warehouses = warehousesForTransfer(db, req.session.user);
     const products = db.prepare(PRODUCT_FORM_SQL).all();
     return res.render('transfer_form', { warehouses, products, error: msg, order: null, existingItems: [], today: todayLocalDate() });
   };
@@ -87,6 +94,10 @@ router.post('/transfers/new', requireLogin, (req, res) => {
 
   if (!from_warehouse_id || !to_warehouse_id) return renderError('请选择调出仓库和调入仓库');
   if (from_warehouse_id === to_warehouse_id) return renderError('调出仓库和调入仓库不能是同一个');
+  if (!areWarehousesTransferable(db, req.session.user, [from_warehouse_id, to_warehouse_id])) {
+    res.status(403);
+    return renderError('调拨只能选择自己的车辆或未分配的总库，无权使用其他操作员车辆');
+  }
 
   const items = buildItemsFromRequest(db, req.body);
   if (items.invalidDetailCount > 0) { return renderError('商品明细包含无效行（商品、数量必须填写且数量为正整数），请修正后再提交'); }
@@ -117,9 +128,9 @@ router.get('/transfers/:id/edit', requireLogin, (req, res) => {
   const order = db.prepare('SELECT * FROM transfer_orders WHERE id = ?').get(req.params.id);
   if (!order) return res.status(404).send('单据不存在');
   if (order.status !== 'draft') return res.status(400).send('只有草稿状态的调拨单可以编辑，请先撤回');
-  if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限编辑他人的调拨单');
+  if (!canAccessTransfer(db, order, req.session.user)) return res.status(403).send('无权限编辑非本人车辆的调拨单');
 
-  const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
+  const warehouses = warehousesForTransfer(db, req.session.user);
   const products = db.prepare(PRODUCT_FORM_SQL).all();
   const existingItems = db.prepare('SELECT * FROM transfer_order_items WHERE transfer_order_id = ?').all(order.id);
   res.render('transfer_form', { warehouses, products, error: null, order, existingItems, today: todayLocalDate() });
@@ -130,12 +141,12 @@ router.post('/transfers/:id/edit', requireLogin, (req, res) => {
   const order = db.prepare('SELECT * FROM transfer_orders WHERE id = ?').get(req.params.id);
   if (!order) return res.status(404).send('单据不存在');
   if (order.status !== 'draft') return res.status(400).send('只有草稿状态的调拨单可以编辑，请先撤回');
-  if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限编辑他人的调拨单');
+  if (!canAccessTransfer(db, order, req.session.user)) return res.status(403).send('无权限编辑非本人车辆的调拨单');
 
   const { from_warehouse_id, to_warehouse_id, order_date, note, remarks } = req.body;
 
   const renderError = (msg) => {
-    const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
+    const warehouses = warehousesForTransfer(db, req.session.user);
     const products = db.prepare(PRODUCT_FORM_SQL).all();
     const existingItems = db.prepare('SELECT * FROM transfer_order_items WHERE transfer_order_id = ?').all(order.id);
     return res.render('transfer_form', { warehouses, products, error: msg, order, existingItems, today: todayLocalDate() });
@@ -148,6 +159,10 @@ router.post('/transfers/:id/edit', requireLogin, (req, res) => {
 
   if (!from_warehouse_id || !to_warehouse_id) return renderError('请选择调出仓库和调入仓库');
   if (from_warehouse_id === to_warehouse_id) return renderError('调出仓库和调入仓库不能是同一个');
+  if (!areWarehousesTransferable(db, req.session.user, [from_warehouse_id, to_warehouse_id])) {
+    res.status(403);
+    return renderError('调拨只能选择自己的车辆或未分配的总库，无权使用其他操作员车辆');
+  }
 
   const items = buildItemsFromRequest(db, req.body);
   if (items.invalidDetailCount > 0) { return renderError('商品明细包含无效行（商品、数量必须填写且数量为正整数），请修正后再提交'); }
@@ -174,7 +189,7 @@ router.post('/transfers/submit/:id', requireLogin, (req, res) => {
   const order = db.prepare('SELECT * FROM transfer_orders WHERE id = ?').get(req.params.id);
   if (!order) return res.status(404).send('单据不存在');
   if (order.status !== 'draft') return res.status(400).send('只有草稿状态可以提交审核');
-  if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限');
+  if (!canAccessTransfer(db, order, req.session.user)) return res.status(403).send('无权限');
   db.prepare("UPDATE transfer_orders SET status = 'submitted' WHERE id = ?").run(order.id);
   res.redirect('/transfers/' + order.id);
 });
@@ -185,7 +200,7 @@ router.post('/transfers/withdraw/:id', requireLogin, (req, res) => {
   const order = db.prepare('SELECT * FROM transfer_orders WHERE id = ?').get(req.params.id);
   if (!order) return res.status(404).send('单据不存在');
   if (order.status !== 'submitted') return res.status(400).send('只有待审核状态可以撤回');
-  if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限撤回他人的调拨单');
+  if (!canAccessTransfer(db, order, req.session.user)) return res.status(403).send('无权限撤回他人的调拨单');
   db.prepare("UPDATE transfer_orders SET status = 'draft' WHERE id = ?").run(order.id);
   res.redirect('/transfers/' + order.id);
 });
@@ -326,14 +341,14 @@ router.get('/transfers/:id', requireLogin, (req, res) => {
   `).get(req.params.id);
   if (!order) return res.status(404).send('单据不存在');
   // 与列表页口径保持一致：操作员只能看自己录入的调拨单（列表里有 t.user_id = ? 过滤）
-  if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限查看他人的调拨单');
+  if (!canAccessTransfer(db, order, req.session.user)) return res.status(403).send('无权限查看非本人车辆的调拨单');
   const items = db.prepare(`
     SELECT ti.*, p.name AS product_name
     FROM transfer_order_items ti
     JOIN products p ON p.id = ti.product_id
     WHERE ti.transfer_order_id = ?
   `).all(req.params.id);
-  res.render('transfer_detail', { order, items, canManage: canEditOrWithdraw(order, req.session.user) });
+  res.render('transfer_detail', { order, items, canManage: canAccessTransfer(db, order, req.session.user) });
 });
 
 module.exports = router;

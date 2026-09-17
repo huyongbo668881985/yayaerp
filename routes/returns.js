@@ -4,6 +4,7 @@ const { sendCsv } = require('../utils/csv');
 const { todayLocalDate } = require('../utils/dates');
 const { costSnapshotPerBaseUnit } = require('../lib/priceCalc');
 const { isBlank, isValidDateString, isValidNonNegativeAmount, roundToCents } = require('../lib/validators');
+const { warehousesForUser, isWarehouseInScope } = require('../lib/warehouseAccess');
 const router = express.Router();
 
 // 状态机跟销售单一致：submitted --审核通过--> approved（这一步才真正把库存加回去）
@@ -242,7 +243,7 @@ function isCustomerInScope(db, sessionUser, customerId, currentCustomerId) {
 router.get('/returns/new', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const customers = customersForForm(db, req.session.user, null);
-  const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
+  const warehouses = warehousesForUser(db, req.session.user);
   const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
   res.render('return_form', { customers, warehouses, products, error: null, order: null, existingItems: [], today: todayLocalDate() });
 });
@@ -253,7 +254,7 @@ router.post('/returns/new', requireLogin, (req, res) => {
 
   const renderError = (msg) => {
     const customers = customersForForm(db, req.session.user, null);
-    const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
+    const warehouses = warehousesForUser(db, req.session.user);
     const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
     return res.render('return_form', { customers, warehouses, products, error: msg, order: null, existingItems: [], today: todayLocalDate() });
   };
@@ -270,6 +271,10 @@ router.post('/returns/new', requireLogin, (req, res) => {
   if (items.invalidDetailCount > 0) { res.status(400); return renderError('商品明细包含无效行（商品、数量必须填写且数量为正整数），请修正后再提交'); }
   if (!warehouse_id || items.length === 0) {
     return renderError('请选择退回的仓库并至少填写一行有效商品明细');
+  }
+  if (!isWarehouseInScope(db, req.session.user, warehouse_id)) {
+    res.status(403);
+    return renderError('所选仓库不属于你的车辆，无权使用');
   }
   if (hasInvalidPrice(items)) {
     res.status(400);
@@ -335,9 +340,10 @@ router.get('/returns/:id/edit', requireLogin, (req, res) => {
   if (!order) return res.status(404).send('单据不存在');
   if (order.status !== 'draft') return res.status(400).send('只有草稿状态的退货单可以编辑，请先撤回');
   if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限编辑他人的退货单');
+  if (!isWarehouseInScope(db, req.session.user, order.warehouse_id)) return res.status(403).send('无权限编辑非本人车辆的退货单');
 
   const customers = customersForForm(db, req.session.user, order.customer_id);
-  const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
+  const warehouses = warehousesForUser(db, req.session.user);
   const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
   const existingItems = db.prepare('SELECT * FROM return_order_items WHERE return_order_id = ?').all(order.id);
   res.render('return_form', { customers, warehouses, products, error: null, order, existingItems, today: todayLocalDate() });
@@ -349,12 +355,13 @@ router.post('/returns/:id/edit', requireLogin, (req, res) => {
   if (!order) return res.status(404).send('单据不存在');
   if (order.status !== 'draft') return res.status(400).send('只有草稿状态的退货单可以编辑，请先撤回');
   if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限编辑他人的退货单');
+  if (!isWarehouseInScope(db, req.session.user, order.warehouse_id)) return res.status(403).send('无权限编辑非本人车辆的退货单');
 
   const { customer_id, warehouse_id, order_date, note, refunded_amount, remarks, related_sales_order_id } = req.body;
 
   const renderError = (msg) => {
     const customers = customersForForm(db, req.session.user, order.customer_id);
-    const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
+    const warehouses = warehousesForUser(db, req.session.user);
     const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
     const existingItems = db.prepare('SELECT * FROM return_order_items WHERE return_order_id = ?').all(order.id);
     return res.render('return_form', { customers, warehouses, products, error: msg, order, existingItems, today: todayLocalDate() });
@@ -372,6 +379,10 @@ router.post('/returns/:id/edit', requireLogin, (req, res) => {
   if (items.invalidDetailCount > 0) { res.status(400); return renderError('商品明细包含无效行（商品、数量必须填写且数量为正整数），请修正后再提交'); }
   if (!warehouse_id || items.length === 0) {
     return renderError('请选择退回的仓库并至少填写一行有效商品明细');
+  }
+  if (!isWarehouseInScope(db, req.session.user, warehouse_id)) {
+    res.status(403);
+    return renderError('所选仓库不属于你的车辆，无权使用');
   }
   if (hasInvalidPrice(items)) {
     res.status(400);

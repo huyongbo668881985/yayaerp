@@ -116,9 +116,10 @@ router.get('/', requireLogin, (req, res) => {
     JOIN products p ON p.id = inv.product_id
     JOIN warehouses w ON w.id = inv.warehouse_id
     WHERE p.low_stock_threshold > 0 AND inv.quantity <= p.low_stock_threshold
+      ${operatorFilter ? 'AND w.operator_id = ?' : ''}
     ORDER BY inv.quantity ASC
     LIMIT 20
-  `).all();
+  `).all(...(operatorFilter ? [user.id] : []));
 
   // 最近销售单（操作员只看自己录入的——列表页/详情页都是这个口径，
   // 首页不能反而把别人的单号递到眼前）

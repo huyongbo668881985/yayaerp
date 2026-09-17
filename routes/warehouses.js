@@ -1,22 +1,50 @@
 const express = require('express');
 const { requireLogin, requireAdmin } = require('../middleware/auth');
+const { warehousesForUser } = require('../lib/warehouseAccess');
 const router = express.Router();
 
 router.get('/warehouses', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY id').all();
-  res.render('warehouses', { warehouses, isAdmin: req.session.user.role === 'admin' });
+  const isAdmin = req.session.user.role === 'admin';
+  const warehouses = (isAdmin
+    ? db.prepare(`SELECT w.*, u.name AS operator_name
+                  FROM warehouses w LEFT JOIN users u ON u.id = w.operator_id
+                  ORDER BY w.id`).all()
+    : warehousesForUser(db, req.session.user));
+  const operators = isAdmin
+    ? db.prepare("SELECT id, name FROM users WHERE role = 'operator' AND active = 1 ORDER BY name").all()
+    : [];
+  res.render('warehouses', { warehouses, operators, isAdmin });
 });
 
 router.post('/warehouses/new', requireAdmin, (req, res) => {
   const db = req.tenantDb;
-  const { name, address } = req.body;
+  const { name, address, operator_id } = req.body;
   if (!name) return res.redirect('/warehouses');
-  const info = db.prepare('INSERT INTO warehouses (name, address) VALUES (?,?)').run(name, address || '');
+  const operatorId = operator_id ? Number(operator_id) : null;
+  if (operatorId && !db.prepare("SELECT 1 FROM users WHERE id = ? AND role = 'operator' AND active = 1").get(operatorId)) {
+    return res.status(400).send('所选操作员不存在或已禁用');
+  }
+  const info = db.prepare('INSERT INTO warehouses (name, address, operator_id) VALUES (?,?,?)').run(name, address || '', operatorId);
   // 为所有已存在的商品建立此仓库的库存行
   const products = db.prepare('SELECT id FROM products').all();
   const insertInv = db.prepare('INSERT OR IGNORE INTO inventory (product_id, warehouse_id, quantity) VALUES (?,?,0)');
   for (const p of products) insertInv.run(p.id, info.lastInsertRowid);
+  res.redirect('/warehouses');
+});
+
+// 仓库/车辆归属只由管理员维护。未分配 = 仅管理员可见。
+router.post('/warehouses/:id/operator', requireAdmin, (req, res) => {
+  const db = req.tenantDb;
+  const warehouseId = Number(req.params.id);
+  const operatorId = req.body.operator_id ? Number(req.body.operator_id) : null;
+  if (!Number.isInteger(warehouseId) || !db.prepare('SELECT 1 FROM warehouses WHERE id = ?').get(warehouseId)) {
+    return res.status(404).send('仓库不存在');
+  }
+  if (operatorId && (!Number.isInteger(operatorId) || !db.prepare("SELECT 1 FROM users WHERE id = ? AND role = 'operator' AND active = 1").get(operatorId))) {
+    return res.status(400).send('所选操作员不存在或已禁用');
+  }
+  db.prepare('UPDATE warehouses SET operator_id = ? WHERE id = ?').run(operatorId, warehouseId);
   res.redirect('/warehouses');
 });
 

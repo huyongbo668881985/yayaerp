@@ -2,10 +2,11 @@ const express = require('express');
 const { requireLogin, requireAdmin } = require('../middleware/auth');
 const { sendCsv } = require('../utils/csv');
 const { formatDateTime } = require('../utils/dates');
+const { warehousesForUser, isWarehouseInScope } = require('../lib/warehouseAccess');
 const router = express.Router();
 
 // 当前库存快照（商品 × 仓库）：库存页面和 API v1 共用这一份查询
-function queryInventorySnapshot(db, warehouseId) {
+function queryInventorySnapshot(db, warehouseId, user = null) {
   let sql = `
     SELECT p.id AS product_id, p.sku, p.name, p.spec, p.unit, p.pack_unit, p.pack_size, p.low_stock_threshold,
            w.id AS warehouse_id, w.name AS warehouse_name, inv.quantity
@@ -14,19 +15,28 @@ function queryInventorySnapshot(db, warehouseId) {
     JOIN warehouses w ON w.id = inv.warehouse_id
   `;
   const params = [];
+  const conditions = [];
+  if (user && user.role !== 'admin') {
+    conditions.push('w.operator_id = ?');
+    params.push(user.id);
+  }
   if (warehouseId) {
-    sql += ' WHERE w.id = ?';
+    conditions.push('w.id = ?');
     params.push(warehouseId);
   }
+  if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
   sql += ' ORDER BY p.name, w.name';
   return db.prepare(sql).all(...params);
 }
 
 router.get('/inventory', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  const warehouseId = req.query.warehouse_id || '';
-  const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
-  const rows = queryInventorySnapshot(db, warehouseId || null);
+  const user = req.session.user;
+  const requestedWarehouseId = req.query.warehouse_id || '';
+  const warehouseId = requestedWarehouseId && isWarehouseInScope(db, user, requestedWarehouseId)
+    ? requestedWarehouseId : '';
+  const warehouses = warehousesForUser(db, user);
+  const rows = queryInventorySnapshot(db, warehouseId || null, user);
   res.render('inventory', { rows, warehouses, warehouseId, isAdmin: req.session.user.role === 'admin' });
 });
 
@@ -44,6 +54,7 @@ function queryStockLogs(db, user, start, end, limit) {
   `;
   const params = [];
   if (user && user.role !== 'admin') { sql += ' AND st.user_id = ?'; params.push(user.id); }
+  if (user && user.role !== 'admin') { sql += ' AND w.operator_id = ?'; params.push(user.id); }
   if (start) { sql += " AND date(st.created_at, '+8 hours') >= ?"; params.push(start); }
   if (end) { sql += " AND date(st.created_at, '+8 hours') <= ?"; params.push(end); }
   sql += ' ORDER BY st.id DESC';

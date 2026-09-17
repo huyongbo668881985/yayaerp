@@ -66,11 +66,12 @@ router.post('/users/:id/delete', requireAdmin, (req, res) => {
     db.prepare('SELECT COUNT(*) c FROM purchase_orders WHERE user_id = ?').get(targetId).c +
     db.prepare('SELECT COUNT(*) c FROM transfer_orders WHERE user_id = ?').get(targetId).c +
     db.prepare('SELECT COUNT(*) c FROM return_orders WHERE user_id = ?').get(targetId).c +
-    db.prepare('SELECT COUNT(*) c FROM stock_transactions WHERE user_id = ?').get(targetId).c;
+    db.prepare('SELECT COUNT(*) c FROM stock_transactions WHERE user_id = ?').get(targetId).c +
+    db.prepare('SELECT COUNT(*) c FROM warehouses WHERE operator_id = ?').get(targetId).c;
   // return_orders 也要查（与 products.js 的同类检查对齐）：漏查的话有退货记录的账号
   // 会走到外键约束报错，用户看到的是难懂的全局兑底提示
   if (refCount > 0) {
-    return res.status(400).send('无法删除：该账号名下有历史单据记录，删除会破坏单据的录入人信息。建议改用"禁用"，既能立刻收回权限，又能保留历史记录。');
+    return res.status(400).send('无法删除：该账号名下有历史单据或归属仓库，删除会破坏历史记录或导致车辆失去负责人。请先转移仓库归属；如只是离职，建议改用“禁用”。');
   }
   db.prepare('DELETE FROM users WHERE id = ?').run(targetId);
   res.redirect('/users');
