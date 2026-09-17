@@ -104,8 +104,8 @@ router.get('/reports/summary', requireApiTier('read_only'), (req, res) => {
 // ---- 酒水经营仪表盘：直营订单只读汇总 ----
 // 供外部“酒水经营仪表盘”消费；仅从 API Key 所属的 req.tenantDb 聚合，
 // 不接受 tenant_id，也不写业务数据或审计日志。
-// 未关联销售单的已审核退货没有可归属的订单：为保证总销售/成本/利润不漏算，
-// 将其作为已结清行的负向调整；实际退款始终只进入 cash_adjustments，不冒充销售收款。
+// 未关联销售单的已审核退货没有可归属的订单，独立返回给调用方作提醒和总额对账；
+// 实际退款始终只进入 cash_adjustments，不冒充销售收款。
 router.get('/reports/direct-dashboard', requireApiTier('read_only'), (req, res) => {
   // 成本只读单据明细的历史快照，绝不关联 products.cost_price（后者会被后续调价改写）。
   const salesCostSubquery = `COALESCE((SELECT SUM(soi.base_quantity * soi.cost_price_snapshot)
@@ -154,10 +154,6 @@ router.get('/reports/direct-dashboard', requireApiTier('read_only'), (req, res) 
     });
   }
 
-  // 无关联退货没有应收或销售收款可归属，故只抵减已结清行的净销售/成本/毛利；
-  // order_count 与 received_amount 均保持“销售订单”定义，不把退货伪装成订单或收款。
-  buckets.settled.sales_amount -= Number(unlinked.sales_amount);
-  buckets.settled.cost_amount -= Number(unlinked.cost_amount);
   for (const bucket of Object.values(buckets)) {
     bucket.gross_profit = bucket.sales_amount - bucket.cost_amount;
     for (const key of ['sales_amount', 'received_amount', 'receivable_amount', 'cost_amount', 'gross_profit']) {
@@ -171,10 +167,19 @@ router.get('/reports/direct-dashboard', requireApiTier('read_only'), (req, res) 
   `).get();
   const refundAmount = Number(refund.refund_amount);
   const netReceived = buckets.settled.received_amount + buckets.outstanding.received_amount - refundAmount;
+  // 未关联退货不强行归入订单分组。完整直营净额可由两组订单汇总分别减去以下 reduction 得出。
+  const unlinkedReturns = {
+    return_count: unlinked.return_count,
+    sales_amount_reduction: r2(unlinked.sales_amount),
+    cost_amount_reduction: r2(unlinked.cost_amount),
+    gross_profit_reduction: r2(Number(unlinked.sales_amount) - Number(unlinked.cost_amount)),
+    refund_amount: r2(unlinked.refund_amount)
+  };
 
   res.json({
     settled: buckets.settled,
     outstanding: buckets.outstanding,
+    unlinked_returns: unlinkedReturns,
     cash_adjustments: {
       refund_amount: r2(refundAmount),
       net_received_amount: r2(netReceived)

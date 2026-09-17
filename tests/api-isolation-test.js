@@ -224,14 +224,22 @@ function purgeTenant(code, platformDb, getTenantByCode) {
   }
   r = await get('/api/v1/reports/direct-dashboard?tenant_id=' + tenantB.id, keyA_read.plaintext);
   j = await r.json();
-  ok(r.status === 200 && j.settled.order_count === 3 && j.settled.sales_amount === 550 &&
+  ok(r.status === 200 && j.settled.order_count === 3 && j.settled.sales_amount === 600 &&
     j.settled.received_amount === 700 && j.settled.receivable_amount === 0 &&
-    j.settled.cost_amount === 310 && j.settled.gross_profit === 240,
+    j.settled.cost_amount === 340 && j.settled.gross_profit === 260,
   'direct-dashboard: 全额收款及“部分收款 + 退货抵扣结清”均在已结清行，成本取历史快照', JSON.stringify(j.settled));
   ok(j.outstanding.order_count === 2 && j.outstanding.sales_amount === 1300 &&
     j.outstanding.received_amount === 600 && j.outstanding.receivable_amount === 700 &&
     j.outstanding.cost_amount === 750 && j.outstanding.gross_profit === 550,
   'direct-dashboard: 部分收款和未收款订单均在未收款/部分收款行，草稿/拒绝单被排除', JSON.stringify(j.outstanding));
+  ok(j.unlinked_returns.return_count === 1 && j.unlinked_returns.sales_amount_reduction === 50 &&
+    j.unlinked_returns.cost_amount_reduction === 30 && j.unlinked_returns.gross_profit_reduction === 20 &&
+    j.unlinked_returns.refund_amount === 20,
+  'direct-dashboard: 未关联已审核退货独立返回，不强行归入两组销售订单', JSON.stringify(j.unlinked_returns));
+  ok(j.settled.sales_amount + j.outstanding.sales_amount - j.unlinked_returns.sales_amount_reduction === 1850 &&
+    j.settled.cost_amount + j.outstanding.cost_amount - j.unlinked_returns.cost_amount_reduction === 1060 &&
+    j.settled.gross_profit + j.outstanding.gross_profit - j.unlinked_returns.gross_profit_reduction === 790,
+  'direct-dashboard: 两组订单汇总减未关联退货后，可完整对账直营净销售、成本与毛利');
   ok(j.cash_adjustments.refund_amount === 120 && j.cash_adjustments.net_received_amount === 1180 &&
     j.meta.currency === 'CNY' && j.meta.scope === 'all_approved_history' && j.meta.unlinked_return_count === 1,
   'direct-dashboard: 所有已审核实际退款扣现金；未关联退货计数可供仪表盘提示', JSON.stringify({ cash: j.cash_adjustments, meta: j.meta }));
