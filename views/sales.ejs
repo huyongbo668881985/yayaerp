@@ -72,7 +72,7 @@
     <% orders.forEach(function(o) { %>
       <tr>
         <td><a href="/sales/<%= o.id %>">#<%= o.id %></a></td>
-        <td><%= o.order_date %></td>
+        <td><%= o.order_date %><br><span class="muted">录入 <%= formatDateTime(o.created_at).slice(0, 16) %></span></td>
         <td><%= o.customer_name || '散客' %></td>
         <td><%= o.warehouse_name %></td>
         <td>¥<%= o.total_amount.toFixed(2) %></td>
@@ -142,7 +142,7 @@
         <span class="badge" style="background:<%= st.bg %>;color:<%= st.fg %>"><%= st.text %></span>
       </div>
       <div class="order-card-mid">
-        <span><%= o.order_date %></span>
+        <span><%= o.order_date %> · 录入 <%= formatDateTime(o.created_at).slice(0, 16) %></span>
         <span><%= o.warehouse_name %></span>
       </div>
       <div class="order-card-bottom">

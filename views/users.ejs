@@ -1,5 +1,8 @@
 <%- include('partials/header') %>
 <h1>账号管理</h1>
+<% if (currentUser.role === 'admin' && users.some(function(u) { return u.id === currentUser.id && u.audit_log_owner; })) { %>
+  <p style="margin-top:-8px"><a class="btn btn-secondary btn-sm" href="/users/audit-logs">操作日志</a></p>
+<% } %>
 <% if (currentTenant && currentTenant.expires_at) { %>
   <p class="muted" style="margin-bottom:10px">服务到期时间：<%= currentTenant.expires_at %></p>
 <% } %>
@@ -28,12 +31,13 @@
 </div>
 <div class="card desktop-table-wrap">
   <table>
-    <tr><th>用户名</th><th>姓名</th><th>角色</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
+    <tr><th>用户名</th><th>姓名</th><th>角色</th><th>日志权限</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
     <% users.forEach(function(u) { %>
       <tr>
         <td><%= u.username %></td>
         <td><%= u.name %></td>
         <td><span class="badge <%= u.role === 'admin' ? 'badge-admin' : 'badge-operator' %>"><%= u.role === 'admin' ? '管理员' : '操作员' %></span></td>
+        <td><% if (u.audit_log_owner) { %><span class="badge badge-admin">日志所有者</span><% } else { %>-<% } %></td>
         <td>
           <% if (u.active) { %>
             <span class="badge badge-operator">正常</span>
@@ -78,6 +82,7 @@
           <span class="badge badge-low">已禁用</span>
         <% } %>
       </div>
+      <% if (u.audit_log_owner) { %><p class="muted" style="margin-top:8px">日志所有者（首位管理员，不能禁用或删除）</p><% } %>
       <form method="POST" action="/users/<%= u.id %>/reset-password" style="display:flex; gap:8px; margin-top:8px" onsubmit="return confirm('确认重置该账号密码？')">
         <input type="password" name="new_password" placeholder="新密码" minlength="6" required style="flex:1">
         <button type="submit" class="btn btn-secondary btn-sm">重置</button>

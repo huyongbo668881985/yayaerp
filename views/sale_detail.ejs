@@ -8,6 +8,7 @@
   </p>
   <p>
     <strong>录入人：</strong><%= order.user_name %> &nbsp;
+    <strong>录入时间：</strong><%= formatDateTime(order.created_at).slice(0, 16) %> &nbsp;
     <strong>备注：</strong><%= order.note || '-' %>
   </p>
   <p>

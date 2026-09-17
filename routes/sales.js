@@ -6,6 +6,7 @@ const { costSnapshotPerBaseUnit } = require('../lib/priceCalc');
 const { returnedAmountSubquery } = require('../lib/profitCalc');
 const { isBlank, isValidDateString, isValidNonNegativeAmount, roundToCents } = require('../lib/validators');
 const { warehousesForUser, isWarehouseInScope } = require('../lib/warehouseAccess');
+const { writeAuditLog } = require('../lib/auditLog');
 const router = express.Router();
 
 // 关联到某张销售单、且已审核的退货金额。
@@ -411,9 +412,11 @@ router.post('/sales/new', requireLogin, (req, res) => {
     for (const it of items) {
       insertItem.run(soId, it.pid, it.qty, it.unitLabel, it.baseQty, it.price, it.gift ? 1 : 0, it.costSnapshot);
     }
+    return soId;
   });
-  tx();
+  const soId = tx();
 
+  writeAuditLog(db, req.session.user, '新建销售单', '销售单', soId, `金额 ¥${total.toFixed(2)}`);
   res.redirect('/sales');
 });
 
@@ -509,7 +512,7 @@ router.post('/sales/:id/edit', requireLogin, (req, res) => {
     }
   });
   tx();
-
+  writeAuditLog(db, req.session.user, '编辑销售单', '销售单', order.id, `金额更新为 ¥${total.toFixed(2)}`);
   res.redirect('/sales/' + order.id);
 });
 
@@ -521,6 +524,7 @@ router.post('/sales/submit/:id', requireLogin, (req, res) => {
   if (order.status !== 'draft') return res.status(400).send('只有草稿状态可以提交审核');
   if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限');
   db.prepare("UPDATE sales_orders SET status = 'submitted' WHERE id = ?").run(order.id);
+  writeAuditLog(db, req.session.user, '提交销售单审核', '销售单', order.id, '状态：待审核');
   res.redirect('/sales/' + order.id);
 });
 
@@ -532,6 +536,7 @@ router.post('/sales/withdraw/:id', requireLogin, (req, res) => {
   if (order.status !== 'submitted') return res.status(400).send('只有待审核状态可以撤回');
   if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限撤回他人的订单');
   db.prepare("UPDATE sales_orders SET status = 'draft' WHERE id = ?").run(order.id);
+  writeAuditLog(db, req.session.user, '撤回销售单', '销售单', order.id, '状态：草稿');
   res.redirect('/sales/' + order.id);
 });
 
@@ -575,6 +580,7 @@ router.post('/sales/approve/:id', requireLogin, (req, res) => {
     db.prepare("UPDATE sales_orders SET status = 'approved' WHERE id = ?").run(order.id);
   });
   tx();
+  writeAuditLog(db, req.session.user, '审核通过销售单', '销售单', order.id, '状态：已审核');
 
   res.redirect('/sales/' + order.id);
 });
@@ -587,6 +593,7 @@ router.post('/sales/reject/:id', requireLogin, (req, res) => {
   if (!order) return res.status(404).send('单据不存在');
   if (order.status !== 'submitted') return res.status(400).send('只有待审核状态可以拒绝');
   db.prepare("UPDATE sales_orders SET status = 'rejected' WHERE id = ?").run(order.id);
+  writeAuditLog(db, req.session.user, '审核拒绝销售单', '销售单', order.id, '状态：已拒绝');
   res.redirect('/sales/' + order.id);
 });
 
@@ -656,6 +663,7 @@ router.post('/sales/unapprove/:id', requireLogin, (req, res) => {
     db.prepare("UPDATE sales_orders SET status = 'submitted' WHERE id = ?").run(order.id);
   });
   tx();
+  writeAuditLog(db, req.session.user, '反审核销售单', '销售单', order.id, '状态：待审核');
 
   res.redirect('/sales/' + order.id);
 });
@@ -709,6 +717,7 @@ router.post('/sales/:id/record-payment', requireLogin, (req, res) => {
 
   db.prepare('UPDATE sales_orders SET paid_amount = ?, payment_status = ? WHERE id = ?')
     .run(newPaid, paymentStatus, order.id);
+  writeAuditLog(db, req.session.user, '记录销售收款', '销售单', order.id, `本次收款 ¥${amount.toFixed(2)}，累计 ¥${newPaid.toFixed(2)}`);
   res.redirect('/sales/' + order.id);
 });
 
