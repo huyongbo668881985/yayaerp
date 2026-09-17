@@ -284,11 +284,17 @@ input[type=text], input[type=password], input[type=number], input[type=date], in
   .topbar nav {
     display: none;
     flex-direction: column;
-    width: 100%;
-    order: 3;
-    margin-top: 10px;
-    border-top: 1px solid var(--border);
-    padding-top: 10px;
+    position: absolute;
+    top: calc(100% + 1px);
+    right: 0;
+    width: min(272px, 72vw);
+    margin: 0;
+    padding: 8px 12px 12px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 0 0 0 12px;
+    box-shadow: 0 12px 24px rgba(15, 23, 42, 0.16);
+    z-index: 60;
   }
   .topbar nav.open { display: flex; }
   .topbar nav a {
