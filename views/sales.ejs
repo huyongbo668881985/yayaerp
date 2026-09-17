@@ -1,6 +1,7 @@
 <%- include('partials/header') %>
 <div class="tabbar">
   <a href="/sales" class="active">销售订单</a>
+  <a href="/sales/summary">客户销售汇总</a>
   <a href="/returns">退货</a>
 </div>
 <h1>销售订单</h1>
@@ -9,6 +10,7 @@
   <% if (currentUser.role === 'admin') { %>
     <a class="btn <%= pendingOnly ? '' : 'btn-secondary' %>" href="/sales?pending=1">未审核订单</a>
   <% } %>
+  <a class="btn btn-secondary" href="/sales/summary<%= salesQueryString({ start: start, end: end }) %>">客户销售汇总</a>
 </div>
 
 <div class="card">
@@ -52,13 +54,19 @@
     <% if (pendingOnly) { %><input type="hidden" name="pending" value="1"><% } %>
     <button type="submit" class="btn btn-secondary">筛选</button>
     <a class="btn btn-secondary" href="/sales">清除</a>
-    <a class="btn" href="/sales/export?start=<%= start %>&end=<%= end %>&customer_id=<%= customerId || '' %><%= unpaidOnly ? '&unpaid=1' : '' %><%= pendingOnly ? '&pending=1' : '' %>">导出CSV</a>
+    <a class="btn" href="/sales/export?start=<%= start %>&end=<%= end %>&customer_id=<%= customerId || '' %><%= guestOnly ? '&guest=1' : '' %><%= unpaidOnly ? '&unpaid=1' : '' %><%= pendingOnly ? '&pending=1' : '' %>">导出CSV</a>
   </form>
+</div>
+<div class="sales-mobile-sort" aria-label="销售订单排序">
+  <span>排序：</span>
+  <a class="btn btn-secondary btn-sm <%= sort === 'date' ? 'is-selected' : '' %>" href="/sales<%= salesQueryString({ start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', unpaid: unpaidOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: 'date', order: sort === 'date' && order === 'desc' ? 'asc' : 'desc' }) %>">日期<%= sort === 'date' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a>
+  <a class="btn btn-secondary btn-sm <%= sort === 'amount' ? 'is-selected' : '' %>" href="/sales<%= salesQueryString({ start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', unpaid: unpaidOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: 'amount', order: sort === 'amount' && order === 'desc' ? 'asc' : 'desc' }) %>">金额<%= sort === 'amount' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a>
+  <a class="btn btn-secondary btn-sm <%= sort === 'debt' ? 'is-selected' : '' %>" href="/sales<%= salesQueryString({ start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', unpaid: unpaidOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: 'debt', order: sort === 'debt' && order === 'desc' ? 'asc' : 'desc' }) %>">欠款<%= sort === 'debt' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a>
 </div>
 <div class="card desktop-table-wrap">
   <table>
     <tr>
-      <th>单号</th><th>日期</th><th>客户</th><th>仓库</th><th>金额</th><th>已收款</th><th>欠款</th>
+      <th>单号</th><th><a href="/sales<%= salesQueryString({ start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', unpaid: unpaidOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: 'date', order: sort === 'date' && order === 'desc' ? 'asc' : 'desc' }) %>" class="table-sort">日期<%= sort === 'date' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th><th>客户</th><th>仓库</th><th><a href="/sales<%= salesQueryString({ start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', unpaid: unpaidOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: 'amount', order: sort === 'amount' && order === 'desc' ? 'asc' : 'desc' }) %>" class="table-sort">金额<%= sort === 'amount' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th><th>已收款</th><th><a href="/sales<%= salesQueryString({ start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', unpaid: unpaidOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: 'debt', order: sort === 'debt' && order === 'desc' ? 'asc' : 'desc' }) %>" class="table-sort">欠款<%= sort === 'debt' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th>
       <th>收款状态</th><th>审核状态</th><th>录入人</th><th>操作</th>
     </tr>
     <% orders.forEach(function(o) { %>
@@ -103,10 +111,10 @@
   <span class="muted">共 <%= totalOrders %> 单，第 <%= page %> / <%= totalPages %> 页</span>
   <div style="display:flex; gap:8px">
     <% if (page > 1) { %>
-      <a class="btn btn-secondary btn-sm" href="/sales?page=<%= page - 1 %>&start=<%= start %>&end=<%= end %>&customer_id=<%= customerId || '' %><%= unpaidOnly ? '&unpaid=1' : '' %><%= pendingOnly ? '&pending=1' : '' %>">上一页</a>
+      <a class="btn btn-secondary btn-sm" href="/sales<%= salesQueryString({ page: page - 1, start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', unpaid: unpaidOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: sort, order: order }) %>">上一页</a>
     <% } %>
     <% if (page < totalPages) { %>
-      <a class="btn btn-secondary btn-sm" href="/sales?page=<%= page + 1 %>&start=<%= start %>&end=<%= end %>&customer_id=<%= customerId || '' %><%= unpaidOnly ? '&unpaid=1' : '' %><%= pendingOnly ? '&pending=1' : '' %>">下一页</a>
+      <a class="btn btn-secondary btn-sm" href="/sales<%= salesQueryString({ page: page + 1, start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', unpaid: unpaidOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: sort, order: order }) %>">下一页</a>
     <% } %>
   </div>
 </div>

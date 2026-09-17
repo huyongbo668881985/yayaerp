@@ -86,6 +86,8 @@ th, td {
 }
 th { color: var(--muted); font-weight: 600; background: #fafbfc; }
 tr:hover td { background: #fafbfc; }
+.table-sort { color: inherit; white-space: nowrap; }
+.table-sort:hover { color: var(--primary); }
 
 .btn {
   display: inline-block;
@@ -232,6 +234,14 @@ input[type=text], input[type=password], input[type=number], input[type=date], in
 .sales-filter-form .form-row { margin-bottom: 0; min-width: 156px; }
 .sales-customer-filter { flex: 1 1 280px; min-width: 280px !important; }
 .sales-unpaid-filter { display: flex; align-items: center; gap: 6px; min-height: 38px; }
+.sales-mobile-sort { display: none; }
+.summary-note { margin: -4px 0 12px; }
+.summary-debt { color: var(--danger); font-weight: 650; }
+.summary-card-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0; color: var(--muted); font-size: 12px; }
+.summary-card-grid span { display: flex; flex-direction: column; gap: 3px; }
+.summary-card-grid strong { color: var(--text); font-size: 14px; }
+.summary-card-grid .summary-debt strong { color: var(--danger); }
+.summary-card-link { color: var(--primary); font-size: 13px; font-weight: 600; }
 
 .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
 .badge-admin { background: #e0e7ff; color: #3730a3; }
@@ -355,6 +365,11 @@ input[type=text], input[type=password], input[type=number], input[type=date], in
   .sales-filter-form .form-row { flex: 1 1 calc(50% - 8px); min-width: 0; }
   .sales-customer-filter { flex-basis: 100% !important; min-width: 0 !important; }
   .sales-unpaid-filter { flex-basis: 100% !important; min-height: 30px; }
+  .sales-mobile-sort { display: flex; align-items: center; gap: 6px; margin: -4px 0 14px; font-size: 13px; color: var(--muted); }
+  .sales-mobile-sort .btn { flex: 1; padding: 8px 6px; text-align: center; }
+  .sales-mobile-sort .btn.is-selected { background: var(--primary); }
+  .summary-card-grid { grid-template-columns: 1fr 1fr; }
+  .summary-card-grid .summary-debt { grid-column: span 2; }
 
   /* 单据明细行：桌面多列网格 → 手机上堆叠成一张张小卡片 */
   .item-row, .item-row-5, .item-row-4 {

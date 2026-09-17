@@ -1,0 +1,55 @@
+<%- include('partials/header') %>
+<div class="tabbar">
+  <a href="/sales">销售订单</a>
+  <a href="/sales/summary" class="active">客户销售汇总</a>
+  <a href="/returns">退货</a>
+</div>
+<h1>客户销售汇总</h1>
+<div class="card">
+  <form method="GET" action="/sales/summary" class="sales-filter-form">
+    <div class="form-row">
+      <label>开始日期</label>
+      <input type="date" name="start" value="<%= start %>">
+    </div>
+    <div class="form-row">
+      <label>结束日期</label>
+      <input type="date" name="end" value="<%= end %>">
+    </div>
+    <div class="form-row sales-unpaid-filter">
+      <input type="checkbox" name="debt" value="1" id="debtCheck" <%= debtOnly ? 'checked' : '' %> style="width:auto">
+      <label for="debtCheck" style="margin:0">只看有欠款客户</label>
+    </div>
+    <button type="submit" class="btn btn-secondary">筛选</button>
+    <a class="btn btn-secondary" href="/sales/summary">清除</a>
+  </form>
+</div>
+<p class="muted summary-note">仅统计已审核销售单；销售额已扣除关联的已审核退货，欠款按订单当前有效欠款汇总。</p>
+<div class="card desktop-table-wrap">
+  <table>
+    <tr>
+      <th><a class="table-sort" href="/sales/summary<%= salesQueryString({ start: start, end: end, debt: debtOnly ? 1 : '', sort: 'customer', order: sort === 'customer' && order === 'asc' ? 'desc' : 'asc' }) %>">客户<%= sort === 'customer' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th>
+      <th><a class="table-sort" href="/sales/summary<%= salesQueryString({ start: start, end: end, debt: debtOnly ? 1 : '', sort: 'orders', order: sort === 'orders' && order === 'desc' ? 'asc' : 'desc' }) %>">订单数<%= sort === 'orders' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th>
+      <th><a class="table-sort" href="/sales/summary<%= salesQueryString({ start: start, end: end, debt: debtOnly ? 1 : '', sort: 'amount', order: sort === 'amount' && order === 'desc' ? 'asc' : 'desc' }) %>">销售总额<%= sort === 'amount' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th>
+      <th><a class="table-sort" href="/sales/summary<%= salesQueryString({ start: start, end: end, debt: debtOnly ? 1 : '', sort: 'paid', order: sort === 'paid' && order === 'desc' ? 'asc' : 'desc' }) %>">已收款<%= sort === 'paid' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th>
+      <th><a class="table-sort" href="/sales/summary<%= salesQueryString({ start: start, end: end, debt: debtOnly ? 1 : '', sort: 'debt', order: sort === 'debt' && order === 'desc' ? 'asc' : 'desc' }) %>">合计欠款<%= sort === 'debt' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th>
+      <th>操作</th>
+    </tr>
+    <% summaries.forEach(function(row) { %>
+      <tr>
+        <td><%= row.customer_name %></td><td><%= row.order_count %></td><td>¥<%= row.total_amount.toFixed(2) %></td><td>¥<%= row.paid_amount.toFixed(2) %></td><td class="summary-debt">¥<%= row.total_debt.toFixed(2) %></td>
+        <td><a class="btn btn-sm btn-secondary" href="/sales<%= salesQueryString({ start: start, end: end, customer_id: row.id, guest: row.id ? '' : 1 }) %>">查看订单</a></td>
+      </tr>
+    <% }) %>
+  </table>
+</div>
+<div class="mobile-order-cards summary-cards">
+  <% summaries.forEach(function(row) { %>
+    <a class="order-card" href="/sales<%= salesQueryString({ start: start, end: end, customer_id: row.id, guest: row.id ? '' : 1 }) %>">
+      <div class="order-card-top"><span class="order-card-id"><%= row.customer_name %></span><span class="badge badge-admin"><%= row.order_count %> 单</span></div>
+      <div class="summary-card-grid"><span>销售总额<strong>¥<%= row.total_amount.toFixed(2) %></strong></span><span>已收款<strong>¥<%= row.paid_amount.toFixed(2) %></strong></span><span class="summary-debt">合计欠款<strong>¥<%= row.total_debt.toFixed(2) %></strong></span></div>
+      <span class="summary-card-link">查看订单明细 →</span>
+    </a>
+  <% }) %>
+  <% if (summaries.length === 0) { %><p class="muted">没有符合条件的客户销售记录</p><% } %>
+</div>
+<%- include('partials/footer') %>

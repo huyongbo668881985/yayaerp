@@ -146,7 +146,7 @@ function rowIdOf(html, name, pattern) {
   r = await A.login(TENANT_A, 'admin', TENANT_ADMIN_PASSWORD);
   ok(r.loc === '/', '管理员登录');
   const pages = [
-    ['/', '首页'], ['/sales', '销售列表'], ['/sales/new', '销售开单'], ['/returns', '退货列表'],
+    ['/', '首页'], ['/sales', '销售列表'], ['/sales/summary', '客户销售汇总'], ['/sales/new', '销售开单'], ['/returns', '退货列表'],
     ['/returns/new', '退货开单'], ['/transfers', '调拨列表'], ['/transfers/new', '调拨开单'],
     ['/inventory', '库存'], ['/inventory/adjust', '库存调整'], ['/stock-log', '流水'],
     ['/products', '商品'], ['/products/new', '商品新建'], ['/customers', '客户'],
@@ -250,6 +250,10 @@ function rowIdOf(html, name, pattern) {
   ok(r.text.includes('未收款'), '销售订单可只看未结清');
   r = await A.raw('/sales?start=2026-09-09&end=2026-09-09');
   ok(r.text.includes('没有符合条件的订单'), '销售订单可按日期筛选');
+  r = await A.raw('/sales?sort=amount&order=asc');
+  ok(r.status === 200 && r.text.includes('金额 ↑') && r.text.includes('sort=date'), '销售订单金额排序链接与状态正常');
+  r = await A.raw('/sales/summary?sort=debt&order=desc');
+  ok(r.status === 200 && r.text.includes('客户销售汇总') && r.text.includes('客户甲') && r.text.includes('合计欠款 ↓'), '客户销售汇总可渲染并按欠款排序');
   r = await A.raw(`/sales/${so2}/record-payment`, { body: f({ amount: '99999' }) });
   ok(r.status === 400, '收款超欠款被拒');
 

@@ -103,7 +103,7 @@ function attachEffectivePayment(order) {
   return order;
 }
 
-function queryOrders(db, user, start, end, customerId, unpaidOnly, pendingOnly) {
+function queryOrders(db, user, start, end, customerId, guestOnly, unpaidOnly, pendingOnly) {
   let sql = `
     SELECT so.*, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name,
            ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount
@@ -121,11 +121,38 @@ function queryOrders(db, user, start, end, customerId, unpaidOnly, pendingOnly) 
   if (start) { sql += ' AND so.order_date >= ?'; params.push(start); }
   if (end) { sql += ' AND so.order_date <= ?'; params.push(end); }
   if (customerId) { sql += ' AND so.customer_id = ?'; params.push(customerId); }
+  if (guestOnly) sql += ' AND so.customer_id IS NULL';
   if (pendingOnly) sql += " AND so.status = 'submitted'";
   sql += ' ORDER BY so.id DESC';
   let orders = db.prepare(sql).all(...params).map(attachEffectivePayment);
   if (unpaidOnly) orders = orders.filter(o => o.effective_status !== 'paid');
   return orders;
+}
+
+function parseSort(query, allowed, defaultSort, defaultOrder = 'desc') {
+  const sort = allowed.includes(query.sort) ? query.sort : defaultSort;
+  const order = query.order === 'asc' ? 'asc' : defaultOrder;
+  return { sort, order };
+}
+
+function sortRows(rows, sort, order, values) {
+  const direction = order === 'asc' ? 1 : -1;
+  return rows.sort((a, b) => {
+    const left = values(a, sort);
+    const right = values(b, sort);
+    if (left < right) return -1 * direction;
+    if (left > right) return direction;
+    return (b.id - a.id) * direction;
+  });
+}
+
+function salesQueryString(params) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== '' && value !== false) query.set(key, String(value));
+  }
+  const text = query.toString();
+  return text ? `?${text}` : '';
 }
 
 // 销售单列表 - 管理员看全部，操作员看自己的；支持日期、客户与未结清筛选。
@@ -141,11 +168,18 @@ router.get('/sales', requireLogin, (req, res) => {
   const { start, end } = req.query;
   const requestedCustomerId = Number(req.query.customer_id);
   const customerId = Number.isInteger(requestedCustomerId) && requestedCustomerId > 0 ? requestedCustomerId : null;
+  const guestOnly = req.query.guest === '1';
   const unpaidOnly = req.query.unpaid === '1';
   const pendingOnly = user.role === 'admin' && req.query.pending === '1';
+  const { sort, order } = parseSort(req.query, ['date', 'amount', 'debt'], 'date');
   const customers = customersForForm(db, user, null);
 
-  const allOrders = queryOrders(db, user, start, end, customerId, unpaidOnly, pendingOnly);
+  const allOrders = queryOrders(db, user, start, end, customerId, guestOnly, unpaidOnly, pendingOnly);
+  sortRows(allOrders, sort, order, (row, field) => ({
+    date: row.order_date,
+    amount: row.total_amount,
+    debt: row.effective_debt
+  })[field]);
   const totalOrders = allOrders.length;
   const totalPages = Math.max(1, Math.ceil(totalOrders / SALES_PAGE_SIZE));
 
@@ -155,8 +189,51 @@ router.get('/sales', requireLogin, (req, res) => {
 
   const orders = allOrders.slice((page - 1) * SALES_PAGE_SIZE, page * SALES_PAGE_SIZE);
   res.render('sales', {
-    orders, user, customers, customerId, start: start || '', end: end || '', unpaidOnly, pendingOnly,
-    page, totalPages, totalOrders
+    orders, user, customers, customerId, guestOnly, start: start || '', end: end || '', unpaidOnly, pendingOnly,
+    sort, order, page, totalPages, totalOrders,
+    salesQueryString
+  });
+});
+
+// 客户维度销售汇总：只汇总已审核销售单，避免草稿、待审核、已拒绝单据进入正式销售/应收口径。
+// 销售额取扣除已审核退货后的有效金额；欠款与订单列表完全复用 attachEffectivePayment 的统一计算。
+router.get('/sales/summary', requireLogin, (req, res) => {
+  const db = req.tenantDb;
+  const user = req.session.user;
+  const { start, end } = req.query;
+  const debtOnly = req.query.debt === '1';
+  const { sort, order } = parseSort(req.query, ['customer', 'orders', 'amount', 'paid', 'debt'], 'debt');
+  const allOrders = queryOrders(db, user, start, end, null, false, false, false)
+    .filter(order => order.status === 'approved');
+  const byCustomer = new Map();
+  for (const sale of allOrders) {
+    const key = sale.customer_id || 'guest';
+    const row = byCustomer.get(key) || {
+      id: sale.customer_id || null,
+      customer_name: sale.customer_name || '散客',
+      order_count: 0,
+      total_amount: 0,
+      paid_amount: 0,
+      total_debt: 0
+    };
+    row.order_count += 1;
+    row.total_amount += sale.effective_total;
+    row.paid_amount += sale.paid_amount || 0;
+    row.total_debt += sale.effective_debt;
+    byCustomer.set(key, row);
+  }
+  let summaries = [...byCustomer.values()];
+  if (debtOnly) summaries = summaries.filter(row => row.total_debt > 0.001);
+  sortRows(summaries, sort, order, (row, field) => ({
+    customer: row.customer_name,
+    orders: row.order_count,
+    amount: row.total_amount,
+    paid: row.paid_amount,
+    debt: row.total_debt
+  })[field]);
+
+  res.render('sales_summary', {
+    summaries, start: start || '', end: end || '', debtOnly, sort, order, salesQueryString
   });
 });
 
@@ -167,6 +244,7 @@ router.get('/sales/export', requireLogin, (req, res) => {
   const { start, end } = req.query;
   const requestedCustomerId = Number(req.query.customer_id);
   const customerId = Number.isInteger(requestedCustomerId) && requestedCustomerId > 0 ? requestedCustomerId : null;
+  const guestOnly = req.query.guest === '1';
   const unpaidOnly = req.query.unpaid === '1';
   const pendingOnly = user.role === 'admin' && req.query.pending === '1';
 
@@ -189,6 +267,7 @@ router.get('/sales/export', requireLogin, (req, res) => {
   if (start) { sql += ' AND so.order_date >= ?'; params.push(start); }
   if (end) { sql += ' AND so.order_date <= ?'; params.push(end); }
   if (customerId) { sql += ' AND so.customer_id = ?'; params.push(customerId); }
+  if (guestOnly) sql += ' AND so.customer_id IS NULL';
   if (pendingOnly) sql += " AND so.status = 'submitted'";
   sql += ' ORDER BY so.id DESC';
   let rows_raw = db.prepare(sql).all(...params).map(r => {
