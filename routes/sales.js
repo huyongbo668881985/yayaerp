@@ -102,7 +102,7 @@ function attachEffectivePayment(order) {
   return order;
 }
 
-function queryOrders(db, user, start, end, unpaidOnly, pendingOnly) {
+function queryOrders(db, user, start, end, customerId, unpaidOnly, pendingOnly) {
   let sql = `
     SELECT so.*, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name,
            ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount
@@ -119,6 +119,7 @@ function queryOrders(db, user, start, end, unpaidOnly, pendingOnly) {
   }
   if (start) { sql += ' AND so.order_date >= ?'; params.push(start); }
   if (end) { sql += ' AND so.order_date <= ?'; params.push(end); }
+  if (customerId) { sql += ' AND so.customer_id = ?'; params.push(customerId); }
   if (pendingOnly) sql += " AND so.status = 'submitted'";
   sql += ' ORDER BY so.id DESC';
   let orders = db.prepare(sql).all(...params).map(attachEffectivePayment);
@@ -126,7 +127,7 @@ function queryOrders(db, user, start, end, unpaidOnly, pendingOnly) {
   return orders;
 }
 
-// 销售单列表 - 管理员看全部，操作员看自己的；支持 ?start=&end= 按日期范围筛选，?unpaid=1 只看未结清。
+// 销售单列表 - 管理员看全部，操作员看自己的；支持日期、客户与未结清筛选。
 // 管理员可使用 ?pending=1 集中查看所有待审核销售单，避免遗漏审核；操作员即使手动拼接该参数也不会生效。
 // 分页：每页 50 条。"只看未结清"是查询后按有效欠款在内存里过滤的，
 // 所以先全量查询+过滤，再内存切片分页，保证筛选和分页的组合结果正确。
@@ -137,10 +138,13 @@ router.get('/sales', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const user = req.session.user;
   const { start, end } = req.query;
+  const requestedCustomerId = Number(req.query.customer_id);
+  const customerId = Number.isInteger(requestedCustomerId) && requestedCustomerId > 0 ? requestedCustomerId : null;
   const unpaidOnly = req.query.unpaid === '1';
   const pendingOnly = user.role === 'admin' && req.query.pending === '1';
+  const customers = customersForForm(db, user, null);
 
-  const allOrders = queryOrders(db, user, start, end, unpaidOnly, pendingOnly);
+  const allOrders = queryOrders(db, user, start, end, customerId, unpaidOnly, pendingOnly);
   const totalOrders = allOrders.length;
   const totalPages = Math.max(1, Math.ceil(totalOrders / SALES_PAGE_SIZE));
 
@@ -150,7 +154,7 @@ router.get('/sales', requireLogin, (req, res) => {
 
   const orders = allOrders.slice((page - 1) * SALES_PAGE_SIZE, page * SALES_PAGE_SIZE);
   res.render('sales', {
-    orders, user, start: start || '', end: end || '', unpaidOnly, pendingOnly,
+    orders, user, customers, customerId, start: start || '', end: end || '', unpaidOnly, pendingOnly,
     page, totalPages, totalOrders
   });
 });
@@ -160,6 +164,8 @@ router.get('/sales/export', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const user = req.session.user;
   const { start, end } = req.query;
+  const requestedCustomerId = Number(req.query.customer_id);
+  const customerId = Number.isInteger(requestedCustomerId) && requestedCustomerId > 0 ? requestedCustomerId : null;
   const unpaidOnly = req.query.unpaid === '1';
   const pendingOnly = user.role === 'admin' && req.query.pending === '1';
 
@@ -181,6 +187,7 @@ router.get('/sales/export', requireLogin, (req, res) => {
   if (user.role !== 'admin') { sql += ' AND so.user_id = ?'; params.push(user.id); }
   if (start) { sql += ' AND so.order_date >= ?'; params.push(start); }
   if (end) { sql += ' AND so.order_date <= ?'; params.push(end); }
+  if (customerId) { sql += ' AND so.customer_id = ?'; params.push(customerId); }
   if (pendingOnly) sql += " AND so.status = 'submitted'";
   sql += ' ORDER BY so.id DESC';
   let rows_raw = db.prepare(sql).all(...params).map(r => {

@@ -243,6 +243,13 @@ function rowIdOf(html, name, pattern) {
   const so2 = Number(r.text.match(/\/sales\/(\d+)"/)[1]);
   await A.raw(`/sales/submit/${so2}`, { body: f({ _: '1' }) });
   await A.raw(`/sales/approve/${so2}`, { body: f({ _: '1' }) });
+  r = await A.raw(`/sales?customer_id=${custJia}`);
+  ok(r.text.includes(`id="salesCustomerId" value="${custJia}"`) && r.text.includes('客户甲') && !r.text.includes('散客'), '销售订单可按客户筛选');
+  ok(r.text.includes('id="salesCustomerPicker"') && r.text.includes('搜索名称、联系人、电话或地址'), '销售订单筛选复用可搜索客户选择器');
+  r = await A.raw('/sales?unpaid=1');
+  ok(r.text.includes('未收款'), '销售订单可只看未结清');
+  r = await A.raw('/sales?start=2026-09-09&end=2026-09-09');
+  ok(r.text.includes('没有符合条件的订单'), '销售订单可按日期筛选');
   r = await A.raw(`/sales/${so2}/record-payment`, { body: f({ amount: '99999' }) });
   ok(r.status === 400, '收款超欠款被拒');
 

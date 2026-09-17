@@ -1,9 +1,9 @@
 <%- include('partials/header') %>
 <div class="tabbar">
-  <a href="/sales" class="active">销售</a>
+  <a href="/sales" class="active">销售订单</a>
   <a href="/returns">退货</a>
 </div>
-<h1>销售出库</h1>
+<h1>销售订单</h1>
 <div style="margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap">
   <a class="btn" href="/sales/new">+ 新建销售单</a>
   <% if (currentUser.role === 'admin') { %>
@@ -12,7 +12,7 @@
 </div>
 
 <div class="card">
-  <form method="GET" action="/sales" style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap">
+  <form method="GET" action="/sales" class="sales-filter-form">
     <div class="form-row" style="margin-bottom:0">
       <label>开始日期</label>
       <input type="date" name="start" value="<%= start %>">
@@ -21,14 +21,38 @@
       <label>结束日期</label>
       <input type="date" name="end" value="<%= end %>">
     </div>
-    <div class="form-row" style="margin-bottom:0; flex-direction:row; align-items:center; gap:6px">
+    <div class="form-row sales-customer-filter">
+      <label for="salesCustomerSearch">客户</label>
+      <div class="customer-picker" id="salesCustomerPicker">
+        <div class="customer-picker-control">
+          <span class="customer-picker-icon" aria-hidden="true">⌕</span>
+          <input id="salesCustomerSearch" class="customer-picker-search" type="search" placeholder="搜索名称、联系人、电话或地址" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="salesCustomerPickerResults" aria-autocomplete="list">
+          <button type="button" id="clearSalesCustomer" class="customer-picker-clear" aria-label="清除已选客户" hidden>×</button>
+        </div>
+        <div id="salesCustomerPickerResults" class="customer-picker-results" role="listbox" hidden>
+          <div id="salesCustomerSearchCount" class="customer-picker-result-summary">共 <%= customers.length %> 位客户</div>
+          <button type="button" class="customer-picker-option" role="option" data-customer-id="" data-search="全部客户">
+            <span class="customer-picker-name">全部客户</span>
+          </button>
+        <% customers.forEach(function(customer) { %>
+          <button type="button" class="customer-picker-option" role="option" data-customer-id="<%= customer.id %>" data-search="<%= [customer.name, customer.contact, customer.phone, customer.address].filter(Boolean).join(' ').toLocaleLowerCase() %>">
+            <span class="customer-picker-name"><%= customer.name %></span>
+            <span class="customer-picker-meta"><%= [customer.contact, customer.phone, customer.address].filter(Boolean).join(' · ') || '未填写联系方式' %></span>
+          </button>
+        <% }) %>
+          <p id="salesCustomerPickerEmpty" class="customer-picker-empty" hidden>没有匹配的客户</p>
+        </div>
+        <input type="hidden" name="customer_id" id="salesCustomerId" value="<%= customerId || '' %>">
+      </div>
+    </div>
+    <div class="form-row sales-unpaid-filter">
       <input type="checkbox" name="unpaid" value="1" id="unpaidCheck" <%= unpaidOnly ? 'checked' : '' %> style="width:auto">
       <label for="unpaidCheck" style="margin:0">只看未结清（欠款）</label>
     </div>
     <% if (pendingOnly) { %><input type="hidden" name="pending" value="1"><% } %>
     <button type="submit" class="btn btn-secondary">筛选</button>
     <a class="btn btn-secondary" href="/sales">清除</a>
-    <a class="btn" href="/sales/export?start=<%= start %>&end=<%= end %><%= unpaidOnly ? '&unpaid=1' : '' %><%= pendingOnly ? '&pending=1' : '' %>">导出CSV</a>
+    <a class="btn" href="/sales/export?start=<%= start %>&end=<%= end %>&customer_id=<%= customerId || '' %><%= unpaidOnly ? '&unpaid=1' : '' %><%= pendingOnly ? '&pending=1' : '' %>">导出CSV</a>
   </form>
 </div>
 <div class="card desktop-table-wrap">
@@ -79,10 +103,10 @@
   <span class="muted">共 <%= totalOrders %> 单，第 <%= page %> / <%= totalPages %> 页</span>
   <div style="display:flex; gap:8px">
     <% if (page > 1) { %>
-      <a class="btn btn-secondary btn-sm" href="/sales?page=<%= page - 1 %>&start=<%= start %>&end=<%= end %><%= unpaidOnly ? '&unpaid=1' : '' %><%= pendingOnly ? '&pending=1' : '' %>">上一页</a>
+      <a class="btn btn-secondary btn-sm" href="/sales?page=<%= page - 1 %>&start=<%= start %>&end=<%= end %>&customer_id=<%= customerId || '' %><%= unpaidOnly ? '&unpaid=1' : '' %><%= pendingOnly ? '&pending=1' : '' %>">上一页</a>
     <% } %>
     <% if (page < totalPages) { %>
-      <a class="btn btn-secondary btn-sm" href="/sales?page=<%= page + 1 %>&start=<%= start %>&end=<%= end %><%= unpaidOnly ? '&unpaid=1' : '' %><%= pendingOnly ? '&pending=1' : '' %>">下一页</a>
+      <a class="btn btn-secondary btn-sm" href="/sales?page=<%= page + 1 %>&start=<%= start %>&end=<%= end %>&customer_id=<%= customerId || '' %><%= unpaidOnly ? '&unpaid=1' : '' %><%= pendingOnly ? '&pending=1' : '' %>">下一页</a>
     <% } %>
   </div>
 </div>
@@ -125,3 +149,115 @@
   <% if (orders.length === 0) { %><p class="muted">没有符合条件的订单</p><% } %>
 </div>
 <%- include('partials/footer') %>
+<script>
+  // 与新建销售单共用同一种客户选择体验：输入、结果与最终提交值始终来自同一组件。
+  const salesCustomerSearch = document.getElementById('salesCustomerSearch');
+  const salesCustomerPicker = document.getElementById('salesCustomerPicker');
+  const salesCustomerResults = document.getElementById('salesCustomerPickerResults');
+  const salesCustomerId = document.getElementById('salesCustomerId');
+  const salesCustomerSearchCount = document.getElementById('salesCustomerSearchCount');
+  const salesCustomerEmpty = document.getElementById('salesCustomerPickerEmpty');
+  const clearSalesCustomer = document.getElementById('clearSalesCustomer');
+  const salesCustomerOptions = Array.from(salesCustomerPicker.querySelectorAll('.customer-picker-option'));
+  let activeSalesCustomerOption = -1;
+
+  function selectedSalesCustomerOption() {
+    return salesCustomerOptions.find(function(option) { return option.dataset.customerId === salesCustomerId.value; });
+  }
+
+  function salesCustomerLabel(option) {
+    return option ? option.querySelector('.customer-picker-name').textContent.trim() : '';
+  }
+
+  function filterSalesCustomers() {
+    const selected = selectedSalesCustomerOption();
+    const rawKeyword = salesCustomerSearch.value.trim().toLocaleLowerCase();
+    const keyword = selected && rawKeyword === salesCustomerLabel(selected).toLocaleLowerCase() ? '' : rawKeyword;
+    let matched = 0;
+    salesCustomerOptions.forEach(function(option) {
+      const visible = !keyword || option.dataset.search.includes(keyword);
+      option.hidden = !visible;
+      if (visible) matched++;
+    });
+    salesCustomerEmpty.hidden = matched > 0;
+    salesCustomerSearchCount.textContent = keyword ? `匹配 ${matched} 位客户` : `共 ${salesCustomerOptions.length - 1} 位客户`;
+    activeSalesCustomerOption = -1;
+  }
+
+  function openSalesCustomerPicker() {
+    salesCustomerResults.hidden = false;
+    salesCustomerSearch.setAttribute('aria-expanded', 'true');
+    filterSalesCustomers();
+  }
+
+  function closeSalesCustomerPicker() {
+    salesCustomerResults.hidden = true;
+    salesCustomerSearch.setAttribute('aria-expanded', 'false');
+    activeSalesCustomerOption = -1;
+    salesCustomerOptions.forEach(function(option) { option.classList.remove('active'); });
+  }
+
+  function selectSalesCustomer(option) {
+    salesCustomerId.value = option.dataset.customerId;
+    salesCustomerSearch.value = salesCustomerLabel(option);
+    clearSalesCustomer.hidden = !salesCustomerId.value;
+    salesCustomerOptions.forEach(function(item) { item.setAttribute('aria-selected', item === option ? 'true' : 'false'); });
+    closeSalesCustomerPicker();
+  }
+
+  salesCustomerSearch.addEventListener('focus', function() {
+    openSalesCustomerPicker();
+    if (salesCustomerId.value) salesCustomerSearch.select();
+  });
+  salesCustomerSearch.addEventListener('input', openSalesCustomerPicker);
+  salesCustomerSearch.addEventListener('keydown', function(event) {
+    const visibleOptions = salesCustomerOptions.filter(function(option) { return !option.hidden; });
+    if (event.key === 'Escape') {
+      closeSalesCustomerPicker();
+      salesCustomerSearch.blur();
+      return;
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (!visibleOptions.length) return;
+      activeSalesCustomerOption = event.key === 'ArrowDown'
+        ? Math.min(activeSalesCustomerOption + 1, visibleOptions.length - 1)
+        : Math.max(activeSalesCustomerOption - 1, 0);
+      visibleOptions.forEach(function(option, index) { option.classList.toggle('active', index === activeSalesCustomerOption); });
+      visibleOptions[activeSalesCustomerOption].scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      const option = visibleOptions[activeSalesCustomerOption] || visibleOptions[0];
+      if (option) selectSalesCustomer(option);
+    }
+  });
+  salesCustomerOptions.forEach(function(option) {
+    option.addEventListener('click', function() { selectSalesCustomer(option); });
+  });
+  clearSalesCustomer.addEventListener('click', function() {
+    salesCustomerId.value = '';
+    salesCustomerSearch.value = '';
+    clearSalesCustomer.hidden = true;
+    salesCustomerOptions.forEach(function(option) { option.setAttribute('aria-selected', 'false'); });
+    openSalesCustomerPicker();
+    salesCustomerSearch.focus();
+  });
+  document.addEventListener('click', function(event) {
+    if (!salesCustomerPicker.contains(event.target)) closeSalesCustomerPicker();
+  });
+
+  const initialSalesCustomer = selectedSalesCustomerOption();
+  if (initialSalesCustomer && salesCustomerId.value) {
+    salesCustomerSearch.value = salesCustomerLabel(initialSalesCustomer);
+    clearSalesCustomer.hidden = false;
+    initialSalesCustomer.setAttribute('aria-selected', 'true');
+  }
+  document.querySelector('.sales-filter-form').addEventListener('submit', function(event) {
+    if (document.activeElement !== salesCustomerSearch) return;
+    event.preventDefault();
+    const option = salesCustomerOptions.find(function(item) { return !item.hidden; });
+    if (option) selectSalesCustomer(option);
+  });
+</script>

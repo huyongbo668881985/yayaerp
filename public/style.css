@@ -228,6 +228,11 @@ input[type=text], input[type=password], input[type=number], input[type=date], in
 .customer-reassign-content { padding: 0 16px 16px; border-top: 1px solid var(--border); }
 .customer-reassign-content .muted { margin: 12px 0; }
 
+.sales-filter-form { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.sales-filter-form .form-row { margin-bottom: 0; min-width: 156px; }
+.sales-customer-filter { flex: 1 1 280px; min-width: 280px !important; }
+.sales-unpaid-filter { display: flex; align-items: center; gap: 6px; min-height: 38px; }
+
 .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
 .badge-admin { background: #e0e7ff; color: #3730a3; }
 .badge-operator { background: #dcfce7; color: #166534; }
@@ -340,6 +345,10 @@ input[type=text], input[type=password], input[type=number], input[type=date], in
   .customer-picker-meta { font-size: 13px; }
   .customer-reassign summary { padding: 14px; }
   .customer-reassign-content { padding: 0 14px 14px; }
+  .sales-filter-form { gap: 10px 8px; }
+  .sales-filter-form .form-row { flex: 1 1 calc(50% - 8px); min-width: 0; }
+  .sales-customer-filter { flex-basis: 100% !important; min-width: 0 !important; }
+  .sales-unpaid-filter { flex-basis: 100% !important; min-height: 30px; }
 
   /* 单据明细行：桌面多列网格 → 手机上堆叠成一张张小卡片 */
   .item-row, .item-row-5, .item-row-4 {
