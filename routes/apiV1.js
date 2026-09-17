@@ -18,7 +18,9 @@ const express = require('express');
 const { rateLimit } = require('express-rate-limit');
 const { apiAuth, requireApiTier } = require('../middleware/apiAuth');
 const { todayLocalDate } = require('../utils/dates');
-const { returnedAmountSubquery } = require('../lib/profitCalc');
+const {
+  returnedAmountSubquery, effectiveDebtExpr, salesSettledExpr
+} = require('../lib/profitCalc');
 const reportRoutes = require('./report');
 const salesRoutes = require('./sales');
 const inventoryRoutes = require('./inventory');
@@ -48,6 +50,8 @@ const apiKeyLimiter = rateLimit({
 
 // 口径唯一实现点：退货金额子查询与 Web 端共用 lib/profitCalc.js 的同一份定义
 const RETURNED_AMOUNT_SUBQUERY = returnedAmountSubquery('so');
+const EFFECTIVE_DEBT_EXPR = effectiveDebtExpr('so');
+const SALES_SETTLED_EXPR = salesSettledExpr('so');
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const SALES_STATUSES = ['draft', 'submitted', 'approved', 'rejected'];
@@ -93,6 +97,92 @@ router.get('/reports/summary', requireApiTier('read_only'), (req, res) => {
       without_receivable: r2(s.profitWithoutReceivable),
       with_receivable: r2(s.profitWithReceivable),
       receivable_profit: r2(s.receivableProfit)
+    }
+  });
+});
+
+// ---- 酒水经营仪表盘：直营订单只读汇总 ----
+// 供外部“酒水经营仪表盘”消费；仅从 API Key 所属的 req.tenantDb 聚合，
+// 不接受 tenant_id，也不写业务数据或审计日志。
+// 未关联销售单的已审核退货没有可归属的订单：为保证总销售/成本/利润不漏算，
+// 将其作为已结清行的负向调整；实际退款始终只进入 cash_adjustments，不冒充销售收款。
+router.get('/reports/direct-dashboard', requireApiTier('read_only'), (req, res) => {
+  // 成本只读单据明细的历史快照，绝不关联 products.cost_price（后者会被后续调价改写）。
+  const salesCostSubquery = `COALESCE((SELECT SUM(soi.base_quantity * soi.cost_price_snapshot)
+    FROM sales_order_items soi WHERE soi.sales_order_id = so.id), 0)`;
+  const returnCostSubquery = `COALESCE((SELECT SUM(roi.base_quantity * roi.cost_price_snapshot)
+    FROM return_order_items roi
+    JOIN return_orders ro_cost ON ro_cost.id = roi.return_order_id
+    WHERE ro_cost.related_sales_order_id = so.id AND ro_cost.status = 'approved'), 0)`;
+
+  const rows = req.tenantDb.prepare(`
+    SELECT
+      CASE WHEN ${SALES_SETTLED_EXPR} THEN 'settled' ELSE 'outstanding' END AS bucket,
+      COUNT(*) AS order_count,
+      COALESCE(SUM(so.total_amount - ${RETURNED_AMOUNT_SUBQUERY}), 0) AS sales_amount,
+      COALESCE(SUM(so.paid_amount), 0) AS received_amount,
+      COALESCE(SUM(CASE WHEN ${EFFECTIVE_DEBT_EXPR} > 0 THEN ${EFFECTIVE_DEBT_EXPR} ELSE 0 END), 0) AS receivable_amount,
+      COALESCE(SUM(${salesCostSubquery} - ${returnCostSubquery}), 0) AS cost_amount
+    FROM sales_orders so
+    WHERE so.status = 'approved'
+    GROUP BY bucket
+  `).all();
+
+  const unlinked = req.tenantDb.prepare(`
+    SELECT
+      COUNT(*) AS return_count,
+      COALESCE(SUM(ro.total_amount), 0) AS sales_amount,
+      COALESCE(SUM(ro.refunded_amount), 0) AS refund_amount,
+      COALESCE(SUM((SELECT SUM(roi.base_quantity * roi.cost_price_snapshot)
+                    FROM return_order_items roi WHERE roi.return_order_id = ro.id)), 0) AS cost_amount
+    FROM return_orders ro
+    WHERE ro.status = 'approved' AND ro.related_sales_order_id IS NULL
+  `).get();
+
+  const buckets = {
+    settled: { order_count: 0, sales_amount: 0, received_amount: 0, receivable_amount: 0, cost_amount: 0, gross_profit: 0 },
+    outstanding: { order_count: 0, sales_amount: 0, received_amount: 0, receivable_amount: 0, cost_amount: 0, gross_profit: 0 }
+  };
+  for (const row of rows) {
+    const bucket = buckets[row.bucket];
+    Object.assign(bucket, {
+      order_count: row.order_count,
+      sales_amount: Number(row.sales_amount),
+      received_amount: Number(row.received_amount),
+      receivable_amount: Number(row.receivable_amount),
+      cost_amount: Number(row.cost_amount)
+    });
+  }
+
+  // 无关联退货没有应收或销售收款可归属，故只抵减已结清行的净销售/成本/毛利；
+  // order_count 与 received_amount 均保持“销售订单”定义，不把退货伪装成订单或收款。
+  buckets.settled.sales_amount -= Number(unlinked.sales_amount);
+  buckets.settled.cost_amount -= Number(unlinked.cost_amount);
+  for (const bucket of Object.values(buckets)) {
+    bucket.gross_profit = bucket.sales_amount - bucket.cost_amount;
+    for (const key of ['sales_amount', 'received_amount', 'receivable_amount', 'cost_amount', 'gross_profit']) {
+      bucket[key] = r2(bucket[key]);
+    }
+  }
+
+  const refund = req.tenantDb.prepare(`
+    SELECT COALESCE(SUM(refunded_amount), 0) AS refund_amount
+    FROM return_orders WHERE status = 'approved'
+  `).get();
+  const refundAmount = Number(refund.refund_amount);
+  const netReceived = buckets.settled.received_amount + buckets.outstanding.received_amount - refundAmount;
+
+  res.json({
+    settled: buckets.settled,
+    outstanding: buckets.outstanding,
+    cash_adjustments: {
+      refund_amount: r2(refundAmount),
+      net_received_amount: r2(netReceived)
+    },
+    meta: {
+      currency: 'CNY',
+      scope: 'all_approved_history',
+      unlinked_return_count: unlinked.return_count
     }
   });
 });

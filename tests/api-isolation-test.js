@@ -185,6 +185,57 @@ function purgeTenant(code, platformDb, getTenantByCode) {
   ok(r.status === 200 && j.total === 2 && !JSON.stringify(j).includes(MARK_B),
     'A 的 Key 传 tenant_code/tenant_id=B 的标识 → 参数被忽略，仍只返回 A 自己的数据', `total=${j.total}`);
 
+  // ============ 3.5 直营经营仪表盘汇总 ==========
+  section('3.5 直营经营仪表盘汇总（已审核、收款、退货、成本快照）');
+  {
+    const db = openTenantDbByPath(tenantA.db_path);
+    const addSale = (total, paid, cost, status = 'approved') => {
+      const sale = db.prepare(`INSERT INTO sales_orders
+        (customer_id, warehouse_id, user_id, order_date, total_amount, paid_amount, payment_status, status, note, remarks)
+        VALUES (1, 1, 1, ?, ?, ?, 'partial', ?, '', '')`).run(today, total, paid, status);
+      db.prepare(`INSERT INTO sales_order_items
+        (sales_order_id, product_id, quantity, unit_label, base_quantity, unit_price, is_gift, cost_price_snapshot)
+        VALUES (?, 1, 1, '瓶', 1, ?, 0, ?)`).run(sale.lastInsertRowid, total, cost);
+      return Number(sale.lastInsertRowid);
+    };
+    const addReturn = (relatedSaleId, total, refunded, cost, status = 'approved') => {
+      const refundStatus = refunded >= total ? 'refunded' : (refunded > 0 ? 'partial' : 'unrefunded');
+      const ret = db.prepare(`INSERT INTO return_orders
+        (customer_id, warehouse_id, user_id, related_sales_order_id, order_date, total_amount, refunded_amount, refund_status, status, note, remarks)
+        VALUES (1, 1, 1, ?, ?, ?, ?, ?, ?, '', '')`)
+        .run(relatedSaleId, today, total, refunded, refundStatus, status);
+      db.prepare(`INSERT INTO return_order_items
+        (return_order_id, product_id, quantity, unit_label, base_quantity, unit_price, cost_price_snapshot)
+        VALUES (?, 1, 1, '瓶', 1, ?, ?)`).run(ret.lastInsertRowid, total, cost);
+    };
+
+    addSale(100, 100, 40);
+    addSale(300, 0, 150);
+    const offsetSettled = addSale(500, 200, 300);
+    addReturn(offsetSettled, 300, 0, 180);
+    const refundedSale = addSale(400, 400, 240);
+    addReturn(refundedSale, 100, 100, 60);
+    addReturn(null, 50, 20, 30);
+    addReturn(null, 777, 777, 666, 'draft');
+    addSale(999, 999, 888, 'rejected');
+    // 改当前商品成本，接口仍必须读取各明细行的 cost_price_snapshot。
+    db.prepare('UPDATE products SET cost_price = 9999 WHERE id = 1').run();
+    db.close();
+  }
+  r = await get('/api/v1/reports/direct-dashboard?tenant_id=' + tenantB.id, keyA_read.plaintext);
+  j = await r.json();
+  ok(r.status === 200 && j.settled.order_count === 3 && j.settled.sales_amount === 550 &&
+    j.settled.received_amount === 700 && j.settled.receivable_amount === 0 &&
+    j.settled.cost_amount === 310 && j.settled.gross_profit === 240,
+  'direct-dashboard: 全额收款及“部分收款 + 退货抵扣结清”均在已结清行，成本取历史快照', JSON.stringify(j.settled));
+  ok(j.outstanding.order_count === 2 && j.outstanding.sales_amount === 1300 &&
+    j.outstanding.received_amount === 600 && j.outstanding.receivable_amount === 700 &&
+    j.outstanding.cost_amount === 750 && j.outstanding.gross_profit === 550,
+  'direct-dashboard: 部分收款和未收款订单均在未收款/部分收款行，草稿/拒绝单被排除', JSON.stringify(j.outstanding));
+  ok(j.cash_adjustments.refund_amount === 120 && j.cash_adjustments.net_received_amount === 1180 &&
+    j.meta.currency === 'CNY' && j.meta.scope === 'all_approved_history' && j.meta.unlinked_return_count === 1,
+  'direct-dashboard: 所有已审核实际退款扣现金；未关联退货计数可供仪表盘提示', JSON.stringify({ cash: j.cash_adjustments, meta: j.meta }));
+
   // ============ 4. 吊销与租户暂停立即生效 ============
   section('4. 吊销 / 暂停立即生效');
   apiKeys.revokeApiKey(keyB_read.id); // 超管后台吊销动作的 lib 等价调用
