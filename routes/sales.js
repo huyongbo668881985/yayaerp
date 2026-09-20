@@ -516,6 +516,30 @@ router.post('/sales/:id/edit', requireLogin, (req, res) => {
   res.redirect('/sales/' + order.id);
 });
 
+// 删除草稿：草稿尚未进入审核流程，不会扣减库存；只允许管理员或录入人删除。
+// 已提交及之后的单据必须保留，通过撤回/反审核后修改来修正，避免破坏审核和库存留痕。
+router.post('/sales/:id/delete', requireLogin, (req, res) => {
+  const db = req.tenantDb;
+  const order = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(req.params.id);
+  if (!order) return res.status(404).send('单据不存在');
+  if (order.status !== 'draft') return res.status(400).send('只有未提交的草稿销售单可以删除');
+  if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限删除他人的销售单');
+
+  // 正常业务流程不会让退货关联草稿单；这里仍显式检查，防止历史异常数据触发外键错误。
+  const relatedReturnCount = db.prepare('SELECT COUNT(*) AS c FROM return_orders WHERE related_sales_order_id = ?').get(order.id).c;
+  if (relatedReturnCount > 0) {
+    return res.status(400).send('该草稿已有关联退货单，无法删除，请先处理关联退货单');
+  }
+
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM sales_order_items WHERE sales_order_id = ?').run(order.id);
+    db.prepare('DELETE FROM sales_orders WHERE id = ?').run(order.id);
+  });
+  tx();
+  writeAuditLog(db, req.session.user, '删除销售单', '销售单', order.id, `删除草稿，金额 ¥${order.total_amount.toFixed(2)}`);
+  res.redirect('/sales');
+});
+
 // 提交审核：draft -> submitted
 router.post('/sales/submit/:id', requireLogin, (req, res) => {
   const db = req.tenantDb;

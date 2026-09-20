@@ -100,7 +100,14 @@
           <span class="badge" style="background:<%= st.bg %>;color:<%= st.fg %>"><%= st.text %></span>
         </td>
         <td><%= o.user_name %></td>
-        <td><a href="/sales/<%= o.id %>" class="btn btn-sm btn-secondary">详情</a></td>
+        <td>
+          <a href="/sales/<%= o.id %>" class="btn btn-sm btn-secondary">详情</a>
+          <% if (o.status === 'draft' && (currentUser.role === 'admin' || o.user_id === currentUser.id)) { %>
+            <form action="/sales/<%= o.id %>/delete" method="POST" style="display:inline" onsubmit="return confirm('确认删除这张未提交的草稿销售单？删除后无法恢复。')">
+              <button type="submit" class="btn btn-sm btn-danger">删除</button>
+            </form>
+          <% } %>
+        </td>
       </tr>
     <% }) %>
   </table>
@@ -153,6 +160,11 @@
         <div class="order-card-debt">欠款 ¥<%= o.effective_debt.toFixed(2) %></div>
       <% } %>
     </a>
+    <% if (o.status === 'draft' && (currentUser.role === 'admin' || o.user_id === currentUser.id)) { %>
+      <form action="/sales/<%= o.id %>/delete" method="POST" style="margin:-8px 0 12px; text-align:right" onsubmit="return confirm('确认删除这张未提交的草稿销售单？删除后无法恢复。')">
+        <button type="submit" class="btn btn-sm btn-danger">删除草稿</button>
+      </form>
+    <% } %>
   <% }) %>
   <% if (orders.length === 0) { %><p class="muted">没有符合条件的订单</p><% } %>
 </div>

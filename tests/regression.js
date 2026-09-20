@@ -386,6 +386,26 @@ function latestIdInList(html, pattern) {
   ok(r.text.includes('总仓') && !r.text.includes('分仓'), '操作员销售开单仅可选择自己车辆仓库');
   r = await O.raw('/sales/new', { body: f({ warehouse_id: String(w2), order_date: '2026-09-08', items_json: JSON.stringify([{ id: pB, quantity: 1, price: 150, unit_choice: 'base' }]) }) });
   ok(r.status === 403 && r.text.includes('不属于你的车辆'), '操作员伪造他人仓库销售被拒');
+  // 草稿销售单可由录入操作员删除；管理员草稿对操作员不可删；已提交单一律不可删。
+  await A.raw('/sales/new', { body: f({ warehouse_id: String(w1), order_date: '2026-09-08', save_draft: '1', items_json: JSON.stringify([{ id: pB, quantity: 1, price: 150, unit_choice: 'base' }]) }) });
+  r = await A.raw('/sales');
+  const adminDraftSaleId = latestIdInList(r.text, /\/sales\/(\d+)"/g);
+  r = await O.raw(`/sales/${adminDraftSaleId}/delete`, { body: f({ _: '1' }) });
+  ok(r.status === 403, '操作员不能删除管理员录入的草稿销售单');
+  r = await A.raw(`/sales/submit/${adminDraftSaleId}`, { body: f({ _: '1' }) });
+  ok(r.status === 302, '管理员草稿可提交审核');
+  r = await A.raw(`/sales/${adminDraftSaleId}/delete`, { body: f({ _: '1' }) });
+  ok(r.status === 400 && r.text.includes('只有未提交'), '已提交销售单不能删除');
+  await O.raw('/sales/new', { body: f({ warehouse_id: String(w1), order_date: '2026-09-08', save_draft: '1', items_json: JSON.stringify([{ id: pB, quantity: 1, price: 150, unit_choice: 'base' }]) }) });
+  r = await O.raw('/sales');
+  const operatorDraftSaleId = latestIdInList(r.text, /\/sales\/(\d+)"/g);
+  ok(r.text.includes(`/sales/${operatorDraftSaleId}/delete`), '操作员列表展示本人草稿删除按钮');
+  r = await O.raw(`/sales/${operatorDraftSaleId}/delete`, { body: f({ _: '1' }) });
+  ok(r.status === 302, '操作员可删除自己未提交的草稿销售单');
+  r = await O.raw(`/sales/${operatorDraftSaleId}`);
+  ok(r.status === 404, '删除草稿后销售单及明细不可访问');
+  r = await A.raw('/users/audit-logs?action=' + encodeURIComponent('删除销售单'));
+  ok(r.text.includes('删除销售单') && r.text.includes(`销售单 #${operatorDraftSaleId}`), '删除草稿写入操作日志');
   r = await O.raw('/transfers/new');
   ok(r.text.includes('总仓') && r.text.includes('分仓'), '操作员调拨申请可选择自己车辆和未分配总库');
   r = await O.raw('/transfers/new', { body: f({ from_warehouse_id: String(w2), to_warehouse_id: String(w1), order_date: '2026-09-08', product_id: String(pB), quantity: '1', unit_choice: 'base', save_draft: '1' }) });

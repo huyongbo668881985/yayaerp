@@ -69,6 +69,9 @@
       <form action="/sales/submit/<%= order.id %>" method="POST">
         <button type="submit" class="btn" style="background:#16a34a">提交审核</button>
       </form>
+      <form action="/sales/<%= order.id %>/delete" method="POST" onsubmit="return confirm('确认删除这张未提交的草稿销售单？删除后无法恢复。')">
+        <button type="submit" class="btn btn-danger">删除草稿</button>
+      </form>
     <% } %>
 
     <% if (order.status === 'submitted' && canManage) { %>

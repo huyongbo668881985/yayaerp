@@ -5,7 +5,7 @@
   <div class="form-row"><label>开始日期</label><input type="date" name="start" value="<%= start %>"></div>
   <div class="form-row"><label>结束日期</label><input type="date" name="end" value="<%= end %>"></div>
   <div class="form-row"><label>操作人</label><select name="user_id"><option value="">全部人员</option><% users.forEach(function(u) { %><option value="<%= u.id %>" <%= String(u.id) === String(selectedUserId) ? 'selected' : '' %>><%= u.name %></option><% }) %></select></div>
-  <div class="form-row"><label>动作</label><select name="action"><option value="">全部动作</option><% ['新建销售单','编辑销售单','提交销售单审核','撤回销售单','审核通过销售单','审核拒绝销售单','反审核销售单','记录销售收款','新增账号','禁用账号','启用账号','重置密码','删除账号'].forEach(function(item) { %><option value="<%= item %>" <%= item === selectedAction ? 'selected' : '' %>><%= item %></option><% }) %></select></div>
+  <div class="form-row"><label>动作</label><select name="action"><option value="">全部动作</option><% ['新建销售单','编辑销售单','删除销售单','提交销售单审核','撤回销售单','审核通过销售单','审核拒绝销售单','反审核销售单','记录销售收款','新增账号','禁用账号','启用账号','重置密码','删除账号'].forEach(function(item) { %><option value="<%= item %>" <%= item === selectedAction ? 'selected' : '' %>><%= item %></option><% }) %></select></div>
   <button class="btn btn-secondary">筛选</button><a class="btn btn-secondary" href="/users/audit-logs">清除</a>
 </form></div>
 <div class="card desktop-table-wrap"><table><tr><th>时间</th><th>操作人</th><th>动作</th><th>对象</th><th>说明</th></tr><% logs.forEach(function(log) { %><tr><td><%= formatDateTime(log.created_at).slice(0,16) %></td><td><%= log.user_name %></td><td><%= log.action %></td><td><%= log.entity_type %><%= log.entity_id ? ' #' + log.entity_id : '' %></td><td><%= log.summary || '-' %></td></tr><% }) %></table></div>
