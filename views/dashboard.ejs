@@ -20,11 +20,9 @@
   </div>
 </div>
 
+<% if (lowStock.length > 0) { %>
 <div class="card">
   <h2>库存预警 <a class="section-link" href="/inventory?low=1">查看低库存</a></h2>
-  <% if (lowStock.length === 0) { %>
-    <p class="muted">暂无库存预警商品</p>
-  <% } else { %>
     <div class="desktop-table-wrap">
       <table>
         <tr><th>商品</th><th>仓库</th><th>当前库存</th><th>预警阈值</th></tr>
@@ -52,8 +50,8 @@
         </div>
       <% }) %>
     </div>
-  <% } %>
 </div>
+<% } %>
 
 <% if (user.role === 'admin') { %>
   <div class="stat-grid stat-grid-secondary">
