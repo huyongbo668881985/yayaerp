@@ -12,7 +12,7 @@
 <div style="margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap">
   <a class="btn" href="/sales/new<%= selectedCustomer ? '?customer_id=' + selectedCustomer.id : '' %>">+ 新建销售单</a>
   <% if (currentUser.role === 'admin') { %>
-    <a class="btn <%= pendingOnly ? '' : 'btn-secondary' %>" href="/sales<%= salesQueryString({ pending: 1, customer_id: customerId }) %>">未审核订单</a>
+    <a class="btn <%= pendingOnly ? '' : 'btn-secondary' %>" href="/sales<%= salesQueryString({ pending: pendingOnly ? '' : 1, customer_id: customerId }) %>">未审核订单</a>
   <% } %>
 </div>
 
