@@ -201,8 +201,13 @@ function latestIdInList(html, pattern) {
   ok(r.status === 200 && r.text.includes('客户名称已存在'), '客户名称改为重复名被拒');
   r = await A.raw('/customers?q=13800000001');
   ok(r.text.includes('客户甲') && !r.text.includes('客户乙') && r.text.includes('查询结果 1 位'), '客户查询覆盖电话并显示结果数量');
+  ok(r.text.includes(`/sales?customer_id=${custJia}`) && r.text.includes(`/sales/new?customer_id=${custJia}`), '客户卡片提供查订单与新开单入口');
   r = await A.raw('/sales/new');
   ok(r.text.includes('id="customerPicker"') && r.text.includes('name="customer_id"') && !r.text.includes('id="customerSelect"'), '销售单使用一体化可搜索客户选择器');
+  r = await A.raw(`/sales/new?customer_id=${custJia}`);
+  ok(r.text.includes(`id="customerId" value="${custJia}"`), '从客户新开单时预选该客户');
+  r = await A.raw('/sales/new?customer_id=999999');
+  ok(r.text.includes('id="customerId" value=""'), '无效客户编号不会被预选');
   ok(custJia && custYi, `客户创建 id=${custJia}/${custYi}`);
   await A.raw('/suppliers/new', { body: f({ name: '供应商一' }) });
   await A.raw('/suppliers/new', { body: f({ name: '供应商二' }) });
@@ -217,6 +222,8 @@ function latestIdInList(html, pattern) {
   await A.raw('/purchases/new', { body: f({ warehouse_id: String(w1), order_date: '2026-09-08', product_id: String(pC), quantity: '50', unit_price: '30', unit_choice: 'base' }) });
   let invh = await gi();
   ok(invOf(invh, '啤酒A') === 240 && invOf(invh, '白酒B') === 100 && invOf(invh, '赠品C') === 50, '采购入库后 240/100/50');
+  r = await A.raw('/inventory?q=SKUA1');
+  ok(r.status === 200 && r.text.includes('啤酒A') && !r.text.includes('白酒B'), '库存可按 SKU 搜索');
 
   // 销售1：啤酒A 40 + 赠品C 5(赠品)，收 1000
   await A.raw('/sales/new', { body: f({ customer_id: String(custJia), warehouse_id: String(w1), order_date: '2026-09-08', paid_amount: '1000', items_json: JSON.stringify([{ id: pA, quantity: 40, price: 60, unit_choice: 'base' }, { id: pC, quantity: 5, price: 0, unit_choice: 'base', is_gift: true }]) }) });
@@ -252,6 +259,7 @@ function latestIdInList(html, pattern) {
   await A.raw(`/sales/approve/${so2}`, { body: f({ _: '1' }) });
   r = await A.raw(`/sales?customer_id=${custJia}`);
   ok(r.text.includes(`id="salesCustomerId" value="${custJia}"`) && r.text.includes('客户甲') && !r.text.includes('散客'), '销售订单可按客户筛选');
+  ok(r.text.includes('正在查看 <strong>客户甲</strong> 的订单') && r.text.includes(`/sales/new?customer_id=${custJia}`), '客户订单页标明筛选对象并保持开单客户');
   ok(r.text.includes('id="salesCustomerPicker"') && r.text.includes('搜索名称、联系人、电话或地址'), '销售订单筛选复用可搜索客户选择器');
   r = await A.raw('/sales?unpaid=1');
   ok(r.text.includes('未收款'), '销售订单可只看未结清');
@@ -372,6 +380,8 @@ function latestIdInList(html, pattern) {
   ok(r.loc === '/', '操作员登录');
   r = await O.raw('/returns/new', { body: f({ warehouse_id: String(w1), order_date: '2026-09-08', related_sales_order_id: String(so2), items_json: JSON.stringify([{ id: pB, quantity: 1, price: 150, unit_choice: 'base' }]) }) });
   ok(r.status === 400 && r.text.includes('无权关联销售单'), '操作员不能关联他人销售单');
+  r = await O.raw(`/returns/sales-options?q=${so2}`);
+  ok(r.status === 200 && !r.text.includes(`"id":${so2}`), '退货原单搜索不暴露他人销售单');
   for (const [p, label] of [['/', '首页'], ['/sales', '销售'], ['/inventory', '库存'], ['/stock-log', '流水'], ['/products', '商品只读'], ['/change-password', '改密'], ['/customers', '客户']]) {
     const rr = await O.raw(p);
     ok(rr.status === 200, `操作员可访问 ${label}(${rr.status})`);
@@ -384,6 +394,8 @@ function latestIdInList(html, pattern) {
   ok(r.text.includes('总仓') && !r.text.includes('分仓'), '操作员手动指定他人仓库仍不可查看');
   r = await O.raw('/sales/new');
   ok(r.text.includes('总仓') && !r.text.includes('分仓'), '操作员销售开单仅可选择自己车辆仓库');
+  r = await O.raw(`/sales/new?customer_id=${custJia}`);
+  ok(r.text.includes('id="customerId" value=""'), '操作员不能通过链接预选未归属客户');
   r = await O.raw('/sales/new', { body: f({ warehouse_id: String(w2), order_date: '2026-09-08', items_json: JSON.stringify([{ id: pB, quantity: 1, price: 150, unit_choice: 'base' }]) }) });
   ok(r.status === 403 && r.text.includes('不属于你的车辆'), '操作员伪造他人仓库销售被拒');
   // 草稿销售单可由录入操作员删除；管理员草稿对操作员不可删；已提交单一律不可删。
@@ -409,7 +421,7 @@ function latestIdInList(html, pattern) {
   r = await O.raw('/transfers/new');
   ok(r.text.includes('总仓') && r.text.includes('分仓'), '操作员调拨申请可选择自己车辆和未分配总库');
   r = await O.raw('/transfers/new', { body: f({ from_warehouse_id: String(w2), to_warehouse_id: String(w1), order_date: '2026-09-08', product_id: String(pB), quantity: '1', unit_choice: 'base', save_draft: '1' }) });
-  ok(r.loc === '/transfers', '操作员可从总库向自己车辆发起调拨申请');
+  ok(r.status === 302 && /^\/transfers\/\d+\?created=draft$/.test(r.loc || ''), '操作员调拨草稿创建后进入详情页');
   for (const [p, label] of [['/reports', '报表'], ['/users', '账号'], ['/purchases', '采购'], ['/products/1/edit', '商品编辑'], ['/inventory/adjust', '库存调整'], ['/customers/1/edit', '客户编辑'], ['/suppliers', '供应商']]) {
     const rr = await O.raw(p);
     ok(rr.status === 403, `操作员访问${label} 403(${rr.status})`);
@@ -459,6 +471,8 @@ function latestIdInList(html, pattern) {
     r = await A.raw('/sales/new', { body: f({ warehouse_id: String(w1), order_date: '2026-09-08', paid_amount: invalidPaid, items_json: JSON.stringify([{ id: pA, quantity: 1, price: 60, unit_choice: 'base' }]) }) });
     ok(r.status === 400 && r.text.includes('已收款金额'), `非法已收款 ${invalidPaid} 被拒`);
   }
+  r = await A.raw('/sales/new', { body: f({ warehouse_id: String(w1), customer_id: String(custJia), order_date: '2026-09-08', paid_amount: '999', items_json: JSON.stringify([{ id: pA, quantity: 2, price: 60, unit_choice: 'base' }]) }) });
+  ok(r.status === 400 && r.text.includes('value="999"') && r.text.includes('const EXISTING_ITEMS = [{"id":') && r.text.includes('"quantity":2'), '销售校验失败后保留表单和商品明细');
   for (const invalidRefunded of ['-1', 'Infinity', 'not-a-number']) {
     r = await A.raw('/returns/new', { body: f({ warehouse_id: String(w1), order_date: '2026-09-08', refunded_amount: invalidRefunded, items_json: JSON.stringify([{ id: pA, quantity: 1, price: 60, unit_choice: 'base' }]) }) });
     ok(r.status === 400 && r.text.includes('已退款金额'), `非法已退款 ${invalidRefunded} 被拒`);

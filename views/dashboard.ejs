@@ -1,7 +1,7 @@
 <%- include('partials/header') %>
 <h1>首页看板</h1>
 
-<div class="stat-grid">
+<div class="stat-grid stat-grid-primary">
   <div class="stat-card">
     <div class="num">¥<%= todaySales.toFixed(2) %></div>
     <div class="label">今日销售额（已审核）</div>
@@ -18,20 +18,10 @@
     <div class="num" style="color:<%= pendingOrders > 0 ? '#f59e0b' : '#16a34a' %>"><%= pendingOrders %></div>
     <div class="label">待审核单据</div>
   </div>
-  <% if (user.role === 'admin') { %>
-    <div class="stat-card">
-      <div class="num">¥<%= todayProfit.toFixed(2) %></div>
-      <div class="label">今日毛利（已收款订单，已扣退货）</div>
-    </div>
-    <div class="stat-card">
-      <div class="num">¥<%= monthlyProfit.toFixed(2) %></div>
-      <div class="label">本月毛利（已收款订单，已扣退货）</div>
-    </div>
-  <% } %>
 </div>
 
 <div class="card">
-  <h2>库存预警</h2>
+  <h2>库存预警 <a class="section-link" href="/inventory?low=1">查看低库存</a></h2>
   <% if (lowStock.length === 0) { %>
     <p class="muted">暂无库存预警商品</p>
   <% } else { %>
@@ -64,6 +54,20 @@
     </div>
   <% } %>
 </div>
+
+<% if (user.role === 'admin') { %>
+  <div class="stat-grid stat-grid-secondary">
+    <div class="stat-card">
+      <div class="num">¥<%= todayProfit.toFixed(2) %></div>
+      <div class="label">今日毛利</div>
+    </div>
+    <div class="stat-card">
+      <div class="num">¥<%= monthlyProfit.toFixed(2) %></div>
+      <div class="label">本月毛利</div>
+    </div>
+  </div>
+  <p class="muted stat-note">毛利按已收款订单计算，已扣除退货。</p>
+<% } %>
 
 <div class="card">
   <h2>最近销售单</h2>

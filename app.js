@@ -100,6 +100,7 @@ app.use((req, res, next) => {
   res.locals.formatDateTime = formatDateTime;
   res.locals.currentUser = req.session.user || null;
   res.locals.currentTenant = req.tenant || null;
+  res.locals.currentPath = req.path;
   next();
 });
 

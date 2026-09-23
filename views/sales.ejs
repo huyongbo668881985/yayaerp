@@ -5,15 +5,19 @@
   <a href="/returns">退货</a>
 </div>
 <h1>销售订单</h1>
+<% const selectedCustomer = customers.find(function(customer) { return customer.id === customerId; }); %>
+<% if (selectedCustomer) { %>
+  <div class="sales-customer-context"><span>正在查看 <strong><%= selectedCustomer.name %></strong> 的订单</span><a href="/customers">返回客户</a></div>
+<% } %>
 <div style="margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap">
-  <a class="btn" href="/sales/new">+ 新建销售单</a>
+  <a class="btn" href="/sales/new<%= selectedCustomer ? '?customer_id=' + selectedCustomer.id : '' %>">+ 新建销售单</a>
   <% if (currentUser.role === 'admin') { %>
-    <a class="btn <%= pendingOnly ? '' : 'btn-secondary' %>" href="/sales?pending=1">未审核订单</a>
+    <a class="btn <%= pendingOnly ? '' : 'btn-secondary' %>" href="/sales<%= salesQueryString({ pending: 1, customer_id: customerId }) %>">未审核订单</a>
   <% } %>
-  <a class="btn btn-secondary" href="/sales/summary<%= salesQueryString({ start: start, end: end }) %>">客户销售汇总</a>
 </div>
 
-<div class="card">
+<details class="card sales-filter-panel" id="salesFilterPanel" open>
+  <summary>筛选订单<%= start || end || customerId || unpaidOnly || pendingOnly ? ' · 已应用条件' : '' %></summary>
   <form method="GET" action="/sales" class="sales-filter-form">
     <div class="form-row" style="margin-bottom:0">
       <label>开始日期</label>
@@ -56,7 +60,15 @@
     <a class="btn btn-secondary" href="/sales">清除</a>
     <a class="btn" href="/sales/export?start=<%= start %>&end=<%= end %>&customer_id=<%= customerId || '' %><%= guestOnly ? '&guest=1' : '' %><%= unpaidOnly ? '&unpaid=1' : '' %><%= pendingOnly ? '&pending=1' : '' %>">导出CSV</a>
   </form>
-</div>
+</details>
+<script>
+  (function() {
+    const panel = document.getElementById('salesFilterPanel');
+    const sync = function() { if (window.matchMedia('(min-width: 769px)').matches) panel.open = true; };
+    if (window.matchMedia('(max-width: 768px)').matches) panel.open = false;
+    window.addEventListener('resize', sync);
+  })();
+</script>
 <div class="sales-mobile-sort" aria-label="销售订单排序">
   <span>排序：</span>
   <a class="btn btn-secondary btn-sm <%= sort === 'date' ? 'is-selected' : '' %>" href="/sales<%= salesQueryString({ start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', unpaid: unpaidOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: 'date', order: sort === 'date' && order === 'desc' ? 'asc' : 'desc' }) %>">日期<%= sort === 'date' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a>
@@ -77,9 +89,11 @@
         <td><%= o.warehouse_name %></td>
         <td>¥<%= o.total_amount.toFixed(2) %></td>
         <td>¥<%= (o.paid_amount || 0).toFixed(2) %></td>
-        <td>¥<%= o.effective_debt.toFixed(2) %><% if (o.returned_amount > 0) { %><span class="muted" style="font-size:11px">（已扣退货¥<%= o.returned_amount.toFixed(2) %>）</span><% } %></td>
+        <td><% if (o.status === 'approved') { %>¥<%= o.effective_debt.toFixed(2) %><% if (o.returned_amount > 0) { %><span class="muted" style="font-size:11px">（已扣退货¥<%= o.returned_amount.toFixed(2) %>）</span><% } %><% } else { %><span class="muted">审核后生效</span><% } %></td>
         <td>
-          <% if (o.effective_status === 'paid') { %>
+          <% if (o.status !== 'approved') { %>
+            <span class="badge badge-muted">待生效</span>
+          <% } else if (o.effective_status === 'paid') { %>
             <span class="badge" style="background:#dcfce7;color:#166534">已收款</span>
           <% } else if (o.effective_status === 'partial') { %>
             <span class="badge" style="background:#fef3c7;color:#92400e">部分收款</span>
@@ -112,6 +126,13 @@
     <% }) %>
   </table>
 </div>
+<% if (orders.length === 0) { %>
+  <div class="card sales-empty-state">
+    <strong><%= selectedCustomer ? selectedCustomer.name + '还没有符合条件的销售订单' : '没有符合条件的订单' %></strong>
+    <span><%= selectedCustomer ? '可以直接为这位客户新开一单。' : '试试调整筛选条件，或新建一张销售单。' %></span>
+    <a class="btn btn-sm" href="/sales/new<%= selectedCustomer ? '?customer_id=' + selectedCustomer.id : '' %>">+ 新开单</a>
+  </div>
+<% } %>
 
 <% if (totalPages > 1) { %>
 <div class="card" style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap">
@@ -142,21 +163,21 @@
   %>
   <% orders.forEach(function(o) { %>
     <% const st = statusMap2[o.status] || { text: o.status, bg: '#f3f4f6', fg: '#6b7280' }; %>
-    <% const pt = paymentMap2[o.effective_status] || { text: o.effective_status, bg: '#f3f4f6', fg: '#6b7280' }; %>
+    <% const pt = o.status === 'approved' ? (paymentMap2[o.effective_status] || { text: o.effective_status, bg: '#f3f4f6', fg: '#6b7280' }) : { text: '待生效', bg: '#f3f4f6', fg: '#6b7280' }; %>
     <a href="/sales/<%= o.id %>" class="order-card">
       <div class="order-card-top">
-        <span class="order-card-id">#<%= o.id %> <%= o.customer_name || '散客' %></span>
+        <span class="order-card-id"><%= o.customer_name || '散客' %></span>
         <span class="badge" style="background:<%= st.bg %>;color:<%= st.fg %>"><%= st.text %></span>
       </div>
       <div class="order-card-mid">
-        <span><%= o.order_date %> · 录入 <%= formatDateTime(o.created_at).slice(0, 16) %></span>
+        <span>销售单 #<%= o.id %> · <%= o.order_date %></span>
         <span><%= o.warehouse_name %></span>
       </div>
       <div class="order-card-bottom">
-        <span class="order-card-amount">¥<%= o.total_amount.toFixed(2) %></span>
+        <span class="order-card-amount"><small>订单金额</small>¥<%= o.total_amount.toFixed(2) %></span>
         <span class="badge" style="background:<%= pt.bg %>;color:<%= pt.fg %>"><%= pt.text %></span>
       </div>
-      <% if (o.effective_debt > 0) { %>
+      <% if (o.status === 'approved' && o.effective_debt > 0) { %>
         <div class="order-card-debt">欠款 ¥<%= o.effective_debt.toFixed(2) %></div>
       <% } %>
     </a>
@@ -166,7 +187,6 @@
       </form>
     <% } %>
   <% }) %>
-  <% if (orders.length === 0) { %><p class="muted">没有符合条件的订单</p><% } %>
 </div>
 <%- include('partials/footer') %>
 <script>

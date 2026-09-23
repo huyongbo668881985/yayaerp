@@ -1,9 +1,11 @@
 <%- include('partials/header') %>
-<h1><%= order ? '编辑销售单 #' + order.id : '新建销售单' %></h1>
-<div class="card">
-  <% if (error) { %><div class="error"><%= error %></div><% } %>
+<% const form = typeof formValues !== 'undefined' && formValues ? formValues : (order || {}); %>
+<div class="page-heading-actions"><h1><%= order ? '编辑销售单 #' + order.id : '新建销售单' %></h1><a class="sale-cancel-link" href="<%= order ? '/sales/' + order.id : (form.customer_id ? '/sales?customer_id=' + form.customer_id : '/sales') %>">返回</a></div>
+<div class="card sale-form-card">
+  <% if (error) { %><div class="error" role="alert"><%= error %></div><% } %>
   <% if (order) { %><p class="muted">编辑后仍是草稿状态，保存后需要重新点"提交审核"。</p><% } %>
   <form method="POST" action="<%= order ? '/sales/' + order.id + '/edit' : '/sales/new' %>" id="saleForm">
+    <h2 class="form-section-heading">基本信息</h2>
     <div class="grid-3">
       <div class="form-row customer-picker-field">
         <label>客户（可选）</label>
@@ -26,53 +28,51 @@
             <% }) %>
             <p id="customerPickerEmpty" class="customer-picker-empty" hidden>没有匹配的客户</p>
           </div>
-          <input type="hidden" name="customer_id" id="customerId" value="<%= order && order.customer_id ? order.customer_id : '' %>">
+          <input type="hidden" name="customer_id" id="customerId" value="<%= form.customer_id || '' %>">
         </div>
       </div>
       <div class="form-row">
         <label>出库仓库 *</label>
         <select name="warehouse_id" required>
-          <% warehouses.forEach(function(w) { %><option value="<%= w.id %>" <%= order && order.warehouse_id === w.id ? 'selected' : '' %>><%= w.name %></option><% }) %>
+          <% warehouses.forEach(function(w) { %><option value="<%= w.id %>" <%= String(form.warehouse_id || '') === String(w.id) ? 'selected' : '' %>><%= w.name %></option><% }) %>
         </select>
       </div>
       <div class="form-row">
         <label>日期</label>
-        <input type="date" name="order_date" value="<%= order ? order.order_date : today %>">
+        <input type="date" name="order_date" value="<%= form.order_date || today %>">
       </div>
     </div>
 
+    <h2 class="form-section-heading">商品明细</h2>
+    <div id="items"></div>
+    <button type="button" class="btn btn-secondary btn-sm" onclick="addRow(); saleFormDirty = true">＋ 添加商品</button>
+    <p style="margin-top:10px;font-size:16px"><strong>商品合计：¥<span id="itemsTotal">0.00</span></strong> <span class="muted">（赠品不计入）</span></p>
+
+    <h2 class="form-section-heading">金额与备注</h2>
     <div class="grid-3">
       <div class="form-row">
         <label>收款金额</label>
-        <input type="number" name="paid_amount" placeholder="本次收款金额" step="0.01" min="0" value="<%= order ? (order.paid_amount || 0) : 0 %>">
+        <input type="number" name="paid_amount" placeholder="本次收款金额" step="0.01" min="0" value="<%= form.paid_amount != null ? form.paid_amount : 0 %>">
       </div>
       <div class="form-row">
         <label>备注</label>
-        <input type="text" name="remarks" placeholder="备注信息" value="<%= order ? (order.remarks || '') : '' %>">
+        <input type="text" name="remarks" placeholder="备注信息" value="<%= form.remarks || '' %>">
       </div>
     </div>
-
-    <h2>商品明细</h2>
-    <div id="items"></div>
-    <button type="button" class="btn btn-secondary btn-sm" onclick="addRow()">+ 添加一行</button>
-    <p style="margin-top:10px;font-size:16px"><strong>商品合计：¥<span id="itemsTotal">0.00</span></strong> <span class="muted">（赠品不计入）</span></p>
-
-    <div class="form-row" style="margin-top:16px">
-      <label>内部备注</label>
-      <textarea name="note" rows="2"><%= order ? (order.note || '') : '' %></textarea>
-    </div>
+    <details class="sale-note-panel" <%= form.note ? 'open' : '' %>><summary>内部备注（可选）</summary><div class="form-row"><label>仅内部查看</label><textarea name="note" rows="2"><%= form.note || '' %></textarea></div></details>
 
     <input type="hidden" name="items_json" id="itemsJson">
 
-    <div style="margin-top:16px">
-      <button class="btn" type="submit"><%= order ? '保存修改' : '提交出库' %></button>
+    <div class="form-actions sale-form-actions">
+      <button class="btn" type="submit"><%= order ? '保存修改' : '提交审核' %></button>
       <% if (!order) { %>
         <button class="btn btn-secondary" type="submit" name="save_draft" value="1">存草稿</button>
       <% } %>
-      <a class="btn btn-secondary" href="<%= order ? '/sales/' + order.id : '/sales' %>">取消</a>
+      <a class="btn btn-secondary" href="<%= order ? '/sales/' + order.id : (form.customer_id ? '/sales?customer_id=' + form.customer_id : '/sales') %>">取消</a>
     </div>
   </form>
 </div>
+<div class="sale-mobile-submit" aria-label="销售单操作"><div><small>商品合计</small><strong>¥<span id="stickyItemsTotal">0.00</span></strong></div><% if (!order) { %><button class="btn btn-secondary" type="submit" form="saleForm" name="save_draft" value="1">存草稿</button><% } %><button class="btn" type="submit" form="saleForm"><%= order ? '保存修改' : '提交审核' %></button></div>
 
 <script>
   const PRODUCTS = <%- JSON.stringify(products).replace(/</g, '\\u003c') %>;
@@ -194,7 +194,7 @@
   });
 
   // 编辑模式下，把已有明细转换成和新建表单一致的结构（quantity 用录入时的原始数量，配合 unit_choice 换算）
-  const EXISTING_ITEMS = <%- JSON.stringify((typeof existingItems !== 'undefined' ? existingItems : []).map(function(it) {
+  const EXISTING_ITEMS = <%- JSON.stringify(typeof draftItems !== 'undefined' ? draftItems : (typeof existingItems !== 'undefined' ? existingItems : []).map(function(it) {
     const p = products.find(function(pr) { return pr.id === it.product_id; });
     const isPack = p && p.pack_unit && it.unit_label === p.pack_unit;
     return {
@@ -213,34 +213,85 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
+  function setupProductPicker(row) {
+    const search = row.querySelector('.product-search');
+    const results = row.querySelector('.sale-product-results');
+    const select = row.querySelector('select[name=product_id]');
+    function showResults() {
+      const keyword = search.value.trim().toLocaleLowerCase();
+      const matches = PRODUCTS.filter(function(product) {
+        return [product.name, product.sku, product.spec].filter(Boolean).join(' ').toLocaleLowerCase().includes(keyword);
+      }).slice(0, 20);
+      results.replaceChildren();
+      matches.forEach(function(product) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'sale-product-option';
+        button.textContent = product.name + (product.spec ? ' · ' + product.spec : '') + (product.sku ? ' · ' + product.sku : '');
+        button.addEventListener('click', function() {
+          select.value = String(product.id);
+          onProductChange(select);
+          recalcTotal();
+          results.hidden = true;
+          row.querySelector('input[name=quantity]').focus();
+        });
+        results.appendChild(button);
+      });
+      if (!matches.length) {
+        const empty = document.createElement('p');
+        empty.textContent = '没有匹配的商品';
+        results.appendChild(empty);
+      }
+      results.hidden = false;
+    }
+    search.addEventListener('focus', function() { if (select.value) search.select(); showResults(); });
+    search.addEventListener('input', function() { select.value = ''; search.setCustomValidity('请从搜索结果中选择商品'); showResults(); });
+    search.addEventListener('keydown', function(event) {
+      if (event.key === 'Escape') results.hidden = true;
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        const first = results.querySelector('button');
+        if (first) first.click();
+      }
+    });
+    search.addEventListener('blur', function() { setTimeout(function() { results.hidden = true; }, 180); });
+    select.addEventListener('change', function() { results.hidden = true; });
+  }
+
   function addRow(initial) {
     const container = document.getElementById('items');
     const div = document.createElement('div');
     div.className = 'item-row';
-    div.style.gridTemplateColumns = '2fr 1fr 1fr 1fr auto auto';
-    const options = PRODUCTS.map(p => `<option value="${p.id}" data-price="${p.sale_price}" data-price-pack="${p.sale_price_pack != null ? p.sale_price_pack : ''}" data-unit="${esc(p.unit)}" data-pack-unit="${esc(p.pack_unit || '')}" data-pack-size="${p.pack_size || 1}">${esc(p.name)}${p.spec ? ' ('+esc(p.spec)+')' : ''}</option>`).join('');
+    div.classList.add('sale-item-row');
+    const options = PRODUCTS.map(p => `<option value="${p.id}" data-search="${esc([p.name, p.sku, p.spec].filter(Boolean).join(' '))}" data-price="${p.sale_price}" data-price-pack="${p.sale_price_pack != null ? p.sale_price_pack : ''}" data-unit="${esc(p.unit)}" data-pack-unit="${esc(p.pack_unit || '')}" data-pack-size="${p.pack_size || 1}">${esc(p.name)}${p.spec ? ' ('+esc(p.spec)+')' : ''}</option>`).join('');
     div.innerHTML = `
-      <select name="product_id" onchange="onProductChange(this)" required>
+      <label class="sale-product-label">商品<input type="search" class="product-search" placeholder="输入名称或 SKU，点击结果选中" aria-label="搜索商品" autocomplete="off" required></label>
+      <div class="sale-product-results" hidden></div>
+      <select name="product_id" aria-label="商品" onchange="onProductChange(this)" tabindex="-1">
         <option value="">-- 选择商品 --</option>
         ${options}
       </select>
-      <select name="unit_choice" class="unit-select" onchange="fillPrice(this.parentElement.querySelector('select[name=product_id]'))">
+      <label class="sale-qty-field">数量<input type="number" name="quantity" placeholder="数量" min="1" required></label>
+      <label class="sale-unit-field">单位<select name="unit_choice" class="unit-select" onchange="fillPrice(this.closest('.item-row').querySelector('select[name=product_id]'))">
         <option value="base">（先选商品）</option>
-      </select>
-      <input type="number" name="quantity" placeholder="数量" min="1" required>
-      <input type="number" name="unit_price" placeholder="销售单价" step="0.01" required>
-      <label style="display:flex;align-items:center;gap:4px;font-size:13px;white-space:nowrap">
+      </select></label>
+      <label class="sale-price-field">销售单价<input type="number" name="unit_price" placeholder="销售单价" step="0.01" required></label>
+      <label class="sale-gift-field">
         <input type="hidden" name="is_gift" value="0">
         <input type="checkbox" name="is_gift" value="1" class="gift-checkbox" onchange="toggleGift(this)"> 赠品
       </label>
-      <button type="button" class="btn btn-danger btn-sm" onclick="this.parentElement.remove(); recalcTotal();">删除</button>
+      <span class="sale-line-total">小计 <strong>¥0.00</strong></span>
+      <button type="button" class="btn btn-danger btn-sm sale-item-delete" onclick="this.closest('.item-row').remove(); recalcTotal();">删除</button>
     `;
     container.appendChild(div);
+    setupProductPicker(div);
 
     if (initial) {
       const productSelect = div.querySelector('select[name=product_id]');
       productSelect.value = initial.id;
-      onProductChange(productSelect);
+      if (productSelect.value) onProductChange(productSelect);
+      const selectedOption = productSelect.options[productSelect.selectedIndex];
+      div.querySelector('.product-search').value = selectedOption ? selectedOption.textContent : '';
       const unitSelect = div.querySelector('select[name=unit_choice]');
       unitSelect.value = initial.unit_choice;
       div.querySelector('input[name=quantity]').value = initial.quantity;
@@ -256,7 +307,7 @@
   }
 
   function toggleGift(checkbox) {
-    const row = checkbox.closest('[style*="gridTemplateColumns"]') || checkbox.parentElement.parentElement;
+    const row = checkbox.closest('.item-row');
     const priceInput = row.querySelector('input[name=unit_price]');
     if (checkbox.checked) {
       priceInput.value = '0';
@@ -288,6 +339,9 @@
       unitSelect.appendChild(packOpt);
     }
     fillPrice(select);
+    const search = row.querySelector('.product-search');
+    if (opt.value) search.value = opt.textContent;
+    search.setCustomValidity('');
   }
 
   function fillPrice(select) {
@@ -316,13 +370,15 @@
       const qtyInput = row.querySelector('input[name=quantity]');
       const priceInput = row.querySelector('input[name=unit_price]');
       const giftCheckbox = row.querySelector('.gift-checkbox');
-      if (giftCheckbox && giftCheckbox.checked) return; // 赠品不计入合计
       const qty = parseFloat(qtyInput.value) || 0;
       const price = parseFloat(priceInput.value) || 0;
-      total += qty * price;
+      const lineTotal = giftCheckbox && giftCheckbox.checked ? 0 : qty * price;
+      row.querySelector('.sale-line-total strong').textContent = '¥' + lineTotal.toFixed(2);
+      total += lineTotal;
     });
     const el = document.getElementById('itemsTotal');
     if (el) el.textContent = total.toFixed(2);
+    document.getElementById('stickyItemsTotal').textContent = total.toFixed(2);
   }
   document.getElementById('items').addEventListener('input', recalcTotal);
   document.getElementById('items').addEventListener('change', recalcTotal);
@@ -335,6 +391,7 @@
 
   // 提交时收集所有商品行数据为 JSON
   document.getElementById('saleForm').addEventListener('submit', function(e) {
+    if (e.defaultPrevented) return;
     const rows = document.querySelectorAll('#items .item-row');
     const items = [];
     rows.forEach(function(row) {
@@ -346,7 +403,7 @@
       if (!productSelect.value || !qtyInput.value) return;
       items.push({
         id: parseInt(productSelect.value),
-        quantity: parseInt(qtyInput.value),
+        quantity: Number(qtyInput.value),
         price: parseFloat(priceInput.value) || 0,
         unit_choice: unitChoiceSelect ? unitChoiceSelect.value : 'base',
         is_gift: giftCheckbox ? giftCheckbox.checked : false
@@ -361,6 +418,19 @@
       this.appendChild(hidden);
     }
     hidden.value = JSON.stringify(items);
+    saleFormDirty = false;
+  });
+  let saleFormDirty = false;
+  const saleForm = document.getElementById('saleForm');
+  saleForm.addEventListener('input', function() { saleFormDirty = true; });
+  saleForm.addEventListener('change', function() { saleFormDirty = true; });
+  document.getElementById('items').addEventListener('click', function(event) {
+    if (event.target.closest('.sale-item-delete, .sale-product-option')) saleFormDirty = true;
+  });
+  window.addEventListener('beforeunload', function(event) {
+    if (!saleFormDirty) return;
+    event.preventDefault();
+    event.returnValue = '';
   });
 </script>
 <%- include('partials/footer') %>

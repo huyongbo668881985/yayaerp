@@ -6,7 +6,7 @@ const { warehousesForUser, isWarehouseInScope } = require('../lib/warehouseAcces
 const router = express.Router();
 
 // 当前库存快照（商品 × 仓库）：库存页面和 API v1 共用这一份查询
-function queryInventorySnapshot(db, warehouseId, user = null) {
+function queryInventorySnapshot(db, warehouseId, user = null, search = '', lowOnly = false) {
   let sql = `
     SELECT p.id AS product_id, p.sku, p.name, p.spec, p.unit, p.pack_unit, p.pack_size, p.low_stock_threshold,
            w.id AS warehouse_id, w.name AS warehouse_name, inv.quantity
@@ -24,6 +24,11 @@ function queryInventorySnapshot(db, warehouseId, user = null) {
     conditions.push('w.id = ?');
     params.push(warehouseId);
   }
+  if (search) {
+    conditions.push('(instr(lower(p.name), lower(?)) > 0 OR instr(lower(coalesce(p.sku, \'\')), lower(?)) > 0)');
+    params.push(search, search);
+  }
+  if (lowOnly) conditions.push('p.low_stock_threshold > 0 AND inv.quantity <= p.low_stock_threshold');
   if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
   sql += ' ORDER BY p.name, w.name';
   return db.prepare(sql).all(...params);
@@ -36,8 +41,10 @@ router.get('/inventory', requireLogin, (req, res) => {
   const warehouseId = requestedWarehouseId && isWarehouseInScope(db, user, requestedWarehouseId)
     ? requestedWarehouseId : '';
   const warehouses = warehousesForUser(db, user);
-  const rows = queryInventorySnapshot(db, warehouseId || null, user);
-  res.render('inventory', { rows, warehouses, warehouseId, isAdmin: req.session.user.role === 'admin' });
+  const search = String(req.query.q || '').trim().slice(0, 100);
+  const lowOnly = req.query.low === '1';
+  const rows = queryInventorySnapshot(db, warehouseId || null, user, search, lowOnly);
+  res.render('inventory', { rows, warehouses, warehouseId, search, lowOnly, isAdmin: req.session.user.role === 'admin' });
 });
 
 // 出入库流水：管理员看全部；操作员只能看自己操作产生的流水（user_id=自己），

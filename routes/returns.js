@@ -5,6 +5,7 @@ const { todayLocalDate } = require('../utils/dates');
 const { costSnapshotPerBaseUnit } = require('../lib/priceCalc');
 const { isBlank, isValidDateString, isValidNonNegativeAmount, roundToCents } = require('../lib/validators');
 const { warehousesForUser, isWarehouseInScope } = require('../lib/warehouseAccess');
+const { submittedItemsFromBody } = require('../lib/formDraft');
 const router = express.Router();
 
 // 状态机跟销售单一致：submitted --审核通过--> approved（这一步才真正把库存加回去）
@@ -240,12 +241,34 @@ function isCustomerInScope(db, sessionUser, customerId, currentCustomerId) {
   return !!hit;
 }
 
+// 独立开退货单时可按单号或客户查找原销售单；只返回当前用户有权关联的已审核单。
+router.get('/returns/sales-options', requireLogin, (req, res) => {
+  const keyword = String(req.query.q || '').trim().slice(0, 60);
+  const user = req.session.user;
+  const sql = `SELECT so.id, so.customer_id, so.warehouse_id, so.order_date, so.total_amount,
+      c.name AS customer_name
+    FROM sales_orders so
+    LEFT JOIN customers c ON c.id = so.customer_id
+    WHERE so.status = 'approved'
+      ${user.role === 'admin' ? '' : 'AND so.user_id = ?'}
+      AND (? = '' OR instr(CAST(so.id AS TEXT), ?) > 0 OR instr(lower(coalesce(c.name, '')), lower(?)) > 0)
+    ORDER BY so.id DESC LIMIT 20`;
+  const params = user.role === 'admin' ? [keyword, keyword, keyword] : [user.id, keyword, keyword, keyword];
+  res.json(req.tenantDb.prepare(sql).all(...params));
+});
+
 router.get('/returns/new', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  const customers = customersForForm(db, req.session.user, null);
   const warehouses = warehousesForUser(db, req.session.user);
   const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
-  res.render('return_form', { customers, warehouses, products, error: null, order: null, existingItems: [], today: todayLocalDate() });
+  const requestedSaleId = Number(req.query.sale_id);
+  const linkedSale = Number.isInteger(requestedSaleId) && requestedSaleId > 0 && db.prepare(`SELECT so.id, so.customer_id, so.warehouse_id
+    FROM sales_orders so WHERE so.id = ? AND so.status = 'approved'${req.session.user.role === 'admin' ? '' : ' AND so.user_id = ?'}`)
+    .get(...(req.session.user.role === 'admin' ? [requestedSaleId] : [requestedSaleId, req.session.user.id]));
+  const customers = customersForForm(db, req.session.user, linkedSale ? linkedSale.customer_id : null);
+  res.render('return_form', { customers, warehouses, products, error: null, order: null, existingItems: [],
+    formValues: linkedSale ? { customer_id: linkedSale.customer_id || '', warehouse_id: linkedSale.warehouse_id, related_sales_order_id: linkedSale.id } : null,
+    today: todayLocalDate() });
 });
 
 router.post('/returns/new', requireLogin, (req, res) => {
@@ -256,7 +279,7 @@ router.post('/returns/new', requireLogin, (req, res) => {
     const customers = customersForForm(db, req.session.user, null);
     const warehouses = warehousesForUser(db, req.session.user);
     const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
-    return res.render('return_form', { customers, warehouses, products, error: msg, order: null, existingItems: [], today: todayLocalDate() });
+    return res.render('return_form', { customers, warehouses, products, error: msg, order: null, existingItems: [], formValues: req.body, draftItems: submittedItemsFromBody(req.body), today: todayLocalDate() });
   };
 
   if (!isBlank(order_date) && !isValidDateString(order_date)) {
@@ -328,10 +351,11 @@ router.post('/returns/new', requireLogin, (req, res) => {
     for (const it of items) {
       insertItem.run(roId, it.pid, it.qty, it.unitLabel, it.baseQty, it.price, it.costSnapshot);
     }
+    return roId;
   });
-  tx();
+  const roId = tx();
 
-  res.redirect('/returns');
+  res.redirect(`/returns/${roId}?created=${status}`);
 });
 
 router.get('/returns/:id/edit', requireLogin, (req, res) => {
@@ -363,8 +387,7 @@ router.post('/returns/:id/edit', requireLogin, (req, res) => {
     const customers = customersForForm(db, req.session.user, order.customer_id);
     const warehouses = warehousesForUser(db, req.session.user);
     const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
-    const existingItems = db.prepare('SELECT * FROM return_order_items WHERE return_order_id = ?').all(order.id);
-    return res.render('return_form', { customers, warehouses, products, error: msg, order, existingItems, today: todayLocalDate() });
+    return res.render('return_form', { customers, warehouses, products, error: msg, order, existingItems: [], formValues: req.body, draftItems: submittedItemsFromBody(req.body), today: todayLocalDate() });
   };
 
   if (!isBlank(order_date) && !isValidDateString(order_date)) {
@@ -619,7 +642,7 @@ router.get('/returns/:id', requireLogin, (req, res) => {
     JOIN products p ON p.id = roi.product_id
     WHERE roi.return_order_id = ?
   `).all(req.params.id);
-  res.render('return_detail', { order, items, canManage: canEditOrWithdraw(order, req.session.user) });
+  res.render('return_detail', { order, items, canManage: canEditOrWithdraw(order, req.session.user), created: req.query.created === order.status ? order.status : null });
 });
 
 module.exports = router;

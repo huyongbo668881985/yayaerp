@@ -7,6 +7,7 @@ const { returnedAmountSubquery } = require('../lib/profitCalc');
 const { isBlank, isValidDateString, isValidNonNegativeAmount, roundToCents } = require('../lib/validators');
 const { warehousesForUser, isWarehouseInScope } = require('../lib/warehouseAccess');
 const { writeAuditLog } = require('../lib/auditLog');
+const { submittedItemsFromBody } = require('../lib/formDraft');
 const router = express.Router();
 
 // 关联到某张销售单、且已审核的退货金额。
@@ -126,7 +127,7 @@ function queryOrders(db, user, start, end, customerId, guestOnly, unpaidOnly, pe
   if (pendingOnly) sql += " AND so.status = 'submitted'";
   sql += ' ORDER BY so.id DESC';
   let orders = db.prepare(sql).all(...params).map(attachEffectivePayment);
-  if (unpaidOnly) orders = orders.filter(o => o.effective_status !== 'paid');
+  if (unpaidOnly) orders = orders.filter(o => o.status === 'approved' && o.effective_status !== 'paid');
   return orders;
 }
 
@@ -179,7 +180,7 @@ router.get('/sales', requireLogin, (req, res) => {
   sortRows(allOrders, sort, order, (row, field) => ({
     date: row.order_date,
     amount: row.total_amount,
-    debt: row.effective_debt
+    debt: row.status === 'approved' ? row.effective_debt : 0
   })[field]);
   const totalOrders = allOrders.length;
   const totalPages = Math.max(1, Math.ceil(totalOrders / SALES_PAGE_SIZE));
@@ -277,7 +278,7 @@ router.get('/sales/export', requireLogin, (req, res) => {
     r.effective_status = effectiveDebt <= 0.001 ? 'paid' : ((r.paid_amount > 0 || r.returned_amount > 0) ? 'partial' : 'unpaid');
     return r;
   });
-  if (unpaidOnly) rows_raw = rows_raw.filter(r => r.effective_status !== 'paid');
+  if (unpaidOnly) rows_raw = rows_raw.filter(r => r.status === 'approved' && r.effective_status !== 'paid');
 
   const statusText = { draft: '草稿', submitted: '待审核', approved: '已审核', rejected: '已拒绝' };
   const paymentText = { paid: '已收款', partial: '部分收款', unpaid: '未收款' };
@@ -294,7 +295,7 @@ router.get('/sales/export', requireLogin, (req, res) => {
     r.unit_price.toFixed(2),
     (r.quantity * r.unit_price).toFixed(2),
     r.is_gift ? '赠品' : '',
-    paymentText[r.effective_status] || r.effective_status,
+    r.status === 'approved' ? (paymentText[r.effective_status] || r.effective_status) : '待生效',
     statusText[r.status] || r.status,
     r.user_name,
     r.remarks || ''
@@ -338,9 +339,16 @@ function isCustomerInScope(db, sessionUser, customerId, currentCustomerId) {
 router.get('/sales/new', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const customers = customersForForm(db, req.session.user, null);
+  const requestedCustomerId = Number(req.query.customer_id);
+  const selectedCustomer = Number.isInteger(requestedCustomerId) && requestedCustomerId > 0
+    ? customers.find(customer => customer.id === requestedCustomerId)
+    : null;
   const warehouses = warehousesForUser(db, req.session.user);
   const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
-  res.render('sale_form', { customers, warehouses, products, error: null, order: null, existingItems: [], today: todayLocalDate() });
+  res.render('sale_form', {
+    customers, warehouses, products, error: null, order: null, existingItems: [], today: todayLocalDate(),
+    formValues: selectedCustomer ? { customer_id: selectedCustomer.id } : null
+  });
 });
 
 router.post('/sales/new', requireLogin, (req, res) => {
@@ -351,7 +359,7 @@ router.post('/sales/new', requireLogin, (req, res) => {
     const customers = customersForForm(db, req.session.user, null);
     const warehouses = warehousesForUser(db, req.session.user);
     const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
-    return res.render('sale_form', { customers, warehouses, products, error: msg, order: null, existingItems: [], today: todayLocalDate() });
+    return res.render('sale_form', { customers, warehouses, products, error: msg, order: null, existingItems: [], formValues: req.body, draftItems: submittedItemsFromBody(req.body), today: todayLocalDate() });
   };
 
   if (!isBlank(order_date) && !isValidDateString(order_date)) {
@@ -417,7 +425,7 @@ router.post('/sales/new', requireLogin, (req, res) => {
   const soId = tx();
 
   writeAuditLog(db, req.session.user, '新建销售单', '销售单', soId, `金额 ¥${total.toFixed(2)}`);
-  res.redirect('/sales');
+  res.redirect(`/sales/${soId}?created=${status}`);
 });
 
 // 编辑草稿单（仅创建人或管理员，仅 draft 状态）
@@ -450,8 +458,7 @@ router.post('/sales/:id/edit', requireLogin, (req, res) => {
     const customers = customersForForm(db, req.session.user, order.customer_id);
     const warehouses = warehousesForUser(db, req.session.user);
     const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
-    const existingItems = db.prepare('SELECT * FROM sales_order_items WHERE sales_order_id = ?').all(order.id);
-    return res.render('sale_form', { customers, warehouses, products, error: msg, order, existingItems, today: todayLocalDate() });
+    return res.render('sale_form', { customers, warehouses, products, error: msg, order, existingItems: [], formValues: req.body, draftItems: submittedItemsFromBody(req.body), today: todayLocalDate() });
   };
 
   if (!isBlank(order_date) && !isValidDateString(order_date)) {
@@ -771,7 +778,7 @@ router.get('/sales/:id', requireLogin, (req, res) => {
     SELECT id, order_date, total_amount, refund_status, status
     FROM return_orders WHERE related_sales_order_id = ? ORDER BY id DESC
   `).all(req.params.id);
-  res.render('sale_detail', { order, items, relatedReturns, canManage: canEditOrWithdraw(order, req.session.user) });
+  res.render('sale_detail', { order, items, relatedReturns, canManage: canEditOrWithdraw(order, req.session.user), created: req.query.created === order.status ? order.status : null });
 });
 
 module.exports = router;

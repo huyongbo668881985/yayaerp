@@ -3,6 +3,7 @@ const { requireLogin } = require('../middleware/auth');
 const { todayLocalDate } = require('../utils/dates');
 const { isBlank, isValidDateString } = require('../lib/validators');
 const { warehousesForTransfer, areWarehousesTransferable } = require('../lib/warehouseAccess');
+const { submittedItemsFromBody } = require('../lib/formDraft');
 const router = express.Router();
 
 // 调拨单表单只需要这几列。这里必须显式列列名，不能用 SELECT *：
@@ -84,7 +85,7 @@ router.post('/transfers/new', requireLogin, (req, res) => {
   const renderError = (msg) => {
     const warehouses = warehousesForTransfer(db, req.session.user);
     const products = db.prepare(PRODUCT_FORM_SQL).all();
-    return res.render('transfer_form', { warehouses, products, error: msg, order: null, existingItems: [], today: todayLocalDate() });
+    return res.render('transfer_form', { warehouses, products, error: msg, order: null, existingItems: [], formValues: req.body, draftItems: submittedItemsFromBody(req.body), today: todayLocalDate() });
   };
 
   if (!isBlank(order_date) && !isValidDateString(order_date)) {
@@ -116,10 +117,11 @@ router.post('/transfers/new', requireLogin, (req, res) => {
     for (const it of items) {
       insertItem.run(toId, it.pid, it.qty, it.unitLabel, it.baseQty);
     }
+    return toId;
   });
-  tx();
+  const toId = tx();
 
-  res.redirect('/transfers');
+  res.redirect(`/transfers/${toId}?created=${status}`);
 });
 
 // 编辑草稿单
@@ -148,8 +150,7 @@ router.post('/transfers/:id/edit', requireLogin, (req, res) => {
   const renderError = (msg) => {
     const warehouses = warehousesForTransfer(db, req.session.user);
     const products = db.prepare(PRODUCT_FORM_SQL).all();
-    const existingItems = db.prepare('SELECT * FROM transfer_order_items WHERE transfer_order_id = ?').all(order.id);
-    return res.render('transfer_form', { warehouses, products, error: msg, order, existingItems, today: todayLocalDate() });
+    return res.render('transfer_form', { warehouses, products, error: msg, order, existingItems: [], formValues: req.body, draftItems: submittedItemsFromBody(req.body), today: todayLocalDate() });
   };
 
   if (!isBlank(order_date) && !isValidDateString(order_date)) {
@@ -348,7 +349,7 @@ router.get('/transfers/:id', requireLogin, (req, res) => {
     JOIN products p ON p.id = ti.product_id
     WHERE ti.transfer_order_id = ?
   `).all(req.params.id);
-  res.render('transfer_detail', { order, items, canManage: canAccessTransfer(db, order, req.session.user) });
+  res.render('transfer_detail', { order, items, canManage: canAccessTransfer(db, order, req.session.user), created: req.query.created === order.status ? order.status : null });
 });
 
 module.exports = router;

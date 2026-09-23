@@ -1,20 +1,21 @@
 <%- include('partials/header') %>
 <h1>退货单 #<%= order.id %></h1>
+<% if (created) { %><div class="flow-notice" role="status"><strong><%= created === 'draft' ? '草稿已保存' : '已提交审核' %></strong><span><%= created === 'draft' ? '可以继续编辑，准备好后再提交审核。' : '审核通过后才会增加库存并计入退货。' %></span></div><% } %>
 <div class="card">
-  <p>
-    <strong>日期：</strong><%= order.order_date %> &nbsp;
-    <strong>客户：</strong><%= order.customer_name || '散客' %> &nbsp;
-    <strong>退回仓库：</strong><%= order.warehouse_name %>
-  </p>
-  <p>
-    <strong>录入人：</strong><%= order.user_name %> &nbsp;
-    <strong>备注：</strong><%= order.note || '-' %>
-  </p>
+  <div class="detail-hero">
+    <div><span class="detail-eyebrow">退货单 #<%= order.id %> · <%= order.order_date %></span><strong><%= order.customer_name || '散客' %></strong></div>
+    <div class="detail-hero-value"><span>退货金额</span><strong>¥<%= order.total_amount.toFixed(2) %></strong></div>
+  </div>
+  <div class="detail-meta">
+    <div><span>退回仓库</span><strong><%= order.warehouse_name %></strong></div>
+    <div><span>录入人</span><strong><%= order.user_name %></strong></div>
+    <div><span>备注</span><strong><%= order.note || '-' %></strong></div>
+  </div>
   <% if (order.related_sales_order_id) { %>
-    <p><strong>关联销售单：</strong><a href="/sales/<%= order.related_sales_order_id %>">#<%= order.related_sales_order_id %></a>（该单的应收金额已自动扣掉这次退货）</p>
+    <p><strong>关联销售单：</strong><a href="/sales/<%= order.related_sales_order_id %>">#<%= order.related_sales_order_id %></a>（<%= order.status === 'approved' ? '原单应收已扣减这次退货' : '审核通过后才会扣减原单应收' %>）</p>
   <% } %>
-  <p>
-    <strong>退款状态：</strong>
+  <div class="detail-status-list">
+    <div><span>退款状态</span>
     <% if (order.refund_status === 'refunded') { %>
       <span class="badge" style="background:#dcfce7;color:#166534">已退款</span>
     <% } else if (order.refund_status === 'partial') { %>
@@ -22,8 +23,8 @@
     <% } else { %>
       <span class="badge" style="background:#fee2e2;color:#991b1b">未退款</span>
     <% } %>
-    &nbsp;
-    <strong>审核状态：</strong>
+    </div>
+    <div><span>审核状态</span>
     <%
       const statusMap = {
         draft:     { text: '草稿',   bg: '#f3f4f6', fg: '#6b7280' },
@@ -34,16 +35,17 @@
       const st = statusMap[order.status] || { text: order.status, bg: '#f3f4f6', fg: '#6b7280' };
     %>
     <span class="badge" style="background:<%= st.bg %>;color:<%= st.fg %>"><%= st.text %></span>
+    </div>
+  </div>
     <% if (order.status === 'draft' || order.status === 'submitted') { %>
-      <span class="muted">（未审核，库存尚未变动）</span>
+      <p class="detail-state-note">未审核，库存尚未变动</p>
     <% } %>
-  </p>
-  <p>
-    <strong>退货总金额：</strong>¥<%= order.total_amount.toFixed(2) %> &nbsp;
-    <strong>已退现金：</strong>¥<%= (order.refunded_amount || 0).toFixed(2) %> &nbsp;
-    <strong>还差：</strong>¥<%= (order.total_amount - (order.refunded_amount || 0)).toFixed(2) %>
-  </p>
-  <table>
+  <div class="detail-finance-grid">
+    <div><span>已退现金</span><strong>¥<%= (order.refunded_amount || 0).toFixed(2) %></strong></div>
+    <div><span>还差</span><strong class="detail-owing">¥<%= (order.total_amount - (order.refunded_amount || 0)).toFixed(2) %></strong></div>
+  </div>
+  <h2 class="detail-section-heading">退货商品</h2>
+  <table class="detail-items-table">
     <tr><th>商品</th><th>数量</th><th>单价</th><th>小计</th></tr>
     <% items.forEach(function(it) { %>
       <tr>
@@ -54,9 +56,14 @@
       </tr>
     <% }) %>
   </table>
+  <div class="detail-items-mobile">
+    <% items.forEach(function(it) { %>
+      <div class="detail-item-card"><div><strong><%= it.product_name %></strong><span><%= it.quantity %> <%= it.unit_label %> × ¥<%= it.unit_price.toFixed(2) %></span></div><strong>¥<%= (it.quantity * it.unit_price).toFixed(2) %></strong></div>
+    <% }) %>
+  </div>
   <p class="right"><strong>总计：¥<%= order.total_amount.toFixed(2) %></strong></p>
 
-  <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:16px">
+  <div class="detail-actions">
     <% if (order.status === 'draft' && canManage) { %>
       <a class="btn" href="/returns/<%= order.id %>/edit">编辑</a>
       <form action="/returns/submit/<%= order.id %>" method="POST">

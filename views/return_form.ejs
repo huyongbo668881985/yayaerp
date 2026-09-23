@@ -1,59 +1,67 @@
 <%- include('partials/header') %>
+<% const form = typeof formValues !== 'undefined' && formValues ? formValues : (order || {}); %>
 <h1><%= order ? '编辑退货单 #' + order.id : '新建退货单' %></h1>
 <div class="card">
-  <% if (error) { %><div class="error"><%= error %></div><% } %>
+  <% if (error) { %><div class="error" role="alert"><%= error %></div><% } %>
   <% if (order) { %><p class="muted">编辑后仍是草稿状态，保存后需要重新点"提交审核"。</p><% } %>
   <form method="POST" action="<%= order ? '/returns/' + order.id + '/edit' : '/returns/new' %>" id="returnForm">
+    <h2 class="form-section-heading">基本信息</h2>
     <div class="grid-3">
       <div class="form-row">
         <label>客户（可选）</label>
-        <select name="customer_id">
+        <select name="customer_id" id="returnCustomer">
           <option value="">-- 散客 --</option>
-          <% customers.forEach(function(c) { %><option value="<%= c.id %>" <%= order && order.customer_id === c.id ? 'selected' : '' %>><%= c.name %></option><% }) %>
+          <% customers.forEach(function(c) { %><option value="<%= c.id %>" <%= String(form.customer_id || '') === String(c.id) ? 'selected' : '' %>><%= c.name %></option><% }) %>
         </select>
       </div>
       <div class="form-row">
         <label>退回仓库 *</label>
-        <select name="warehouse_id" required>
-          <% warehouses.forEach(function(w) { %><option value="<%= w.id %>" <%= order && order.warehouse_id === w.id ? 'selected' : '' %>><%= w.name %></option><% }) %>
+        <select name="warehouse_id" id="returnWarehouse" required>
+          <% warehouses.forEach(function(w) { %><option value="<%= w.id %>" <%= String(form.warehouse_id || '') === String(w.id) ? 'selected' : '' %>><%= w.name %></option><% }) %>
         </select>
       </div>
       <div class="form-row">
         <label>日期</label>
-        <input type="date" name="order_date" value="<%= order ? order.order_date : today %>">
+        <input type="date" name="order_date" value="<%= form.order_date || today %>">
       </div>
     </div>
 
     <div class="grid-3">
       <div class="form-row">
-        <label>关联销售单号（可选）</label>
-        <input type="number" name="related_sales_order_id" placeholder="例如 12，不知道可以留空" value="<%= order && order.related_sales_order_id ? order.related_sales_order_id : '' %>">
-        <span class="muted" style="font-size:12px">填了之后，这张原销售单的应收金额会自动扣掉这次退货，不用再手动改原单</span>
-      </div>
-      <div class="form-row">
-        <label>已退现金金额</label>
-        <input type="number" name="refunded_amount" placeholder="本次退款金额" step="0.01" min="0" value="<%= order ? (order.refunded_amount || 0) : 0 %>">
-      </div>
-      <div class="form-row">
-        <label>备注</label>
-        <input type="text" name="remarks" placeholder="备注信息" value="<%= order ? (order.remarks || '') : '' %>">
+        <label for="saleLookup">查找原销售单（可选）</label>
+        <input id="saleLookup" type="search" placeholder="输入单号或客户名称" autocomplete="off">
+        <div id="saleLookupResults" class="sale-lookup-results" hidden></div>
+        <label for="relatedSaleId" style="margin-top:8px">关联单号</label>
+        <input id="relatedSaleId" type="number" name="related_sales_order_id" placeholder="也可直接填写单号" value="<%= form.related_sales_order_id || '' %>">
+        <span class="muted" style="font-size:12px">退货审核通过后，原销售单的应收金额会自动扣减。</span>
       </div>
     </div>
 
-    <h2>退货商品明细</h2>
+    <h2 class="form-section-heading">退货商品明细</h2>
     <div id="items"></div>
     <button type="button" class="btn btn-secondary btn-sm" onclick="addRow()">+ 添加一行</button>
     <p style="margin-top:10px;font-size:16px"><strong>退货合计：¥<span id="itemsTotal">0.00</span></strong></p>
 
+    <h2 class="form-section-heading">金额与备注</h2>
+    <div class="grid-3">
+      <div class="form-row">
+        <label>已退现金金额</label>
+        <input type="number" name="refunded_amount" placeholder="本次退款金额" step="0.01" min="0" value="<%= form.refunded_amount != null ? form.refunded_amount : 0 %>">
+      </div>
+      <div class="form-row">
+        <label>备注</label>
+        <input type="text" name="remarks" placeholder="备注信息" value="<%= form.remarks || '' %>">
+      </div>
+    </div>
     <div class="form-row" style="margin-top:16px">
       <label>内部备注（退货原因等）</label>
-      <textarea name="note" rows="2"><%= order ? (order.note || '') : '' %></textarea>
+      <textarea name="note" rows="2"><%= form.note || '' %></textarea>
     </div>
 
     <input type="hidden" name="items_json" id="itemsJson">
 
-    <div style="margin-top:16px">
-      <button class="btn" type="submit"><%= order ? '保存修改' : '提交退货' %></button>
+    <div class="form-actions">
+      <button class="btn" type="submit"><%= order ? '保存修改' : '提交审核' %></button>
       <% if (!order) { %>
         <button class="btn btn-secondary" type="submit" name="save_draft" value="1">存草稿</button>
       <% } %>
@@ -63,8 +71,54 @@
 </div>
 
 <script>
+  const saleLookup = document.getElementById('saleLookup');
+  const saleLookupResults = document.getElementById('saleLookupResults');
+  let saleLookupRequest = 0;
+  async function loadSaleOptions() {
+    const request = ++saleLookupRequest;
+    try {
+      const response = await fetch('/returns/sales-options?q=' + encodeURIComponent(saleLookup.value.trim()));
+      if (!response.ok) throw new Error('查询失败');
+      const sales = await response.json();
+      if (request !== saleLookupRequest) return;
+      saleLookupResults.replaceChildren();
+      if (!sales.length) {
+        const empty = document.createElement('p');
+        empty.className = 'muted';
+        empty.textContent = '没有可关联的已审核销售单';
+        saleLookupResults.appendChild(empty);
+      }
+      sales.forEach(function(sale) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'sale-lookup-option';
+        button.textContent = '#' + sale.id + ' · ' + (sale.customer_name || '散客') + ' · ' + sale.order_date + ' · ¥' + sale.total_amount.toFixed(2);
+        button.addEventListener('click', function() {
+          document.getElementById('relatedSaleId').value = sale.id;
+          document.getElementById('returnCustomer').value = sale.customer_id || '';
+          document.getElementById('returnWarehouse').value = sale.warehouse_id;
+          saleLookup.value = '#' + sale.id + ' · ' + (sale.customer_name || '散客');
+          saleLookupResults.hidden = true;
+        });
+        saleLookupResults.appendChild(button);
+      });
+      saleLookupResults.hidden = false;
+    } catch (_) {
+      if (request === saleLookupRequest) {
+        saleLookupResults.textContent = '查询失败，请直接填写关联单号';
+        saleLookupResults.hidden = false;
+      }
+    }
+  }
+  saleLookup.addEventListener('focus', loadSaleOptions);
+  saleLookup.addEventListener('input', loadSaleOptions);
+  saleLookup.addEventListener('keydown', function(event) { if (event.key === 'Enter') event.preventDefault(); });
+  document.addEventListener('click', function(event) {
+    if (!saleLookup.contains(event.target) && !saleLookupResults.contains(event.target)) saleLookupResults.hidden = true;
+  });
+
   const PRODUCTS = <%- JSON.stringify(products).replace(/</g, '\\u003c') %>;
-  const EXISTING_ITEMS = <%- JSON.stringify((typeof existingItems !== 'undefined' ? existingItems : []).map(function(it) {
+  const EXISTING_ITEMS = <%- JSON.stringify(typeof draftItems !== 'undefined' ? draftItems : (typeof existingItems !== 'undefined' ? existingItems : []).map(function(it) {
     const p = products.find(function(pr) { return pr.id === it.product_id; });
     const isPack = p && p.pack_unit && it.unit_label === p.pack_unit;
     return {
@@ -87,9 +141,10 @@
     const div = document.createElement('div');
     div.className = 'item-row';
     div.style.gridTemplateColumns = '2fr 1fr 1fr 1fr auto';
-    const options = PRODUCTS.map(p => `<option value="${p.id}" data-price="${p.sale_price}" data-price-pack="${p.sale_price_pack != null ? p.sale_price_pack : ''}" data-unit="${esc(p.unit)}" data-pack-unit="${esc(p.pack_unit || '')}" data-pack-size="${p.pack_size || 1}">${esc(p.name)}${p.spec ? ' ('+esc(p.spec)+')' : ''}</option>`).join('');
+    const options = PRODUCTS.map(p => `<option value="${p.id}" data-search="${esc([p.name, p.sku, p.spec].filter(Boolean).join(' '))}" data-price="${p.sale_price}" data-price-pack="${p.sale_price_pack != null ? p.sale_price_pack : ''}" data-unit="${esc(p.unit)}" data-pack-unit="${esc(p.pack_unit || '')}" data-pack-size="${p.pack_size || 1}">${esc(p.name)}${p.spec ? ' ('+esc(p.spec)+')' : ''}</option>`).join('');
     div.innerHTML = `
-      <select name="product_id" onchange="onProductChange(this)" required>
+      <input type="search" class="product-search" placeholder="搜索商品名称或 SKU" aria-label="搜索商品" oninput="filterProductOptions(this)">
+      <select name="product_id" aria-label="商品" onchange="onProductChange(this)" required>
         <option value="">-- 选择商品 --</option>
         ${options}
       </select>
@@ -105,7 +160,7 @@
     if (initial) {
       const productSelect = div.querySelector('select[name=product_id]');
       productSelect.value = initial.id;
-      onProductChange(productSelect);
+      if (productSelect.value) onProductChange(productSelect);
       const unitSelect = div.querySelector('select[name=unit_choice]');
       unitSelect.value = initial.unit_choice;
       div.querySelector('input[name=quantity]').value = initial.quantity;
@@ -180,7 +235,7 @@
       if (!productSelect.value || !qtyInput.value) return;
       items.push({
         id: parseInt(productSelect.value),
-        quantity: parseInt(qtyInput.value),
+        quantity: Number(qtyInput.value),
         price: parseFloat(priceInput.value) || 0,
         unit_choice: unitChoiceSelect ? unitChoiceSelect.value : 'base'
       });

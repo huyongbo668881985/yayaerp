@@ -1,27 +1,30 @@
 <%- include('partials/header') %>
 <h1>销售单 #<%= order.id %></h1>
+<% if (created) { %><div class="flow-notice" role="status"><strong><%= created === 'draft' ? '草稿已保存' : '已提交审核' %></strong><span><%= created === 'draft' ? '可以继续编辑，准备好后再提交审核。' : '审核通过后才会扣减库存。' %></span></div><% } %>
 <div class="card">
-  <p>
-    <strong>日期：</strong><%= order.order_date %> &nbsp;
-    <strong>客户：</strong><%= order.customer_name || '散客' %> &nbsp;
-    <strong>仓库：</strong><%= order.warehouse_name %>
-  </p>
-  <p>
-    <strong>录入人：</strong><%= order.user_name %> &nbsp;
-    <strong>录入时间：</strong><%= formatDateTime(order.created_at).slice(0, 16) %> &nbsp;
-    <strong>备注：</strong><%= order.note || '-' %>
-  </p>
-  <p>
-    <strong>收款状态：</strong>
-    <% if (order.effective_status === 'paid') { %>
+  <div class="detail-hero">
+    <div><span class="detail-eyebrow">销售单 #<%= order.id %> · <%= order.order_date %></span><strong><%= order.customer_name || '散客' %></strong></div>
+    <div class="detail-hero-value"><span>订单金额</span><strong>¥<%= order.total_amount.toFixed(2) %></strong></div>
+  </div>
+  <div class="detail-meta">
+    <div><span>仓库</span><strong><%= order.warehouse_name %></strong></div>
+    <div><span>录入人</span><strong><%= order.user_name %></strong></div>
+    <div><span>录入时间</span><strong><%= formatDateTime(order.created_at).slice(0, 16) %></strong></div>
+    <div><span>备注</span><strong><%= order.note || '-' %></strong></div>
+  </div>
+  <div class="detail-status-list">
+    <div><span>收款状态</span>
+    <% if (order.status !== 'approved') { %>
+      <span class="badge badge-muted">待生效</span>
+    <% } else if (order.effective_status === 'paid') { %>
       <span class="badge" style="background:#dcfce7;color:#166534">已收款</span>
     <% } else if (order.effective_status === 'partial') { %>
       <span class="badge" style="background:#fef3c7;color:#92400e">部分收款</span>
     <% } else { %>
       <span class="badge" style="background:#fee2e2;color:#991b1b">未收款</span>
     <% } %>
-    &nbsp;
-    <strong>审核状态：</strong>
+    </div>
+    <div><span>审核状态</span>
     <%
       const statusMap = {
         draft:     { text: '草稿',   bg: '#f3f4f6', fg: '#6b7280' },
@@ -32,24 +35,24 @@
       const st = statusMap[order.status] || { text: order.status, bg: '#f3f4f6', fg: '#6b7280' };
     %>
     <span class="badge" style="background:<%= st.bg %>;color:<%= st.fg %>"><%= st.text %></span>
+    </div>
+  </div>
     <% if (order.status === 'draft' || order.status === 'submitted') { %>
-      <span class="muted">（未审核，库存尚未变动）</span>
+      <p class="detail-state-note">未审核，库存尚未变动</p>
     <% } %>
-  </p>
-  <p>
-    <strong>总金额：</strong>¥<%= order.total_amount.toFixed(2) %> &nbsp;
-    <strong>已收款：</strong>¥<%= (order.paid_amount || 0).toFixed(2) %>
-    <% if (order.returned_amount > 0) { %> &nbsp; <strong>已扣退货：</strong>¥<%= order.returned_amount.toFixed(2) %><% } %>
-    &nbsp;
-    <strong>欠款：</strong>¥<%= order.effective_debt.toFixed(2) %>
-  </p>
+  <div class="detail-finance-grid">
+    <div><span><%= order.status === 'approved' ? '已收款' : '录入收款' %></span><strong>¥<%= (order.paid_amount || 0).toFixed(2) %></strong></div>
+    <% if (order.returned_amount > 0) { %><div><span>已扣退货</span><strong>¥<%= order.returned_amount.toFixed(2) %></strong></div><% } %>
+    <div><span><%= order.status === 'approved' ? '欠款' : '预计待收' %></span><strong class="<%= order.status === 'approved' ? 'detail-owing' : '' %>">¥<%= order.effective_debt.toFixed(2) %></strong></div>
+  </div>
   <% if (relatedReturns && relatedReturns.length > 0) { %>
     <p>
       <strong>关联退货单：</strong>
       <% relatedReturns.forEach(function(ro, idx) { %><a href="/returns/<%= ro.id %>">#<%= ro.id %></a>（¥<%= ro.total_amount.toFixed(2) %>，<%= ro.status === 'approved' ? '已审核' : (ro.status === 'submitted' ? '待审核' : (ro.status === 'rejected' ? '已拒绝' : '草稿')) %>）<%= idx < relatedReturns.length - 1 ? '、' : '' %><% }) %>
     </p>
   <% } %>
-  <table>
+  <h2 class="detail-section-heading">商品明细</h2>
+  <table class="detail-items-table">
     <tr><th>商品</th><th>数量</th><th>单价</th><th>小计</th><th>类型</th></tr>
     <% items.forEach(function(it) { %>
       <tr>
@@ -61,9 +64,14 @@
       </tr>
     <% }) %>
   </table>
+  <div class="detail-items-mobile">
+    <% items.forEach(function(it) { %>
+      <div class="detail-item-card"><div><strong><%= it.product_name %></strong><span><%= it.quantity %> <%= it.unit_label %> × ¥<%= it.unit_price.toFixed(2) %><% if (it.is_gift) { %> · 赠品<% } %></span></div><strong>¥<%= (it.quantity * it.unit_price).toFixed(2) %></strong></div>
+    <% }) %>
+  </div>
   <p class="right"><strong>总计：¥<%= order.total_amount.toFixed(2) %></strong></p>
 
-  <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:16px">
+  <div class="detail-actions">
     <% if (order.status === 'draft' && canManage) { %>
       <a class="btn" href="/sales/<%= order.id %>/edit">编辑</a>
       <form action="/sales/submit/<%= order.id %>" method="POST">
@@ -102,7 +110,11 @@
       </form>
     <% } %>
 
-    <a class="btn btn-secondary" href="/sales">返回列表</a>
+    <% if (order.status === 'approved' && canManage) { %>
+      <a class="btn btn-secondary" href="/returns/new?sale_id=<%= order.id %>">为这张销售单办理退货</a>
+    <% } %>
+
+    <a class="btn btn-secondary" href="/sales<%= order.customer_id ? '?customer_id=' + order.customer_id : '' %>">返回列表</a>
   </div>
 </div>
 <%- include('partials/footer') %>

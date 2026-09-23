@@ -5,8 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="csrf-token" content="<%= csrfToken %>">
   <title>鸭鸭进销存</title>
-  <link rel="stylesheet" href="/style.css?v=mobile-nav-panel-1">
+  <link rel="stylesheet" href="/style.css?v=mobile-polish-3">
   <script src="/csrf.js" defer></script>
+  <script src="/productFilter.js" defer></script>
 
   <!-- PWA：添加到主屏幕 -->
   <link rel="manifest" href="/manifest.json">
@@ -31,12 +32,11 @@
   <div class="brand">
     <a href="/" aria-label="返回首页">🦆 鸭鸭进销存</a><% if (currentTenant) { %> · <%= currentTenant.name %><% } %>
   </div>
-  <button class="nav-toggle" id="navToggle" aria-label="菜单" onclick="document.getElementById('mainNav').classList.toggle('open')">☰</button>
+  <button class="nav-toggle" id="navToggle" aria-label="打开菜单" aria-controls="mainNav" aria-expanded="false" onclick="const nav = document.getElementById('mainNav'); const open = nav.classList.toggle('open'); this.setAttribute('aria-expanded', String(open)); this.setAttribute('aria-label', open ? '关闭菜单' : '打开菜单')">☰</button>
   <nav id="mainNav">
-    <a href="/">首页</a>
-    <a href="/sales">销售订单</a>
-    <a href="/inventory">库存</a>
-    <a href="/customers">客户</a>
+    <a class="nav-primary" href="/sales">销售订单</a>
+    <a class="nav-primary" href="/inventory">库存</a>
+    <a class="nav-primary" href="/customers">客户</a>
     <a href="/transfers">调拨</a>
     <% if (currentUser.role === 'admin') { %>
       <a href="/purchases">采购</a>
@@ -60,10 +60,11 @@
 </div>
 <% } %>
 <div class="container">
-<% if (currentUser) { %>
+<% if (currentUser && currentPath === '/') { %>
   <div class="mobile-quick-actions">
-    <a href="/sales/new" class="btn">+ 销售出库</a>
-    <a href="/transfers/new" class="btn btn-secondary">+ 调拨</a>
+    <a href="/sales/new" class="btn">+ 销售</a>
     <a href="/inventory" class="btn btn-secondary">查库存</a>
+    <a href="/customers" class="btn btn-secondary">客户</a>
+    <a href="/transfers/new" class="btn btn-secondary">+ 调拨</a>
   </div>
 <% } %>

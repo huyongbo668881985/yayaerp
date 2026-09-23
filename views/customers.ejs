@@ -1,7 +1,19 @@
 <%- include('partials/header') %>
-<h1>客户管理</h1>
-<div class="card">
-  <h2>新增客户</h2>
+<div class="page-heading-actions"><h1>客户管理</h1><a class="btn customer-add-trigger" href="#customerNewPanel" onclick="document.getElementById('customerNewPanel').open=true">＋新增</a></div>
+<div class="card customer-search-card">
+  <form method="GET" action="/customers" class="customer-search-form">
+    <div class="form-row">
+      <label for="customerQuery">查询客户</label>
+      <input id="customerQuery" type="search" name="q" value="<%= query %>" placeholder="名称、联系人、电话或地址">
+    </div>
+    <button type="submit" class="btn btn-secondary">查询</button>
+    <% if (query) { %><a class="btn btn-secondary" href="/customers">清除</a><% } %>
+  </form>
+  <p class="muted customer-count"><%= query ? '查询结果 ' + displayedCustomerCount + ' 位' : '客户数量 ' + totalCustomerCount + ' 位' %><% if (query) { %>（共 <%= totalCustomerCount %> 位客户）<% } %></p>
+</div>
+<details class="card customer-new-panel" id="customerNewPanel" open>
+  <summary>新增客户 <span>展开填写</span></summary>
+  <div class="customer-new-content">
   <% if (error) { %><div class="error"><%= error %></div><% } %>
   <form method="POST" action="/customers/new" class="grid-3">
     <div class="form-row"><label>名称 *</label><input type="text" name="name" required pattern="\S+" title="客户名称不能包含空格"></div>
@@ -21,12 +33,22 @@
     <% } %>
     <div><button class="btn" type="submit">新增</button></div>
   </form>
-</div>
+  </div>
+</details>
+<script>
+  (function() {
+    const panel = document.getElementById('customerNewPanel');
+    const hasError = <%= error ? 'true' : 'false' %>;
+    function sync() { if (window.matchMedia('(min-width: 769px)').matches || hasError) panel.open = true; }
+    if (window.matchMedia('(max-width: 768px)').matches && !hasError) panel.open = false;
+    window.addEventListener('resize', sync);
+  })();
+</script>
 
 <% if (isAdmin) { %>
 <details class="card customer-reassign">
   <summary>
-    <span>批量转移客户归属</span>
+    <span>更多管理 · 批量转移客户归属</span>
     <span class="customer-reassign-hint">按需展开</span>
   </summary>
   <div class="customer-reassign-content">
@@ -52,21 +74,6 @@
 </details>
 <% } %>
 
-<div class="card">
-  <form method="GET" action="/customers" class="customer-search-form" style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap">
-    <div class="form-row" style="margin-bottom:0; flex:1; min-width:220px">
-      <label for="customerQuery">查询客户</label>
-      <input id="customerQuery" type="search" name="q" value="<%= query %>" placeholder="名称、联系人、电话或地址">
-    </div>
-    <button type="submit" class="btn btn-secondary">查询</button>
-    <% if (query) { %><a class="btn btn-secondary" href="/customers">清除</a><% } %>
-  </form>
-  <p class="muted" style="margin:12px 0 0">
-    <%= query ? '查询结果 ' + displayedCustomerCount + ' 位' : '客户数量 ' + totalCustomerCount + ' 位' %>
-    <% if (query) { %>（共 <%= totalCustomerCount %> 位客户）<% } %>
-  </p>
-</div>
-
 <div class="card desktop-table-wrap">
   <table>
     <tr><th>名称</th><th>联系人</th><th>电话</th><th>地址</th><th>归属业务员</th><th>操作</th></tr>
@@ -77,15 +84,21 @@
         <td><%= c.phone || '-' %></td>
         <td><%= c.address || '-' %></td>
         <td><%= c.operator_name || '-' %></td>
-        <td>
-          <% if (isAdmin || c.operator_id === currentUser.id) { %>
-            <a href="/customers/<%= c.id %>/edit" class="btn btn-sm btn-secondary">编辑</a>
-          <% } %>
-          <% if (isAdmin) { %>
-            <form method="POST" action="/customers/<%= c.id %>/delete" style="display:inline" onsubmit="return confirm('确认删除？如果该客户有历史订单会删除失败。')">
-              <button type="submit" style="background:none;border:none;color:#e5484d;cursor:pointer;padding:0;margin-left:6px">删除</button>
-            </form>
-          <% } %>
+        <td class="customer-table-actions">
+          <div class="customer-primary-actions">
+            <a href="/sales?customer_id=<%= c.id %>" class="btn btn-sm btn-secondary">查订单</a>
+            <a href="/sales/new?customer_id=<%= c.id %>" class="btn btn-sm">新开单</a>
+          </div>
+          <div class="customer-secondary-actions">
+            <% if (isAdmin || c.operator_id === currentUser.id) { %>
+              <a href="/customers/<%= c.id %>/edit">编辑资料</a>
+            <% } %>
+            <% if (isAdmin) { %>
+              <form method="POST" action="/customers/<%= c.id %>/delete" onsubmit="return confirm('确认删除？如果该客户有历史订单会删除失败。')">
+                <button type="submit" class="customer-delete-link">删除</button>
+              </form>
+            <% } %>
+          </div>
         </td>
       </tr>
     <% }) %>
@@ -94,27 +107,40 @@
 
 <div class="mobile-order-cards">
   <% customers.forEach(function(c) { %>
-    <div class="order-card">
+    <div class="order-card customer-card">
       <div class="order-card-top">
         <span class="order-card-id"><%= c.name %></span>
       </div>
       <div class="order-card-mid">
-        <span><%= c.contact || '-' %><% if (c.phone) { %> · <%= c.phone %><% } %></span>
+        <span><%= c.contact || '-' %><% if (c.phone) { %> · <a href="tel:<%= c.phone.replace(/[^+\d]/g, '') %>" class="customer-contact-link"><%= c.phone %></a><% } %></span>
         <span><%= c.operator_name || '未指定业务员' %></span>
       </div>
-      <% if (c.address) { %><div class="muted" style="margin-bottom:8px"><%= c.address %></div><% } %>
-      <div style="display:flex; gap:8px">
+      <% if (c.address) { %><div class="customer-address"><span><%= c.address %></span><button type="button" class="customer-copy-address" data-address="<%= c.address %>" onclick="copyCustomerAddress(this)">复制地址</button></div><% } %>
+      <div class="customer-primary-actions">
+        <a href="/sales?customer_id=<%= c.id %>" class="btn btn-secondary">查订单</a>
+        <a href="/sales/new?customer_id=<%= c.id %>" class="btn">新开单</a>
+      </div>
+      <details class="customer-more-actions"><summary>更多操作</summary><div class="customer-secondary-actions">
         <% if (isAdmin || c.operator_id === currentUser.id) { %>
-          <a href="/customers/<%= c.id %>/edit" class="btn btn-sm btn-secondary" style="flex:1; text-align:center">编辑</a>
+          <a href="/customers/<%= c.id %>/edit">编辑资料</a>
         <% } %>
         <% if (isAdmin) { %>
-          <form method="POST" action="/customers/<%= c.id %>/delete" style="flex:1" onsubmit="return confirm('确认删除？如果该客户有历史订单会删除失败。')">
-            <button type="submit" class="btn btn-sm btn-danger" style="width:100%">删除</button>
+          <form method="POST" action="/customers/<%= c.id %>/delete" onsubmit="return confirm('确认删除？如果该客户有历史订单会删除失败。')">
+            <button type="submit" class="customer-delete-link">删除</button>
           </form>
         <% } %>
-      </div>
+      </div></details>
     </div>
   <% }) %>
   <% if (customers.length === 0) { %><p class="muted">暂无客户</p><% } %>
 </div>
+<script>
+  async function copyCustomerAddress(button) {
+    try {
+      await navigator.clipboard.writeText(button.dataset.address);
+      button.textContent = '已复制';
+      setTimeout(function() { button.textContent = '复制地址'; }, 2000);
+    } catch (error) { button.textContent = '复制失败'; }
+  }
+</script>
 <%- include('partials/footer') %>

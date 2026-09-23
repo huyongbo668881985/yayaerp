@@ -1,18 +1,25 @@
 <%- include('partials/header') %>
-<h1>库存查询</h1>
-<div class="card">
-  <form method="GET" action="/inventory" class="form-row" style="max-width:260px">
-    <label>按仓库筛选</label>
-    <select name="warehouse_id" onchange="this.form.submit()">
-      <option value="">-- <%= isAdmin ? '全部仓库' : '我的车辆仓库' %> --</option>
-      <% warehouses.forEach(function(w) { %>
-        <option value="<%= w.id %>" <%= String(warehouseId) === String(w.id) ? 'selected' : '' %>><%= w.name %></option>
-      <% }) %>
-    </select>
+<div class="page-heading-actions"><h1>库存查询</h1><% if (isAdmin) { %><a class="inventory-adjust-link" href="/inventory/adjust">库存调整</a><% } %></div>
+<div class="card inventory-filter-card">
+  <form method="GET" action="/inventory" class="inventory-filter-form">
+    <div class="form-row inventory-search-row">
+      <label for="inventorySearch">商品名称或 SKU</label>
+      <input id="inventorySearch" type="search" name="q" value="<%= search %>" placeholder="搜索商品">
+    </div>
+    <div class="form-row inventory-warehouse-row">
+      <label for="inventoryWarehouse">仓库</label>
+      <select id="inventoryWarehouse" name="warehouse_id">
+        <option value="">-- <%= isAdmin ? '全部仓库' : '我的车辆仓库' %> --</option>
+        <% warehouses.forEach(function(w) { %>
+          <option value="<%= w.id %>" <%= String(warehouseId) === String(w.id) ? 'selected' : '' %>><%= w.name %></option>
+        <% }) %>
+      </select>
+    </div>
+    <label class="inventory-low-toggle"><input type="checkbox" name="low" value="1" <%= lowOnly ? 'checked' : '' %>> 只看低库存</label>
+    <button class="btn" type="submit">查询</button>
+    <% if (search || warehouseId || lowOnly) { %><a class="btn btn-secondary" href="/inventory">清除</a><% } %>
   </form>
-  <% if (isAdmin) { %>
-    <p style="margin-top:12px"><a class="btn btn-secondary" href="/inventory/adjust">盘点后账实不符？去库存调整</a></p>
-  <% } %>
+  <p class="muted inventory-count">找到 <%= rows.length %> 条库存记录</p>
 </div>
 <div class="card desktop-table-wrap">
   <table>
@@ -45,11 +52,11 @@
         <% if (isLow) { %><span class="badge badge-low">库存偏低</span><% } %>
       </div>
       <div class="order-card-mid">
-        <span><%= r.spec || '-' %></span>
+        <span><%= r.spec || '常规规格' %><% if (r.sku) { %> · <%= r.sku %><% } %></span>
         <span><%= r.warehouse_name %></span>
       </div>
       <div class="order-card-bottom">
-        <span class="order-card-amount" style="<%= isLow ? 'color:#e5484d' : '' %>"><%= qtyText %></span>
+        <span class="order-card-amount <%= isLow ? 'is-low' : '' %>"><small>可用库存</small><%= qtyText %></span>
       </div>
     </div>
   <% }) %>

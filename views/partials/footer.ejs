@@ -1,3 +1,10 @@
 </div>
+<% if (currentUser) { %>
+<nav class="mobile-bottom-nav" aria-label="常用功能">
+  <a href="/sales" class="<%= /^\/(sales|returns)(\/|$)/.test(currentPath) ? 'active' : '' %>" <%- /^\/(sales|returns)(\/|$)/.test(currentPath) ? 'aria-current="page"' : '' %>><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span>销售</span></a>
+  <a href="/inventory" class="<%= /^\/inventory(\/|$)/.test(currentPath) ? 'active' : '' %>" <%- /^\/inventory(\/|$)/.test(currentPath) ? 'aria-current="page"' : '' %>><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 7 12 3l9 4v10l-9 4-9-4zM3 7l9 4 9-4M12 11v10"/></svg><span>库存</span></a>
+  <a href="/customers" class="<%= /^\/customers(\/|$)/.test(currentPath) ? 'active' : '' %>" <%- /^\/customers(\/|$)/.test(currentPath) ? 'aria-current="page"' : '' %>><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3"/><path d="M5 20v-2a7 7 0 0 1 14 0v2z"/></svg><span>客户</span></a>
+</nav>
+<% } %>
 </body>
 </html>
