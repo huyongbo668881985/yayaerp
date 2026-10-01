@@ -1,0 +1,8 @@
+<% if (log.changes.length || log.itemChanges || log.stock.length) { %>
+<details class="audit-detail"><summary>查看变更详情</summary>
+  <% log.changes.forEach(function(change) { %><div class="audit-change"><strong><%= change.label %></strong><span><%= change.before %></span><span aria-hidden="true">→</span><span><%= change.after %></span></div><% }) %>
+  <% if (log.itemChanges) { %><div class="audit-items-compare"><% [{label:'原商品明细',items:log.beforeItems},{label:'新商品明细',items:log.afterItems}].forEach(function(group) { %><div><strong><%= group.label %></strong><% if (!group.items.length) { %><p class="muted">无</p><% } %><% group.items.forEach(function(item) { %><p><%= item.商品 %> · <%= item.数量 %> <%= item.单位 %><% if (item.单价 != null) { %> × ¥<%= Number(item.单价).toFixed(2) %><% } %><% if (item.赠品 === '是') { %>（赠品）<% } %><% if (item.基本单位成本 != null) { %><small>基本数量 <%= item.基本数量 %> · 成本 ¥<%= Number(item.基本单位成本).toFixed(2) %></small><% } %></p><% }) %></div><% }) %></div><% } %>
+  <% if (log.stock.length) { %><strong>本次库存变化（基本单位）</strong><% log.stock.forEach(function(stock) { %><p class="muted"><%= stock.product_name || '商品 #' + stock.product_id %> · <%= stock.warehouse_name || '仓库 #' + stock.warehouse_id %> · <%= stock.change_qty > 0 ? '+' : '' %><%= stock.change_qty %></p><% }) %><% } %>
+  <small class="muted">日志 #<%= log.id %> · 请求 <%= log.request_id %></small>
+</details>
+<% } %>

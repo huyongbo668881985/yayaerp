@@ -1,45 +1,48 @@
 <%- include('partials/header') %>
+<% const form = typeof formValues !== 'undefined' && formValues ? formValues : {}; %>
 <h1>新建采购单</h1>
 <div class="card">
-  <% if (error) { %><div class="error"><%= error %></div><% } %>
-  <form method="POST" action="/purchases/new">
+  <% if (error) { %><div class="error" role="alert"><%= error %></div><% } %>
+  <form method="POST" action="/purchases/new" id="purchaseForm" data-order-draft="purchases">
     <input type="hidden" name="_request_key" value="<%= typeof formValues !== 'undefined' && formValues && formValues._request_key ? formValues._request_key : newRequestKey() %>">
     <div class="grid-3">
       <div class="form-row">
         <label>供应商（可选）</label>
         <select name="supplier_id">
           <option value="">-- 无 --</option>
-          <% suppliers.forEach(function(s) { %><option value="<%= s.id %>"><%= s.name %></option><% }) %>
+          <% suppliers.forEach(function(s) { %><option value="<%= s.id %>" <%= String(form.supplier_id || '') === String(s.id) ? 'selected' : '' %>><%= s.name %></option><% }) %>
         </select>
       </div>
       <div class="form-row">
         <label>入库仓库 *</label>
         <select name="warehouse_id" required>
-          <% warehouses.forEach(function(w) { %><option value="<%= w.id %>"><%= w.name %></option><% }) %>
+          <% warehouses.forEach(function(w) { %><option value="<%= w.id %>" <%= String(form.warehouse_id || '') === String(w.id) ? 'selected' : '' %>><%= w.name %></option><% }) %>
         </select>
       </div>
       <div class="form-row">
         <label>日期</label>
-        <input type="date" name="order_date" value="<%= today %>">
+        <input type="date" name="order_date" value="<%= form.order_date || today %>">
       </div>
     </div>
 
-    <h2>商品明细</h2>
+    <h2 class="form-section-heading">商品明细</h2>
     <div id="items"></div>
     <button type="button" class="btn btn-secondary btn-sm" onclick="addRow()">+ 添加一行</button>
 
+    <p><strong>商品合计：¥<span id="itemsTotal">0.00</span></strong></p>
     <div class="form-row" style="margin-top:16px">
       <label>备注</label>
-      <textarea name="note" rows="2"></textarea>
+      <textarea name="note" rows="2"><%= form.note || '' %></textarea>
     </div>
 
-    <div style="margin-top:16px">
+    <div class="form-actions sale-form-actions">
       <button class="btn" type="submit">提交入库</button>
       <a class="btn btn-secondary" href="/purchases">取消</a>
     </div>
   </form>
 </div>
 
+<div class="sale-mobile-submit" aria-label="单据操作"><div><small>商品合计</small><strong>¥<span id="stickyItemsTotal">0.00</span></strong></div><button class="btn" type="submit" form="purchaseForm">提交入库</button></div>
 <script>
   const PRODUCTS = <%- JSON.stringify(products).replace(/</g, '\\u003c') %>;
   let rowIndex = 0;
@@ -51,18 +54,19 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
-  function addRow() {
+  function addRow(initial) {
     const container = document.getElementById('items');
     const div = document.createElement('div');
     div.className = 'item-row';
     div.style.gridTemplateColumns = '2fr 1fr 1fr 1fr auto';
-    const options = PRODUCTS.map(p => `<option value="${p.id}" data-price="${p.cost_price}" data-price-pack="${p.cost_price_pack != null ? p.cost_price_pack : ''}" data-unit="${esc(p.unit)}" data-pack-unit="${esc(p.pack_unit || '')}" data-pack-size="${p.pack_size || 1}">${esc(p.name)}${p.spec ? ' ('+esc(p.spec)+')' : ''}</option>`).join('');
+    const options = PRODUCTS.map(p => `<option value="${p.id}" data-search="${esc([p.name, p.sku, p.spec].filter(Boolean).join(' '))}" data-name="${esc(p.name)}" data-sku="${esc(p.sku || '')}" data-price="${p.cost_price}" data-price-pack="${p.cost_price_pack != null ? p.cost_price_pack : ''}" data-unit="${esc(p.unit)}" data-pack-unit="${esc(p.pack_unit || '')}" data-pack-size="${p.pack_size || 1}">${esc(p.name)}${p.spec ? ' ('+esc(p.spec)+')' : ''}</option>`).join('');
     div.innerHTML = `
-      <select name="product_id" onchange="onProductChange(this)" required>
+      <input type="search" class="product-search" aria-label="搜索商品" autocomplete="off">
+      <select name="product_id" aria-label="商品" onchange="onProductChange(this)" required>
         <option value="">-- 选择商品 --</option>
         ${options}
       </select>
-      <select name="unit_choice" class="unit-select" onchange="fillPrice(this.parentElement.querySelector('select[name=product_id]'))">
+      <select name="unit_choice" class="unit-select" onchange="fillPrice(this.closest('.item-row').querySelector('select[name=product_id]'))">
         <option value="base">（先选商品）</option>
       </select>
       <input type="number" name="quantity" placeholder="数量" min="1" required>
@@ -70,6 +74,13 @@
       <button type="button" class="btn btn-danger btn-sm" onclick="this.parentElement.remove()">删除</button>
     `;
     container.appendChild(div);
+    if (initial) {
+      const select = div.querySelector('[name="product_id"]'); select.value = initial.id;
+      if (select.value) onProductChange(select);
+      div.querySelector('[name="unit_choice"]').value = initial.unit_choice;
+      div.querySelector('[name="quantity"]').value = initial.quantity;
+      div.querySelector('[name="unit_price"]').value = initial.price;
+    }
   }
 
   function onProductChange(select) {
@@ -105,6 +116,7 @@
     priceInput.value = suggested || '';
   }
 
-  addRow();
+  const INITIAL_ITEMS = <%- JSON.stringify(typeof draftItems !== 'undefined' ? draftItems : []).replace(/</g, '\\u003c') %>;
+  if (INITIAL_ITEMS.length) INITIAL_ITEMS.forEach(addRow); else addRow();
 </script>
 <%- include('partials/footer') %>

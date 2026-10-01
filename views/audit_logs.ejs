@@ -1,13 +1,18 @@
 <%- include('partials/header') %>
 <div class="tabbar"><a href="/users">账号管理</a><a href="/users/audit-logs" class="active">操作日志</a></div>
-<h1>操作日志</h1>
+<div class="page-heading-actions"><h1>操作日志</h1><a class="btn btn-secondary" href="/users/audit-logs/export?<%= queryString %>">导出筛选结果</a></div>
+<p class="muted">日志时间按北京时间显示。新记录保留变更前后内容；历史记录保留原说明。</p>
 <div class="card"><form method="GET" class="sales-filter-form">
-  <div class="form-row"><label>开始日期</label><input type="date" name="start" value="<%= start %>"></div>
-  <div class="form-row"><label>结束日期</label><input type="date" name="end" value="<%= end %>"></div>
-  <div class="form-row"><label>操作人</label><select name="user_id"><option value="">全部人员</option><% users.forEach(function(u) { %><option value="<%= u.id %>" <%= String(u.id) === String(selectedUserId) ? 'selected' : '' %>><%= u.name %></option><% }) %></select></div>
-  <div class="form-row"><label>动作</label><select name="action"><option value="">全部动作</option><% ['新建销售单','编辑销售单','删除销售单','提交销售单审核','撤回销售单','审核通过销售单','审核拒绝销售单','反审核销售单','记录销售收款','新增账号','禁用账号','启用账号','重置密码','删除账号'].forEach(function(item) { %><option value="<%= item %>" <%= item === selectedAction ? 'selected' : '' %>><%= item %></option><% }) %></select></div>
-  <button class="btn btn-secondary">筛选</button><a class="btn btn-secondary" href="/users/audit-logs">清除</a>
+  <div class="form-row"><label for="auditStart">开始日期</label><input id="auditStart" type="date" name="start" value="<%= filters.start %>"></div>
+  <div class="form-row"><label for="auditEnd">结束日期</label><input id="auditEnd" type="date" name="end" value="<%= filters.end %>"></div>
+  <div class="form-row"><label for="auditUser">操作人</label><select id="auditUser" name="user_id"><option value="">全部人员</option><% users.forEach(function(u) { %><option value="<%= u.id %>" <%= String(u.id) === filters.user_id ? 'selected' : '' %>><%= u.name %></option><% }) %></select></div>
+  <div class="form-row"><label for="auditAction">动作</label><select id="auditAction" name="action"><option value="">全部动作</option><% actions.forEach(function(item) { %><option <%= item === filters.action ? 'selected' : '' %>><%= item %></option><% }) %></select></div>
+  <div class="form-row"><label for="auditEntity">对象</label><select id="auditEntity" name="entity_type"><option value="">全部对象</option><% entityTypes.forEach(function(item) { %><option <%= item === filters.entity_type ? 'selected' : '' %>><%= item %></option><% }) %></select></div>
+  <div class="form-row"><label for="auditId">单号 / 对象编号</label><input id="auditId" type="number" name="entity_id" min="1" step="1" inputmode="numeric" value="<%= filters.entity_id %>"></div>
+  <button class="btn btn-secondary" type="submit">筛选</button><a class="btn btn-secondary" href="/users/audit-logs">清除</a>
 </form></div>
-<div class="card desktop-table-wrap"><table><tr><th>时间</th><th>操作人</th><th>动作</th><th>对象</th><th>说明</th></tr><% logs.forEach(function(log) { %><tr><td><%= formatDateTime(log.created_at).slice(0,16) %></td><td><%= log.user_name %></td><td><%= log.action %></td><td><%= log.entity_type %><%= log.entity_id ? ' #' + log.entity_id : '' %></td><td><%= log.summary || '-' %></td></tr><% }) %></table></div>
-<div class="mobile-order-cards"><% logs.forEach(function(log) { %><div class="order-card"><div class="order-card-top"><span class="order-card-id"><%= log.action %></span><span class="muted"><%= formatDateTime(log.created_at).slice(0,16) %></span></div><div><%= log.user_name %> · <%= log.entity_type %><%= log.entity_id ? ' #' + log.entity_id : '' %></div><p class="muted"><%= log.summary || '-' %></p></div><% }) %><% if (!logs.length) { %><p class="muted">暂无操作日志</p><% } %></div>
+<p class="muted" role="status">共 <%= total %> 条 · 第 <%= page %> / <%= pageCount %> 页</p>
+<div class="card desktop-table-wrap"><table><tr><th>时间</th><th>操作人</th><th>动作</th><th>对象</th><th>说明与变更</th></tr><% logs.forEach(function(log) { %><tr><td><%= formatDateTime(log.created_at) %></td><td><%= log.user_name %></td><td><%= log.action %></td><td><%= log.entity_type %><%= log.entity_id ? ' #' + log.entity_id : '' %></td><td><%= log.summary || '-' %><%- include('partials/audit_details', {log}) %></td></tr><% }) %><% if (!logs.length) { %><tr><td colspan="5">暂无符合条件的日志</td></tr><% } %></table></div>
+<div class="mobile-order-cards"><% logs.forEach(function(log) { %><div class="order-card"><div class="order-card-top"><span class="order-card-id"><%= log.action %></span><span class="muted"><%= formatDateTime(log.created_at) %></span></div><div><%= log.user_name %> · <%= log.entity_type %><%= log.entity_id ? ' #' + log.entity_id : '' %></div><p class="muted"><%= log.summary || '-' %></p><%- include('partials/audit_details', {log}) %></div><% }) %><% if (!logs.length) { %><p class="muted">暂无符合条件的日志</p><% } %></div>
+<nav class="audit-pagination" aria-label="日志翻页"><% if (page > 1) { %><a class="btn btn-secondary" href="/users/audit-logs?<%= queryString %>&page=<%= page-1 %>">上一页</a><% } %><% if (page < pageCount) { %><a class="btn btn-secondary" href="/users/audit-logs?<%= queryString %>&page=<%= page+1 %>">下一页</a><% } %></nav>
 <%- include('partials/footer') %>

@@ -11,13 +11,14 @@
 <% } %>
 <div style="margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap">
   <a class="btn" href="/sales/new<%= selectedCustomer ? '?customer_id=' + selectedCustomer.id : '' %>">+ 新建销售单</a>
+  <a class="btn <%= orderStatus === 'draft' ? '' : 'btn-secondary' %>" href="/sales<%= salesQueryString({ status: orderStatus === 'draft' ? '' : 'draft', pending: '' }) %>"><%= orderStatus === 'draft' ? '查看全部订单' : '草稿箱（' + draftCount + '）' %></a>
   <% if (currentUser.role === 'admin') { %>
-    <a class="btn <%= pendingOnly ? '' : 'btn-secondary' %>" href="/sales<%= salesQueryString({ pending: pendingOnly ? '' : 1, customer_id: customerId }) %>">未审核订单</a>
+    <a class="btn <%= pendingOnly ? '' : 'btn-secondary' %>" href="/sales<%= salesQueryString({ pending: pendingOnly ? '' : 1, status: '', customer_id: customerId }) %>">未审核订单</a>
   <% } %>
 </div>
 
 <details class="card sales-filter-panel" id="salesFilterPanel" open>
-  <summary>筛选订单<%= start || end || customerId || unpaidOnly || pendingOnly || tagId ? ' · 已应用条件' : '' %></summary>
+  <summary>筛选订单<%= start || end || customerId || unpaidOnly || pendingOnly || tagId || orderStatus ? ' · 已应用条件' : '' %></summary>
   <form method="GET" action="/sales" class="sales-filter-form">
     <div class="form-row" style="margin-bottom:0">
       <label>开始日期</label>
@@ -59,6 +60,7 @@
       <input type="checkbox" name="unpaid" value="1" id="unpaidCheck" <%= unpaidOnly ? 'checked' : '' %> style="width:auto">
       <label for="unpaidCheck" style="margin:0">只看未结清（欠款 / 待退款）</label>
     </div>
+    <% if (orderStatus) { %><input type="hidden" name="status" value="<%= orderStatus %>"><% } %>
     <% if (pendingOnly) { %><input type="hidden" name="pending" value="1"><% } %>
     <% if (guestOnly) { %><input type="hidden" name="guest" value="1"><% } %>
     <input type="hidden" name="sort" value="<%= sort %>"><input type="hidden" name="order" value="<%= order %>">
@@ -197,9 +199,10 @@
       <% } %>
     </a>
     <% if (o.status === 'draft' && (currentUser.role === 'admin' || o.user_id === currentUser.id)) { %>
-      <form action="/sales/<%= o.id %>/delete" method="POST" style="margin:-8px 0 12px; text-align:right" onsubmit="return confirm('确认删除这张未提交的草稿销售单？删除后无法恢复。')">
+      <div class="draft-row-actions"><a class="btn btn-secondary btn-sm" href="/sales/<%= o.id %>/edit">继续编辑草稿</a>
+      <form action="/sales/<%= o.id %>/delete" method="POST" onsubmit="return confirm('确认删除这张未提交的草稿销售单？删除后无法恢复。')">
         <button type="submit" class="btn btn-sm btn-danger">删除草稿</button>
-      </form>
+      </form></div>
     <% } %>
   <% }) %>
 </div>

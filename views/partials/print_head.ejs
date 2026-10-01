@@ -1,0 +1,3 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title><%= title %></title><link rel="stylesheet" href="/print.css?v=2"><style id="paperSize">@page { size: A4; margin: 12mm; }</style><script src="/printDocument.js?v=2" defer></script></head><body>
+<div class="print-toolbar"><a href="<%= back %>">返回</a><label>纸张<select id="printLayout"><option value="a4">A4</option><% if(typeof receipt !== 'undefined' && receipt) { %><option value="receipt">80mm 票据</option><% } %></select></label><button type="button" id="printButton">打印 / 保存 PDF</button><p id="printHint">建议关闭打印页眉页脚；核对后打印或保存为 PDF。</p></div>
+<main class="print-paper"><header><h1><%= currentTenant.name %></h1><h2><%= title %></h2></header>

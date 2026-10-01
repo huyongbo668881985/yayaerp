@@ -4,8 +4,9 @@
 <div class="card">
   <% if (error) { %><div class="error" role="alert"><%= error %></div><% } %>
   <% if (order) { %><p class="muted">编辑后仍是草稿状态，保存后需要重新点"提交审核"。</p><% } %>
-  <form method="POST" action="<%= order ? '/transfers/' + order.id + '/edit' : '/transfers/new' %>" id="transferForm">
+  <form method="POST" action="<%= order ? '/transfers/' + order.id + '/edit' : '/transfers/new' %>" id="transferForm" data-order-draft="transfers">
     <input type="hidden" name="_request_key" value="<%= typeof formValues !== 'undefined' && formValues && formValues._request_key ? formValues._request_key : newRequestKey() %>">
+    <% if (order) { %><input type="hidden" name="draft_revision" value="<%= form.draft_revision != null ? form.draft_revision : order.revision %>"><% } %>
     <h2 class="form-section-heading">基本信息</h2>
     <div class="grid-3">
       <div class="form-row">
@@ -44,7 +45,7 @@
       </div>
     </div>
 
-    <div class="form-actions">
+    <div class="form-actions sale-form-actions">
       <button class="btn" type="submit"><%= order ? '保存修改' : '提交审核' %></button>
       <% if (!order) { %>
         <button class="btn btn-secondary" type="submit" name="save_draft" value="1">存草稿</button>
@@ -54,6 +55,7 @@
   </form>
 </div>
 
+<div class="sale-mobile-submit" aria-label="单据操作"><div><small>商品行</small><strong><span id="stickyItemsTotal">0</span> 行</strong></div><% if (!order) { %><button class="btn btn-secondary" type="submit" form="transferForm" name="save_draft" value="1">存草稿</button><% } %><button class="btn" type="submit" form="transferForm"><%= order ? '保存修改' : '提交审核' %></button></div>
 <script>
   const PRODUCTS = <%- JSON.stringify(products).replace(/</g, '\\u003c') %>;
   const EXISTING_ITEMS = <%- JSON.stringify(typeof draftItems !== 'undefined' ? draftItems : (typeof existingItems !== 'undefined' ? existingItems : []).map(function(it) {
@@ -74,9 +76,9 @@
     const div = document.createElement('div');
     div.className = 'item-row';
     div.style.gridTemplateColumns = '2fr 1fr 1fr auto';
-    const options = PRODUCTS.map(p => `<option value="${p.id}" data-search="${esc([p.name, p.sku, p.spec].filter(Boolean).join(' '))}" data-unit="${esc(p.unit)}" data-pack-unit="${esc(p.pack_unit || '')}">${esc(p.name)}${p.spec ? ' ('+esc(p.spec)+')' : ''}</option>`).join('');
+    const options = PRODUCTS.map(p => `<option value="${p.id}" data-name="${esc(p.name)}" data-sku="${esc(p.sku || '')}" data-search="${esc([p.name, p.sku, p.spec].filter(Boolean).join(' '))}" data-unit="${esc(p.unit)}" data-pack-unit="${esc(p.pack_unit || '')}" data-pack-size="${p.pack_size || 1}">${esc(p.name)}${p.spec ? ' ('+esc(p.spec)+')' : ''}</option>`).join('');
     div.innerHTML = `
-      <input type="search" class="product-search" placeholder="搜索商品名称或 SKU" aria-label="搜索商品" oninput="filterProductOptions(this)">
+      <input type="search" class="product-search" placeholder="搜索商品名称或 SKU" aria-label="搜索商品">
       <select name="product_id" aria-label="商品" onchange="onProductChange(this)" required>
         <option value="">-- 选择商品 --</option>
         ${options}

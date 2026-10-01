@@ -3,6 +3,7 @@ const { requireLogin, requireAdmin } = require('../middleware/auth');
 const { sendCsv } = require('../utils/csv');
 const { formatDateTime } = require('../utils/dates');
 const { warehousesForUser, isWarehouseInScope } = require('../lib/warehouseAccess');
+const { writeAuditLog } = require('../lib/auditLog');
 const router = express.Router();
 
 // 当前库存快照（商品 × 仓库）：库存页面和 API v1 共用这一份查询
@@ -166,8 +167,12 @@ router.post('/inventory/adjust', requireAdmin, (req, res) => {
       INSERT INTO stock_transactions (product_id, warehouse_id, change_qty, type, ref_type, ref_id, user_id)
       VALUES (?,?,?,'adjust','manual_adjust',NULL,?)
     `).run(productId, warehouseId, delta, req.session.user.id);
+    writeAuditLog(db, req.session.user, '调整库存', '库存', productId, `${product.name} · ${warehouse.name}：${curQty} → ${newQty} ${product.unit}，原因：${reason}`, {
+      before: { fields: { 商品: product.name, 仓库: warehouse.name, 数量: curQty } },
+      after: { fields: { 商品: product.name, 仓库: warehouse.name, 数量: newQty, 调整原因: reason } }
+    });
   });
-  tx();
+  tx.immediate();
 
   if (delta === 0) {
     return renderError(`数量没有变化（当前库存就是 ${newQty}），无需调整`);

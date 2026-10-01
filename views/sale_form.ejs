@@ -4,8 +4,9 @@
 <div class="card sale-form-card">
   <% if (error) { %><div class="error" role="alert"><%= error %></div><% } %>
   <% if (order) { %><p class="muted">编辑后仍是草稿状态，保存后需要重新点"提交审核"。</p><% } %>
-  <form method="POST" action="<%= order ? '/sales/' + order.id + '/edit' : '/sales/new' %>" id="saleForm">
+  <form method="POST" action="<%= order ? '/sales/' + order.id + '/edit' : '/sales/new' %>" id="saleForm" data-order-draft="sales">
     <input type="hidden" name="_request_key" value="<%= typeof formValues !== 'undefined' && formValues && formValues._request_key ? formValues._request_key : newRequestKey() %>">
+    <% if (order) { %><input type="hidden" name="draft_revision" value="<%= form.draft_revision != null ? form.draft_revision : order.revision %>"><% } %>
     <h2 class="form-section-heading">基本信息</h2>
     <div class="grid-3">
       <div class="form-row customer-picker-field">
@@ -46,7 +47,7 @@
 
     <h2 class="form-section-heading">商品明细</h2>
     <div id="items"></div>
-    <button type="button" class="btn btn-secondary btn-sm" onclick="addRow(); saleFormDirty = true">＋ 添加商品</button>
+    <button type="button" class="btn btn-secondary btn-sm" onclick="addRow()">＋ 添加商品</button>
     <p style="margin-top:10px;font-size:16px"><strong>商品合计：¥<span id="itemsTotal">0.00</span></strong> <span class="muted">（赠品不计入）</span></p>
 
     <h2 class="form-section-heading">金额与备注</h2>
@@ -122,6 +123,7 @@
       item.setAttribute('aria-selected', item === option ? 'true' : 'false');
     });
     closeCustomerPicker();
+    document.getElementById('saleForm').dispatchEvent(new Event('order-form-change'));
   }
 
   function filterCustomers() {
@@ -184,6 +186,7 @@
     customerSearch.setCustomValidity('');
     customerOptions.forEach(function(option) { option.setAttribute('aria-selected', 'false'); });
     clearCustomer.hidden = true;
+    document.getElementById('saleForm').dispatchEvent(new Event('order-form-change'));
     openCustomerPicker();
     customerSearch.focus();
   });
@@ -212,7 +215,7 @@
   // 编辑模式下，把已有明细转换成和新建表单一致的结构（quantity 用录入时的原始数量，配合 unit_choice 换算）
   const EXISTING_ITEMS = <%- JSON.stringify(typeof draftItems !== 'undefined' ? draftItems : (typeof existingItems !== 'undefined' ? existingItems : []).map(function(it) {
     const p = products.find(function(pr) { return pr.id === it.product_id; });
-    const isPack = p && p.pack_unit && it.unit_label === p.pack_unit;
+    const isPack = p && p.pack_unit && (it.base_quantity !== it.quantity || it.unit_label === p.pack_unit);
     return {
       id: it.product_id,
       quantity: it.quantity,
@@ -229,57 +232,12 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
-  function setupProductPicker(row) {
-    const search = row.querySelector('.product-search');
-    const results = row.querySelector('.sale-product-results');
-    const select = row.querySelector('select[name=product_id]');
-    function showResults() {
-      const keyword = search.value.trim().toLocaleLowerCase();
-      const matches = PRODUCTS.filter(function(product) {
-        return [product.name, product.sku, product.spec].filter(Boolean).join(' ').toLocaleLowerCase().includes(keyword);
-      }).slice(0, 20);
-      results.replaceChildren();
-      matches.forEach(function(product) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'sale-product-option';
-        button.textContent = product.name + (product.spec ? ' · ' + product.spec : '') + (product.sku ? ' · ' + product.sku : '');
-        button.addEventListener('click', function() {
-          select.value = String(product.id);
-          onProductChange(select);
-          recalcTotal();
-          results.hidden = true;
-          row.querySelector('input[name=quantity]').focus();
-        });
-        results.appendChild(button);
-      });
-      if (!matches.length) {
-        const empty = document.createElement('p');
-        empty.textContent = '没有匹配的商品';
-        results.appendChild(empty);
-      }
-      results.hidden = false;
-    }
-    search.addEventListener('focus', function() { if (select.value) search.select(); showResults(); });
-    search.addEventListener('input', function() { select.value = ''; search.setCustomValidity('请从搜索结果中选择商品'); showResults(); });
-    search.addEventListener('keydown', function(event) {
-      if (event.key === 'Escape') results.hidden = true;
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        const first = results.querySelector('button');
-        if (first) first.click();
-      }
-    });
-    search.addEventListener('blur', function() { setTimeout(function() { results.hidden = true; }, 180); });
-    select.addEventListener('change', function() { results.hidden = true; });
-  }
-
   function addRow(initial) {
     const container = document.getElementById('items');
     const div = document.createElement('div');
     div.className = 'item-row';
     div.classList.add('sale-item-row');
-    const options = PRODUCTS.map(p => `<option value="${p.id}" data-search="${esc([p.name, p.sku, p.spec].filter(Boolean).join(' '))}" data-price="${p.sale_price}" data-price-pack="${p.sale_price_pack != null ? p.sale_price_pack : ''}" data-unit="${esc(p.unit)}" data-pack-unit="${esc(p.pack_unit || '')}" data-pack-size="${p.pack_size || 1}">${esc(p.name)}${p.spec ? ' ('+esc(p.spec)+')' : ''}</option>`).join('');
+    const options = PRODUCTS.map(p => `<option value="${p.id}" data-name="${esc(p.name)}" data-sku="${esc(p.sku || '')}" data-search="${esc([p.name, p.sku, p.spec].filter(Boolean).join(' '))}" data-price="${p.sale_price}" data-price-pack="${p.sale_price_pack != null ? p.sale_price_pack : ''}" data-unit="${esc(p.unit)}" data-pack-unit="${esc(p.pack_unit || '')}" data-pack-size="${p.pack_size || 1}">${esc(p.name)}${p.spec ? ' ('+esc(p.spec)+')' : ''}</option>`).join('');
     div.innerHTML = `
       <label class="sale-product-label">商品<input type="search" class="product-search" placeholder="输入名称或 SKU，点击结果选中" aria-label="搜索商品" autocomplete="off" required></label>
       <div class="sale-product-results" hidden></div>
@@ -300,7 +258,6 @@
       <button type="button" class="btn btn-danger btn-sm sale-item-delete" onclick="this.closest('.item-row').remove(); recalcTotal();">删除</button>
     `;
     container.appendChild(div);
-    setupProductPicker(div);
 
     if (initial) {
       const productSelect = div.querySelector('select[name=product_id]');
@@ -389,12 +346,12 @@
       const qty = parseFloat(qtyInput.value) || 0;
       const price = parseFloat(priceInput.value) || 0;
       const lineTotal = giftCheckbox && giftCheckbox.checked ? 0 : qty * price;
-      row.querySelector('.sale-line-total strong').textContent = '¥' + lineTotal.toFixed(2);
+      row.querySelector('.sale-line-total strong').textContent = Number.isFinite(lineTotal) ? '¥' + lineTotal.toFixed(2) : '—';
       total += lineTotal;
     });
     const el = document.getElementById('itemsTotal');
-    if (el) el.textContent = total.toFixed(2);
-    document.getElementById('stickyItemsTotal').textContent = total.toFixed(2);
+    if (el) el.textContent = Number.isFinite(total) ? total.toFixed(2) : '—';
+    document.getElementById('stickyItemsTotal').textContent = Number.isFinite(total) ? total.toFixed(2) : '—';
   }
   document.getElementById('items').addEventListener('input', recalcTotal);
   document.getElementById('items').addEventListener('change', recalcTotal);
@@ -434,19 +391,15 @@
       this.appendChild(hidden);
     }
     hidden.value = JSON.stringify(items);
-    saleFormDirty = false;
   });
-  let saleFormDirty = false;
-  const saleForm = document.getElementById('saleForm');
-  saleForm.addEventListener('input', function() { saleFormDirty = true; });
-  saleForm.addEventListener('change', function() { saleFormDirty = true; });
-  document.getElementById('items').addEventListener('click', function(event) {
-    if (event.target.closest('.sale-item-delete, .sale-product-option')) saleFormDirty = true;
-  });
-  window.addEventListener('beforeunload', function(event) {
-    if (!saleFormDirty) return;
-    event.preventDefault();
-    event.returnValue = '';
+  document.getElementById('saleForm').addEventListener('draft-restored', function() {
+    const selected = selectedCustomerOption();
+    if (customerId.value && selected) selectCustomer(selected);
+    else {
+      customerId.value = '';
+      customerSearch.setCustomValidity(customerSearch.value.trim() && customerSearch.value !== '散客' ? '请重新选择客户，或清空搜索使用散客。' : '');
+      clearCustomer.hidden = !customerSearch.value;
+    }
   });
 </script>
 <%- include('partials/footer') %>

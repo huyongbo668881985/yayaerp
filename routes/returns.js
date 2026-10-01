@@ -410,7 +410,7 @@ router.get('/returns/:id/edit', requireLogin, (req, res) => {
   res.render('return_form', { customers, warehouses, products, error: null, order, existingItems, today: todayLocalDate() });
 });
 
-router.post('/returns/:id/edit', requireLogin, (req, res) => {
+router.post('/returns/:id/edit', requireLogin, requireMutationKey, (req, res) => {
   const db = req.tenantDb;
   const order = db.prepare('SELECT * FROM return_orders WHERE id = ?').get(req.params.id);
   if (!order) return res.status(404).send('单据不存在');
@@ -488,7 +488,7 @@ router.post('/returns/:id/edit', requireLogin, (req, res) => {
   if (refunded >= total && total > 0) refundStatus = 'refunded';
   else if (refunded > 0) refundStatus = 'partial';
 
-  const tx = db.transaction(() => {
+  return completeMutation(req, res, () => {
     db.prepare(
       `UPDATE return_orders SET customer_id=?, warehouse_id=?, related_sales_order_id=?, order_date=?, total_amount=?, refunded_amount=?, refund_status=?, note=?, remarks=? WHERE id=?`
     ).run(customer_id || null, warehouse_id, relatedId, order_date || order.order_date, total, refunded, refundStatus, note || '', remarks || '', order.id);
@@ -497,10 +497,8 @@ router.post('/returns/:id/edit', requireLogin, (req, res) => {
     for (const it of items) {
       insertItem.run(order.id, it.pid, it.qty, it.unitLabel, it.baseQty, it.price, it.costSnapshot);
     }
+    return { redirect: '/returns/' + order.id };
   });
-  tx();
-
-  res.redirect('/returns/' + order.id);
 });
 
 router.post('/returns/submit/:id', requireLogin, (req, res) => {

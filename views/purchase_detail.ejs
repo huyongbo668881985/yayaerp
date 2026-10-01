@@ -1,5 +1,6 @@
 <%- include('partials/header') %>
 <h1>采购单 #<%= order.id %></h1>
+<div class="detail-print-actions"><a class="btn btn-secondary" href="/purchases/<%= order.id %>/print">打印 / PDF</a></div>
 <div class="card">
   <p><strong>日期：</strong><%= order.order_date %> &nbsp; <strong>供应商：</strong><%= order.supplier_name || '-' %> &nbsp; <strong>仓库：</strong><%= order.warehouse_name %></p>
   <p><strong>录入人：</strong><%= order.user_name %> &nbsp; <strong>备注：</strong><%= order.note || '-' %></p>

@@ -1,0 +1,21 @@
+const express=require('express');
+const { requireLogin }=require('../middleware/auth');
+const { areWarehousesTransferable }=require('../lib/warehouseAccess');
+const { getSalePayment }=require('../lib/profitCalc');
+const router=express.Router();
+const defs={sales:{table:'sales_orders',items:'sales_order_items',parent:'sales_order_id',title:'销售送货单'},returns:{table:'return_orders',items:'return_order_items',parent:'return_order_id',title:'退货单'},purchases:{table:'purchase_orders',items:'purchase_order_items',parent:'purchase_order_id',title:'采购入库单'},transfers:{table:'transfer_orders',items:'transfer_order_items',parent:'transfer_order_id',title:'调拨单'}};
+router.get('/:kind/:id/print',requireLogin,(req,res,next)=>{
+  const def=Object.hasOwn(defs,req.params.kind)?defs[req.params.kind]:null;if(!def)return next();
+  if(!/^[1-9]\d*$/.test(req.params.id))return res.status(404).send('单据不存在');
+  const db=req.tenantDb,user=req.session.user;
+  if(req.params.kind==='purchases' && user.role!=='admin')return res.status(403).render('error',{message:'权限不足：采购打印仅管理员可使用'});
+  const order=db.prepare(`SELECT o.*,u.name user_name FROM ${def.table} o LEFT JOIN users u ON u.id=o.user_id WHERE o.id=?`).get(req.params.id);
+  if(!order)return res.status(404).send('单据不存在');
+  if(user.role!=='admin' && (order.user_id!==user.id || (req.params.kind==='transfers' && !areWarehousesTransferable(db,user,[order.from_warehouse_id,order.to_warehouse_id]))))return res.status(403).send('无权限打印此单据');
+  const name=(table,id)=>id?db.prepare(`SELECT name FROM ${table} WHERE id=?`).get(id)?.name||'已删除':'—';
+  const partner=order.customer_id?db.prepare('SELECT name,contact,phone,address FROM customers WHERE id=?').get(order.customer_id):order.supplier_id?db.prepare('SELECT name,contact,phone FROM suppliers WHERE id=?').get(order.supplier_id):{name:req.params.kind==='purchases'?'无供应商':'散客'};
+  const items=db.prepare(`SELECT i.product_id,i.quantity,i.unit_label,i.base_quantity${req.params.kind==='transfers'?'':',i.unit_price'}${req.params.kind==='sales'?',i.is_gift':''},p.name product_name,p.sku,p.spec FROM ${def.items} i LEFT JOIN products p ON p.id=i.product_id WHERE i.${def.parent}=? ORDER BY i.id`).all(order.id);
+  res.set('Cache-Control','no-store');
+  res.render('document_print',{title:def.title,kind:req.params.kind,order,partner,items,warehouse:order.warehouse_id?name('warehouses',order.warehouse_id):name('warehouses',order.from_warehouse_id)+' → '+name('warehouses',order.to_warehouse_id),payment:req.params.kind==='sales'?getSalePayment(db,order.id):null,printedAt:new Date().toISOString()});
+});
+module.exports=router;

@@ -1,5 +1,5 @@
 <%- include('partials/header') %>
-<div class="page-heading-actions"><h1>库存查询</h1><% if (isAdmin) { %><a class="inventory-adjust-link" href="/inventory/adjust">库存调整</a><% } %></div>
+<div class="page-heading-actions"><h1>库存查询</h1><% if (isAdmin) { %><a class="inventory-adjust-link" href="/inventory/adjust">库存调整</a><a class="inventory-adjust-link" href="/imports">盘点导入</a><% } %></div>
 <div class="card inventory-filter-card">
   <form method="GET" action="/inventory" class="inventory-filter-form">
     <div class="form-row inventory-search-row">

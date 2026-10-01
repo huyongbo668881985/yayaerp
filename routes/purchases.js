@@ -41,11 +41,16 @@ router.post('/purchases/new', requireAdmin, requireMutationKey, (req, res) => {
   if (!Array.isArray(unit_price)) unit_price = [unit_price];
   if (!Array.isArray(unit_choice)) unit_choice = [unit_choice];
 
-  if (!isBlank(order_date) && !isValidDateString(order_date)) {
+  const renderError = message => {
     const suppliers = db.prepare('SELECT * FROM suppliers ORDER BY name').all();
     const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
     const products = db.prepare('SELECT * FROM products ORDER BY name').all();
-    return res.status(400).render('purchase_form', { suppliers, warehouses, products, error: '单据日期无效，请使用 YYYY-MM-DD 格式的真实日期', today: todayLocalDate() });
+    const draftItems = product_id.map((id, index) => ({ id, quantity: quantity[index] || '', price: unit_price[index] ?? '', unit_choice: unit_choice[index] || 'base' }));
+    return res.status(400).render('purchase_form', { suppliers, warehouses, products, error: message, formValues: req.body, draftItems, today: todayLocalDate() });
+  };
+
+  if (!isBlank(order_date) && !isValidDateString(order_date)) {
+    return renderError('单据日期无效，请使用 YYYY-MM-DD 格式的真实日期');
   }
 
   const getProduct = db.prepare('SELECT * FROM products WHERE id = ?');
@@ -70,30 +75,18 @@ router.post('/purchases/new', requireAdmin, requireMutationKey, (req, res) => {
     });
   }
   if (invalidDetailCount > 0) {
-    const suppliers = db.prepare('SELECT * FROM suppliers ORDER BY name').all();
-    const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
-    const products = db.prepare('SELECT * FROM products ORDER BY name').all();
-    return res.status(400).render('purchase_form', { suppliers, warehouses, products, error: '商品明细包含无效行（商品、数量必须填写且数量为正整数），请修正后再提交', today: todayLocalDate() });
+    return renderError('商品明细包含无效行（商品、数量必须填写且数量为正整数），请修正后再提交');
   }
   if (!warehouse_id || items.length === 0) {
-    const suppliers = db.prepare('SELECT * FROM suppliers ORDER BY name').all();
-    const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
-    const products = db.prepare('SELECT * FROM products ORDER BY name').all();
-    return res.render('purchase_form', { suppliers, warehouses, products, error: '请选择仓库并至少填写一行有效商品明细', today: todayLocalDate() });
+    return renderError('请选择仓库并至少填写一行有效商品明细');
   }
   if (items.some(it => it.invalidPrice || !Number.isFinite(it.price) || it.price < 0)) {
-    const suppliers = db.prepare('SELECT * FROM suppliers ORDER BY name').all();
-    const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
-    const products = db.prepare('SELECT * FROM products ORDER BY name').all();
-    return res.status(400).render('purchase_form', { suppliers, warehouses, products, error: '采购单价必须是大于等于 0 的有效数字', today: todayLocalDate() });
+    return renderError('采购单价必须是大于等于 0 的有效数字');
   }
 
   const total = roundToCents(items.reduce((s, it) => s + it.qty * it.price, 0));
   if (!Number.isFinite(total) || total < 0) {
-    const suppliers = db.prepare('SELECT * FROM suppliers ORDER BY name').all();
-    const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
-    const products = db.prepare('SELECT * FROM products ORDER BY name').all();
-    return res.status(400).render('purchase_form', { suppliers, warehouses, products, error: '采购总额计算结果不合法，请检查商品数量和单价', today: todayLocalDate() });
+    return renderError('采购总额计算结果不合法，请检查商品数量和单价');
   }
 
   return completeMutation(req, res, () => {

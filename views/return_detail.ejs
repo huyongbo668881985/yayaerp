@@ -1,5 +1,6 @@
 <%- include('partials/header') %>
 <h1>退货单 #<%= order.id %></h1>
+<div class="detail-print-actions"><a class="btn btn-secondary" href="/returns/<%= order.id %>/print">打印 / PDF</a></div>
 <% if (created) { %><div class="flow-notice" role="status"><strong><%= created === 'draft' ? '草稿已保存' : '已提交审核' %></strong><span><%= created === 'draft' ? '可以继续编辑，准备好后再提交审核。' : '审核通过后才会增加库存并计入退货。' %></span></div><% } %>
 <div class="card">
   <div class="detail-hero">
@@ -9,7 +10,8 @@
   <div class="detail-meta">
     <div><span>退回仓库</span><strong><%= order.warehouse_name %></strong></div>
     <div><span>录入人</span><strong><%= order.user_name %></strong></div>
-    <div><span>备注</span><strong><%= order.note || '-' %></strong></div>
+    <div><span>备注</span><strong><%= order.remarks || '-' %></strong></div>
+    <% if (order.note) { %><div><span>内部备注</span><strong><%= order.note %></strong></div><% } %>
   </div>
   <% if (order.related_sales_order_id) { %>
     <p><strong>关联销售单：</strong><a href="/sales/<%= order.related_sales_order_id %>">#<%= order.related_sales_order_id %></a>（<%= order.status === 'approved' ? '原单应收已扣减这次退货' : '审核通过后才会扣减原单应收' %>）</p>

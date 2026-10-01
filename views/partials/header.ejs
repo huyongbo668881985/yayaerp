@@ -5,7 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="csrf-token" content="<%= csrfToken %>">
   <title>鸭鸭进销存</title>
-  <link rel="stylesheet" href="/style.css?v=mobile-polish-3">
+  <link rel="stylesheet" href="/style.css?v=import-reconcile-print-1">
+  <meta name="order-draft-context" content="<%= JSON.stringify({scope: currentUser && currentTenant ? currentTenant.tenant_code + ':' + currentUser.id : '', completed: typeof draftCompletionKeys !== 'undefined' ? draftCompletionKeys : []}) %>">
+  <script src="/orderForm.js?v=1" defer></script>
+  <script src="/orderDraft.js?v=1" defer></script>
   <script src="/csrf.js" defer></script>
   <script src="/productFilter.js" defer></script>
 
@@ -41,6 +44,8 @@
     <% if (currentUser.role === 'admin') { %>
       <a href="/purchases">采购</a>
       <a href="/reports">经营报表</a>
+      <a href="/reconciliation">对账</a>
+      <a href="/imports">导入</a>
     <% } %>
     <% if (currentUser.role === 'admin') { %>
       <a href="/users">账号</a>

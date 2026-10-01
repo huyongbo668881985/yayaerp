@@ -1,5 +1,6 @@
 <%- include('partials/header') %>
 <h1>调拨单 #<%= order.id %></h1>
+<div class="detail-print-actions"><a class="btn btn-secondary" href="/transfers/<%= order.id %>/print">打印 / PDF</a></div>
 <% if (created) { %><div class="flow-notice" role="status"><strong><%= created === 'draft' ? '草稿已保存' : '已提交审核' %></strong><span><%= created === 'draft' ? '可以继续编辑，准备好后再提交审核。' : '审核通过后才会调整两个仓库的库存。' %></span></div><% } %>
 <div class="card">
   <div class="detail-hero">

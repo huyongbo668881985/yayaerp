@@ -1,5 +1,5 @@
 <%- include('partials/header') %>
-<div class="page-heading-actions"><h1>客户管理</h1><div class="customer-heading-buttons"><% if (isAdmin) { %><a class="btn btn-secondary customer-tag-trigger" href="#customerTagManagement" onclick="document.getElementById('customerTagManagement').open=true">管理标签</a><% } %><a class="btn customer-add-trigger" href="#customerNewPanel" onclick="document.getElementById('customerNewPanel').open=true">＋新增</a></div></div>
+<div class="page-heading-actions"><h1>客户管理</h1><div class="customer-heading-buttons"><% if (isAdmin) { %><a class="btn btn-secondary customer-tag-trigger" href="#customerTagManagement" onclick="document.getElementById('customerTagManagement').open=true">管理标签</a><a class="btn btn-secondary" href="/imports">批量导入</a><a class="btn btn-secondary" href="/reconciliation">对账</a><% } %><a class="btn customer-add-trigger" href="#customerNewPanel" onclick="document.getElementById('customerNewPanel').open=true">＋新增</a></div></div>
 <div class="card customer-search-card">
   <form method="GET" action="/customers" class="customer-search-form">
     <div class="form-row">

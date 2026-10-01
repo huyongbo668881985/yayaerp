@@ -103,6 +103,9 @@ app.use((req, res, next) => {
   res.locals.currentUser = req.session.user || null;
   res.locals.currentTenant = req.tenant || null;
   res.locals.currentPath = req.path;
+  req.requestId = randomUUID();
+  res.locals.draftCompletionKeys = req.session.completedDraftKeys || [];
+  delete req.session.completedDraftKeys;
   next();
 });
 
@@ -113,6 +116,10 @@ app.use(require('./routes/platformAdmin'));
 app.use(require('./routes/trialAuth'));
 
 app.use(require('./routes/auth'));
+app.use(require('./routes/drafts'));
+app.use(require('./routes/imports'));
+app.use(require('./routes/reconciliation'));
+app.use(require('./routes/printing'));
 app.use(require('./routes/dashboard'));
 app.use(require('./routes/products'));
 app.use(require('./routes/report'));
@@ -133,6 +140,7 @@ app.use((req, res) => {
 // 不能让原始报错堆栈（含服务器文件路径）直接展示给用户。
 app.use((err, req, res, next) => {
   console.error(err);
+  if (err.code === 'LEDGER_AMOUNT_INVALID') return res.status(400).render('global_error', { message: err.message });
 
   // better-sqlite3 抛的是扩展错误码（如 SQLITE_CONSTRAINT_FOREIGNKEY / _CHECK / _UNIQUE），用前缀匹配
   if (err && typeof err.code === 'string' && err.code.startsWith('SQLITE_CONSTRAINT')) {

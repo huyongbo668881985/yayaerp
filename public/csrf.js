@@ -15,7 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (form.dataset.submitting === 'true') { event.preventDefault(); return; }
       form.dataset.submitting = 'true';
       // 保留提交按钮的 name/value（例如 save_draft），仅锁定后续点击。
-      for (const button of form.querySelectorAll('button[type="submit"]')) {
+      for (const button of Array.from(form.elements).filter(input => input.tagName === 'BUTTON' && input.type === 'submit')) {
         button.dataset.originalText = button.textContent;
         button.setAttribute('aria-disabled', 'true');
         button.textContent = '正在提交…';
@@ -27,7 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
 window.addEventListener('pageshow', () => {
   for (const form of document.querySelectorAll('form[data-submitting]')) {
     delete form.dataset.submitting;
-    for (const button of form.querySelectorAll('button[data-original-text]')) {
+    for (const button of Array.from(form.elements).filter(input => input.dataset.originalText != null)) {
       button.textContent = button.dataset.originalText;
       button.removeAttribute('aria-disabled');
       delete button.dataset.originalText;

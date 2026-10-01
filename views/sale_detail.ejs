@@ -1,5 +1,6 @@
 <%- include('partials/header') %>
 <h1>销售单 #<%= order.id %></h1>
+<div class="detail-print-actions"><a class="btn btn-secondary" href="/sales/<%= order.id %>/print">打印 / PDF</a></div>
 <% if (created) { %><div class="flow-notice" role="status"><strong><%= created === 'draft' ? '草稿已保存' : '已提交审核' %></strong><span><%= created === 'draft' ? '可以继续编辑，准备好后再提交审核。' : '审核通过后才会扣减库存。' %></span></div><% } %>
 <div class="card">
   <div class="detail-hero">
@@ -10,7 +11,8 @@
     <div><span>仓库</span><strong><%= order.warehouse_name %></strong></div>
     <div><span>录入人</span><strong><%= order.user_name %></strong></div>
     <div><span>录入时间</span><strong><%= formatDateTime(order.created_at).slice(0, 16) %></strong></div>
-    <div><span>备注</span><strong><%= order.note || '-' %></strong></div>
+    <div><span>备注</span><strong><%= order.remarks || '-' %></strong></div>
+    <% if (order.note) { %><div><span>内部备注</span><strong><%= order.note %></strong></div><% } %>
   </div>
   <div class="detail-status-list">
     <div><span>结算状态</span>

@@ -2,6 +2,9 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const { requireAdmin } = require('../middleware/auth');
 const { writeAuditLog } = require('../lib/auditLog');
+const { isValidDateString } = require('../lib/validators');
+const { sendCsv } = require('../utils/csv');
+const { formatDateTime } = require('../utils/dates');
 const router = express.Router();
 
 const USER_FIELDS = 'id, username, name, role, active, audit_log_owner, created_at';
@@ -19,17 +22,50 @@ router.get('/users', requireAdmin, (req, res) => {
   res.render('users', { users, error: null, maxUsers: req.tenant.max_users || null });
 });
 
+function auditFilters(query) {
+  const start = String(query.start || ''), end = String(query.end || '');
+  if ((start && !isValidDateString(start)) || (end && !isValidDateString(end)) || (start && end && start > end)) throw new Error('请填写有效日期，结束日期不能早于开始日期');
+  const filters = { start, end, user_id: String(query.user_id || ''), action: String(query.action || '').slice(0, 100), entity_type: String(query.entity_type || ''), entity_id: String(query.entity_id || '') };
+  for (const key of ['user_id', 'entity_id']) if (filters[key] && !/^[1-9]\d{0,14}$/.test(filters[key])) throw new Error('操作人或单号无效');
+  const clauses = [], params = [];
+  if (start) { clauses.push('created_at >= ?'); params.push(new Date(start + 'T00:00:00+08:00').toISOString().slice(0,19).replace('T',' ')); }
+  if (end) { clauses.push('created_at < ?'); params.push(new Date(new Date(end + 'T00:00:00+08:00').getTime() + 86400000).toISOString().slice(0,19).replace('T',' ')); }
+  for (const key of ['user_id', 'action', 'entity_type', 'entity_id']) if (filters[key]) { clauses.push(key + '=?'); params.push(filters[key]); }
+  return { filters, where: clauses.length ? ' WHERE ' + clauses.join(' AND ') : '', params };
+}
+
+function auditChanges(log) {
+  let details; try { details = JSON.parse(log.details_json || '{}'); } catch (_) { details = {}; }
+  const before = details.before?.fields || {}, after = details.after?.fields || {};
+  const display = value => value === '' ? '（空）' : value ?? '—';
+  const changes = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(key => before[key] !== after[key] && !(before[key] == null && after[key] === ''))
+    .map(key => ({ label: key, before: display(before[key]), after: display(after[key]) }));
+  return { ...log, changes, beforeItems: details.before?.items || [], afterItems: details.after?.items || [], stock: details.stock || [],
+    itemChanges: JSON.stringify(details.before?.items || []) !== JSON.stringify(details.after?.items || []) };
+}
+
 router.get('/users/audit-logs', requireAdmin, requireAuditLogViewer, (req, res) => {
-  const { start, end, user_id, action } = req.query;
-  let sql = 'SELECT * FROM audit_logs WHERE 1=1'; const params = [];
-  if (start) { sql += ' AND created_at >= ?'; params.push(`${start} 00:00:00`); }
-  if (end) { sql += ' AND created_at <= ?'; params.push(`${end} 23:59:59`); }
-  if (user_id) { sql += ' AND user_id=?'; params.push(Number(user_id)); }
-  if (action) { sql += ' AND action=?'; params.push(action); }
-  sql += ' ORDER BY id DESC LIMIT 500';
-  const users = req.tenantDb.prepare(`SELECT ${USER_FIELDS} FROM users ORDER BY id`).all();
-  const logs = req.tenantDb.prepare(sql).all(...params);
-  res.render('audit_logs', { logs, users, start: start || '', end: end || '', selectedUserId: user_id || '', selectedAction: action || '' });
+  let query; try { query = auditFilters(req.query); } catch (error) { return res.status(400).render('global_error', { message: error.message }); }
+  const db = req.tenantDb, total = db.prepare('SELECT COUNT(*) n FROM audit_logs' + query.where).get(...query.params).n;
+  const pageCount = Math.max(1, Math.ceil(total / 50));
+  const page = Math.min(pageCount, Math.max(1, Number(req.query.page) || 1));
+  const logs = db.prepare('SELECT * FROM audit_logs' + query.where + ' ORDER BY id DESC LIMIT 50 OFFSET ?').all(...query.params, (Math.floor(page)-1)*50).map(auditChanges);
+  const users = db.prepare(`SELECT ${USER_FIELDS} FROM users ORDER BY id`).all();
+  const actions = db.prepare('SELECT DISTINCT action FROM audit_logs ORDER BY action').all().map(row => row.action);
+  const entityTypes = db.prepare('SELECT DISTINCT entity_type FROM audit_logs ORDER BY entity_type').all().map(row => row.entity_type);
+  const queryString = new URLSearchParams(Object.entries(query.filters).filter(([,value]) => value)).toString();
+  res.render('audit_logs', { logs, users, actions, entityTypes, filters: query.filters, page: Math.floor(page), pageCount, total, queryString });
+});
+
+router.get('/users/audit-logs/export', requireAdmin, requireAuditLogViewer, (req, res) => {
+  let query; try { query = auditFilters(req.query); } catch (error) { return res.status(400).render('global_error', { message: error.message }); }
+  const count = req.tenantDb.prepare('SELECT COUNT(*) n FROM audit_logs' + query.where).get(...query.params).n;
+  if (count > 10000) return res.status(400).render('global_error', { message: '一次最多导出 10000 条日志，请缩小日期或筛选范围。' });
+  const logs = req.tenantDb.prepare('SELECT * FROM audit_logs' + query.where + ' ORDER BY id DESC').all(...query.params).map(auditChanges);
+  const rows = logs.map(log => [log.id, formatDateTime(log.created_at), log.user_name, log.action, log.entity_type, log.entity_id,
+    log.summary, log.changes.map(change => `${change.label}：${change.before} → ${change.after}`).join('；'),
+    JSON.stringify(log.beforeItems), JSON.stringify(log.afterItems), JSON.stringify(log.stock), log.request_id]);
+  sendCsv(res, '操作日志.csv', ['日志编号','时间（北京时间）','操作人','动作','对象','单号','说明','字段变化','原商品明细','新商品明细','库存变化','请求编号'], rows);
 });
 
 router.post('/users/new', requireAdmin, (req, res) => {

@@ -1,0 +1,21 @@
+<%- include('partials/header') %>
+<h1>数据导入</h1>
+<p class="muted">下载模板填写，上传后先校验预览，确认后整批写入。每次最多 1000 行、1 MB，支持 Excel .xlsx 和 CSV（UTF-8 / GB18030）。</p>
+<div class="import-types">
+<% Object.entries(definitions).forEach(function([kind,def]) { %>
+<section class="card"><h2><%= def.name %></h2><p><%= def.help %></p><div class="action-row"><a class="btn btn-secondary" href="/imports/<%= kind %>/template">下载 Excel 模板</a><a class="btn btn-secondary" href="/imports/<%= kind %>/template?format=csv">CSV 模板</a></div></section>
+<% }) %>
+</div>
+<section class="card"><h2>上传并校验</h2>
+<form id="importUpload" enctype="multipart/form-data" method="POST" action="/imports/products/preview">
+<div class="form-row"><label for="importKind">导入类型</label><select id="importKind"><% Object.entries(definitions).forEach(function([kind,def]) { %><option value="<%= kind %>"><%= def.name %></option><% }) %></select></div>
+<div class="form-row"><label for="importFile">选择文件</label><input type="file" id="importFile" name="file" accept=".xlsx,.csv" required></div>
+<p class="muted">不支持旧 .xls、宏、公式、多个工作表。SKU、电话建议用文本格式保存。基础档案仅新增，已有记录跳过。</p>
+<button type="submit" class="btn">校验并预览</button><p id="importStatus" role="status" aria-live="polite"></p>
+</form></section>
+<% if(batches.length){ %>
+<section class="card"><h2>最近导入批次</h2><p class="muted">仅显示当前账号最近 20 批。可继续核对未完成的预览，或查看已完成的结果。</p>
+<% batches.forEach(function(batch){ %><p><a href="/imports/batches/<%= batch.id %>"><%= definitions[batch.kind].name %> · <%= batch.filename %></a> · <%= batch.status==='committed'?'已完成':'待确认' %> · <%= formatDateTime(batch.created_at) %></p><% }); %>
+</section><% } %>
+<script src="/importUpload.js?v=1" defer></script>
+<%- include('partials/footer') %>

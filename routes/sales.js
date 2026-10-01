@@ -105,7 +105,7 @@ function customerSelectionError(db, body) {
 // 只是在读取展示的时候，把关联到这张单、已审核的退货金额顺带减掉。
 // 这样退货金额=0也不影响没有关联退货的普通订单，是老逻辑的自然扩展，不是另一套逻辑。
 
-function queryOrders(db, user, start, end, customerId, guestOnly, unpaidOnly, pendingOnly, tagId = null) {
+function queryOrders(db, user, start, end, customerId, guestOnly, unpaidOnly, pendingOnly, tagId = null, orderStatus = '') {
   let sql = `
     SELECT so.*, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name,
            ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount, ${refundedAmountSubquery()} AS cash_refunded_amount
@@ -126,6 +126,7 @@ function queryOrders(db, user, start, end, customerId, guestOnly, unpaidOnly, pe
   if (tagId) { sql += ' AND so.customer_id IN (SELECT customer_id FROM customer_tag_links WHERE tag_id = ?)'; params.push(tagId); }
   if (guestOnly) sql += ' AND so.customer_id IS NULL';
   if (pendingOnly) sql += " AND so.status = 'submitted'";
+  if (orderStatus) { sql += ' AND so.status = ?'; params.push(orderStatus); }
   sql += ' ORDER BY so.id DESC';
   let orders = db.prepare(sql).all(...params).map(attachEffectivePayment);
   if (unpaidOnly) orders = orders.filter(o => o.status === 'approved' && o.effective_status !== 'paid');
@@ -174,12 +175,14 @@ router.get('/sales', requireLogin, (req, res) => {
   const guestOnly = req.query.guest === '1';
   const unpaidOnly = req.query.unpaid === '1';
   const pendingOnly = user.role === 'admin' && req.query.pending === '1';
+  const orderStatus = req.query.status === 'draft' ? 'draft' : '';
   const { sort, order } = parseSort(req.query, ['date', 'amount', 'debt'], 'date');
   const customers = customersForForm(db, user, null);
   const tagId = parseTagId(req.query.tag_id);
   const tags = getCustomerTags(db);
 
-  const allOrders = queryOrders(db, user, start, end, customerId, guestOnly, unpaidOnly, pendingOnly, tagId);
+  const allOrders = queryOrders(db, user, start, end, customerId, guestOnly, unpaidOnly, pendingOnly, tagId, orderStatus);
+  const draftCount = db.prepare("SELECT COUNT(*) n FROM sales_orders WHERE status='draft'" + (user.role === 'admin' ? '' : ' AND user_id=?')).get(...(user.role === 'admin' ? [] : [user.id])).n;
   sortRows(allOrders, sort, order, (row, field) => ({
     date: row.order_date,
     amount: row.total_amount,
@@ -195,9 +198,9 @@ router.get('/sales', requireLogin, (req, res) => {
   const orders = allOrders.slice((page - 1) * SALES_PAGE_SIZE, page * SALES_PAGE_SIZE);
   res.render('sales', {
     orders, user, customers, customerId, guestOnly, start: start || '', end: end || '', unpaidOnly, pendingOnly,
-    sort, order, page, totalPages, totalOrders,
+    sort, order, page, totalPages, totalOrders, orderStatus, draftCount,
     tags, tagId,
-    salesQueryString: params => salesQueryString({ start, end, customer_id: customerId, guest: guestOnly ? 1 : '', unpaid: unpaidOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort, order, tag_id: tagId, ...params })
+    salesQueryString: params => salesQueryString({ start, end, customer_id: customerId, guest: guestOnly ? 1 : '', unpaid: unpaidOnly ? 1 : '', pending: pendingOnly ? 1 : '', status: orderStatus, sort, order, tag_id: tagId, ...params })
   });
 });
 
@@ -253,6 +256,7 @@ router.get('/sales/export', requireLogin, (req, res) => {
   const guestOnly = req.query.guest === '1';
   const unpaidOnly = req.query.unpaid === '1';
   const pendingOnly = user.role === 'admin' && req.query.pending === '1';
+  const orderStatus = req.query.status === 'draft' ? 'draft' : '';
   const tagId = parseTagId(req.query.tag_id);
 
   let sql = `
@@ -281,6 +285,7 @@ router.get('/sales/export', requireLogin, (req, res) => {
   if (tagId) { sql += ' AND so.customer_id IN (SELECT customer_id FROM customer_tag_links WHERE tag_id = ?)'; params.push(tagId); }
   if (guestOnly) sql += ' AND so.customer_id IS NULL';
   if (pendingOnly) sql += " AND so.status = 'submitted'";
+  if (orderStatus) { sql += ' AND so.status = ?'; params.push(orderStatus); }
   sql += ' ORDER BY so.id DESC';
   let rows_raw = db.prepare(sql).all(...params).map(attachEffectivePayment);
   if (unpaidOnly) rows_raw = rows_raw.filter(r => r.status === 'approved' && r.effective_status !== 'paid');
@@ -450,7 +455,7 @@ router.get('/sales/:id/edit', requireLogin, (req, res) => {
   res.render('sale_form', { customers, warehouses, products, error: null, order, existingItems, today: todayLocalDate() });
 });
 
-router.post('/sales/:id/edit', requireLogin, (req, res) => {
+router.post('/sales/:id/edit', requireLogin, requireMutationKey, (req, res) => {
   const db = req.tenantDb;
   const order = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(req.params.id);
   if (!order) return res.status(404).send('单据不存在');
@@ -517,7 +522,7 @@ router.post('/sales/:id/edit', requireLogin, (req, res) => {
   if (paid >= total && total > 0) paymentStatus = 'paid';
   else if (paid > 0) paymentStatus = 'partial';
 
-  const tx = db.transaction(() => {
+  return completeMutation(req, res, () => {
     db.prepare(
       `UPDATE sales_orders SET customer_id=?, warehouse_id=?, order_date=?, total_amount=?, paid_amount=?, payment_status=?, note=?, remarks=? WHERE id=?`
     ).run(customer_id || null, warehouse_id, order_date || order.order_date, total, paid, paymentStatus, note || '', remarks || '', order.id);
@@ -526,34 +531,32 @@ router.post('/sales/:id/edit', requireLogin, (req, res) => {
     for (const it of items) {
       insertItem.run(order.id, it.pid, it.qty, it.unitLabel, it.baseQty, it.price, it.gift ? 1 : 0, it.costSnapshot);
     }
+    writeAuditLog(db, req.session.user, '编辑销售单', '销售单', order.id, `金额更新为 ¥${total.toFixed(2)}`);
+    return { redirect: '/sales/' + order.id };
   });
-  tx();
-  writeAuditLog(db, req.session.user, '编辑销售单', '销售单', order.id, `金额更新为 ¥${total.toFixed(2)}`);
-  res.redirect('/sales/' + order.id);
 });
 
 // 删除草稿：草稿尚未进入审核流程，不会扣减库存；只允许管理员或录入人删除。
 // 已提交及之后的单据必须保留，通过撤回/反审核后修改来修正，避免破坏审核和库存留痕。
 router.post('/sales/:id/delete', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  const order = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(req.params.id);
-  if (!order) return res.status(404).send('单据不存在');
-  if (order.status !== 'draft') return res.status(400).send('只有未提交的草稿销售单可以删除');
-  if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限删除他人的销售单');
+  return completeTransaction(req, res, () => {
+    const order = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(req.params.id);
+    if (!order) return { status: 404, error: '单据不存在' };
+    if (order.status !== 'draft') return { status: 400, error: '只有未提交的草稿销售单可以删除' };
+    if (!canEditOrWithdraw(order, req.session.user)) return { status: 403, error: '无权限删除他人的销售单' };
 
-  // 正常业务流程不会让退货关联草稿单；这里仍显式检查，防止历史异常数据触发外键错误。
-  const relatedReturnCount = db.prepare('SELECT COUNT(*) AS c FROM return_orders WHERE related_sales_order_id = ?').get(order.id).c;
-  if (relatedReturnCount > 0) {
-    return res.status(400).send('该草稿已有关联退货单，无法删除，请先处理关联退货单');
-  }
+    // 正常业务流程不会让退货关联草稿单；这里仍显式检查，防止历史异常数据触发外键错误。
+    const relatedReturnCount = db.prepare('SELECT COUNT(*) AS c FROM return_orders WHERE related_sales_order_id = ?').get(order.id).c;
+    if (relatedReturnCount > 0) {
+      return { status: 400, error: '该草稿已有关联退货单，无法删除，请先处理关联退货单' };
+    }
 
-  const tx = db.transaction(() => {
     db.prepare('DELETE FROM sales_order_items WHERE sales_order_id = ?').run(order.id);
     db.prepare('DELETE FROM sales_orders WHERE id = ?').run(order.id);
-  });
-  tx();
   writeAuditLog(db, req.session.user, '删除销售单', '销售单', order.id, `删除草稿，金额 ¥${order.total_amount.toFixed(2)}`);
-  res.redirect('/sales');
+  return { redirect: '/sales' };
+  });
 });
 
 // 提交审核：draft -> submitted

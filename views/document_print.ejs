@@ -1,0 +1,12 @@
+<%- include('partials/print_head',{title:title+' #'+order.id,back:'/'+kind+'/'+order.id,receipt:true}) %>
+<% const statusText={draft:'草稿',submitted:'待审核',approved:'已审核',rejected:'已拒绝'}[order.status]||'已入库'; const formal=kind==='purchases'||order.status==='approved'; %>
+<% if(!formal) { %><div class="print-warning">预览单 · <%= statusText %> · 库存与结算尚未生效</div><% } %>
+<div class="print-meta"><p>单号：<%= ({sales:'XS',returns:'TH',purchases:'CG',transfers:'DB'})[kind] %>-<%= order.id %> · <%= statusText %></p><p>单据日期：<%= order.order_date %> · 录入人：<%= order.user_name %></p><% if(kind!=='transfers'){ %><p><%= kind==='purchases'?'供应商':'客户' %>：<%= partner?.name||'—' %></p><% if(partner?.contact||partner?.phone){ %><p>联系人：<%= partner.contact||'—' %> · 电话：<%= partner.phone||'—' %></p><% } %><% if(partner?.address){ %><p>送货地址：<%= partner.address %></p><% } %><% } %><p>仓库：<%= warehouse %></p></div>
+<table><thead><tr><th>商品 / 规格</th><th>数量</th><% if(kind!=='transfers'){ %><th>单价</th><th>金额</th><% } %></tr></thead><tbody><% items.forEach(function(item){ %><tr><td><%= item.product_name %><% if(item.is_gift){ %>（赠品）<% } %><small><%= item.spec||'' %><% if(item.sku){ %> · <%= item.sku %><% } %></small></td><td><%= item.quantity %><%= item.unit_label %></td><% if(kind!=='transfers'){ %><td><%= Number(item.unit_price).toFixed(2) %></td><td><%= (item.quantity*item.unit_price).toFixed(2) %></td><% } %></tr><% }) %></tbody></table>
+<% if(kind!=='transfers'){ %><p class="print-total">合计：¥<%= order.total_amount.toFixed(2) %></p><% } %>
+<% if(kind==='sales' && formal){ %><div class="print-settlement"><p>已收现金：¥<%= payment.paid_amount.toFixed(2) %> · 退货抵扣：¥<%= payment.returned_amount.toFixed(2) %></p><p>已退现金：¥<%= payment.cash_refunded_amount.toFixed(2) %> · 当前<%= payment.balance<0?'待退款':'应收' %>：¥<%= Math.abs(payment.balance).toFixed(2) %></p></div><% } %>
+<% if(kind==='returns' && formal){ %><p>已退现金：¥<%= Number(order.refunded_amount).toFixed(2) %><% if(order.related_sales_order_id){ %> · 关联销售单 #<%= order.related_sales_order_id %><% } %></p><% } %>
+<% if(kind==='sales' && !formal){ %><p>录入收款（审核后生效）：¥<%= Number(order.paid_amount).toFixed(2) %></p><% } %>
+<% const publicNote=kind==='purchases'?order.note:order.remarks; if(publicNote){ %><p class="print-note">备注：<%= publicNote %></p><% } %>
+<div class="print-signatures"><span>经办人：________</span><span>收货 / 确认人：________</span></div>
+<%- include('partials/print_foot') %>

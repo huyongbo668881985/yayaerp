@@ -136,7 +136,7 @@ router.get('/transfers/:id/edit', requireLogin, (req, res) => {
   res.render('transfer_form', { warehouses, products, error: null, order, existingItems, today: todayLocalDate() });
 });
 
-router.post('/transfers/:id/edit', requireLogin, (req, res) => {
+router.post('/transfers/:id/edit', requireLogin, requireMutationKey, (req, res) => {
   const db = req.tenantDb;
   const order = db.prepare('SELECT * FROM transfer_orders WHERE id = ?').get(req.params.id);
   if (!order) return res.status(404).send('单据不存在');
@@ -167,7 +167,7 @@ router.post('/transfers/:id/edit', requireLogin, (req, res) => {
   if (items.invalidDetailCount > 0) { return renderError('商品明细包含无效行（商品、数量必须填写且数量为正整数），请修正后再提交'); }
   if (items.length === 0) return renderError('请至少填写一行有效商品明细');
 
-  const tx = db.transaction(() => {
+  return completeMutation(req, res, () => {
     db.prepare(
       `UPDATE transfer_orders SET from_warehouse_id=?, to_warehouse_id=?, order_date=?, note=?, remarks=? WHERE id=?`
     ).run(from_warehouse_id, to_warehouse_id, order_date || order.order_date, note || '', remarks || '', order.id);
@@ -176,10 +176,8 @@ router.post('/transfers/:id/edit', requireLogin, (req, res) => {
     for (const it of items) {
       insertItem.run(order.id, it.pid, it.qty, it.unitLabel, it.baseQty);
     }
+    return { redirect: '/transfers/' + order.id };
   });
-  tx();
-
-  res.redirect('/transfers/' + order.id);
 });
 
 // 提交审核：draft -> submitted
