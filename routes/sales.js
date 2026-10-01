@@ -328,9 +328,9 @@ function hasInvalidPrice(items) {
 // 不然下拉里找不到它，表单提交时会被误清空。
 function customersForForm(db, user, currentCustomerId) {
   if (user.role === 'admin') {
-    return db.prepare('SELECT * FROM customers ORDER BY name').all();
+    return db.prepare('SELECT * FROM customers ORDER BY id DESC').all();
   }
-  return db.prepare('SELECT * FROM customers WHERE operator_id = ? OR id = ? ORDER BY name')
+  return db.prepare('SELECT * FROM customers WHERE operator_id = ? OR id = ? ORDER BY id DESC')
     .all(user.id, currentCustomerId || -1);
 }
 

@@ -223,9 +223,9 @@ router.get('/returns/export', requireLogin, (req, res) => {
 // 管理员看全部；操作员只看自己名下的（编辑草稿时额外带上单据当前关联的客户，防误清空）
 function customersForForm(db, user, currentCustomerId) {
   if (user.role === 'admin') {
-    return db.prepare('SELECT * FROM customers ORDER BY name').all();
+    return db.prepare('SELECT * FROM customers ORDER BY id DESC').all();
   }
-  return db.prepare('SELECT * FROM customers WHERE operator_id = ? OR id = ? ORDER BY name')
+  return db.prepare('SELECT * FROM customers WHERE operator_id = ? OR id = ? ORDER BY id DESC')
     .all(user.id, currentCustomerId || -1);
 }
 
