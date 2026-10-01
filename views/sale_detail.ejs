@@ -13,13 +13,15 @@
     <div><span>备注</span><strong><%= order.note || '-' %></strong></div>
   </div>
   <div class="detail-status-list">
-    <div><span>收款状态</span>
+    <div><span>结算状态</span>
     <% if (order.status !== 'approved') { %>
       <span class="badge badge-muted">待生效</span>
     <% } else if (order.effective_status === 'paid') { %>
-      <span class="badge" style="background:#dcfce7;color:#166534">已收款</span>
-    <% } else if (order.effective_status === 'partial') { %>
-      <span class="badge" style="background:#fef3c7;color:#92400e">部分收款</span>
+      <span class="badge" style="background:#dcfce7;color:#166534">已结清</span>
+    <% } else if (order.effective_status === 'refund_pending') { %>
+      <span class="badge" style="background:#fef3c7;color:#92400e">待退款</span>
+      <% } else if (order.effective_status === 'partial') { %>
+      <span class="badge" style="background:#fef3c7;color:#92400e">部分结算</span>
     <% } else { %>
       <span class="badge" style="background:#fee2e2;color:#991b1b">未收款</span>
     <% } %>
@@ -42,7 +44,9 @@
     <% } %>
   <div class="detail-finance-grid">
     <div><span><%= order.status === 'approved' ? '已收款' : '录入收款' %></span><strong>¥<%= (order.paid_amount || 0).toFixed(2) %></strong></div>
-    <% if (order.returned_amount > 0) { %><div><span>已扣退货</span><strong>¥<%= order.returned_amount.toFixed(2) %></strong></div><% } %>
+    <% if (order.returned_amount > 0) { %><div><span>已审核退货</span><strong>¥<%= order.returned_amount.toFixed(2) %></strong></div><% } %>
+    <% if (order.cash_refunded_amount > 0) { %><div><span>已退现金</span><strong>¥<%= order.cash_refunded_amount.toFixed(2) %></strong></div><% } %>
+    <% if (order.pending_refund > 0) { %><div><span>待退现金</span><strong class="detail-owing">¥<%= order.pending_refund.toFixed(2) %></strong></div><% } %>
     <div><span><%= order.status === 'approved' ? '欠款' : '预计待收' %></span><strong class="<%= order.status === 'approved' ? 'detail-owing' : '' %>">¥<%= order.effective_debt.toFixed(2) %></strong></div>
   </div>
   <% if (relatedReturns && relatedReturns.length > 0) { %>
@@ -105,6 +109,7 @@
 
     <% if (order.status === 'approved' && currentUser.role === 'admin' && order.effective_debt > 0.001) { %>
       <form action="/sales/<%= order.id %>/record-payment" method="POST" style="display:flex; gap:6px; align-items:center">
+        <input type="hidden" name="_request_key" value="<%= newRequestKey() %>">
         <input type="number" name="amount" placeholder="本次收款金额" step="0.01" min="0.01" max="<%= order.effective_debt.toFixed(2) %>" required style="width:140px">
         <button type="submit" class="btn" style="background:#16a34a">记录收款</button>
       </form>

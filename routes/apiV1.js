@@ -19,7 +19,7 @@ const { rateLimit } = require('express-rate-limit');
 const { apiAuth, requireApiTier } = require('../middleware/apiAuth');
 const { todayLocalDate } = require('../utils/dates');
 const {
-  returnedAmountSubquery, effectiveDebtExpr, salesSettledExpr
+  returnedAmountSubquery, refundedAmountSubquery, returnCostExpr, effectiveDebtExpr, salesSettledExpr
 } = require('../lib/profitCalc');
 const reportRoutes = require('./report');
 const salesRoutes = require('./sales');
@@ -110,7 +110,7 @@ router.get('/reports/direct-dashboard', requireApiTier('read_only'), (req, res) 
   // 成本只读单据明细的历史快照，绝不关联 products.cost_price（后者会被后续调价改写）。
   const salesCostSubquery = `COALESCE((SELECT SUM(soi.base_quantity * soi.cost_price_snapshot)
     FROM sales_order_items soi WHERE soi.sales_order_id = so.id), 0)`;
-  const returnCostSubquery = `COALESCE((SELECT SUM(roi.base_quantity * roi.cost_price_snapshot)
+  const returnCostSubquery = `COALESCE((SELECT SUM(roi.base_quantity * ${returnCostExpr('ro_cost')})
     FROM return_order_items roi
     JOIN return_orders ro_cost ON ro_cost.id = roi.return_order_id
     WHERE ro_cost.related_sales_order_id = so.id AND ro_cost.status = 'approved'), 0)`;
@@ -313,7 +313,7 @@ router.get('/sales', requireApiTier('read_only'), (req, res) => {
   const rows = req.tenantDb.prepare(`
     SELECT so.id, so.order_date, so.status, so.total_amount, so.paid_amount, so.created_at,
            c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name,
-           ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount
+           ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount, ${refundedAmountSubquery()} AS cash_refunded_amount
     FROM sales_orders so
     LEFT JOIN customers c ON c.id = so.customer_id
     LEFT JOIN warehouses w ON w.id = so.warehouse_id
@@ -336,6 +336,9 @@ router.get('/sales', requireApiTier('read_only'), (req, res) => {
       total_amount: r2(o.total_amount),
       paid_amount: r2(o.paid_amount),
       returned_amount: r2(o.returned_amount),
+      cash_refunded_amount: r2(o.cash_refunded_amount),
+      net_received: r2(o.net_received),
+      pending_refund: r2(o.pending_refund),
       effective_debt: r2(o.effective_debt),
       effective_status: o.effective_status,
       created_at: o.created_at

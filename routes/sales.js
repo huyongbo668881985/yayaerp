@@ -1,9 +1,10 @@
 const express = require('express');
+const { requireMutationKey, completeMutation, completeTransaction } = require('../lib/mutation');
 const { requireLogin } = require('../middleware/auth');
 const { sendCsv } = require('../utils/csv');
 const { todayLocalDate } = require('../utils/dates');
 const { costSnapshotPerBaseUnit } = require('../lib/priceCalc');
-const { returnedAmountSubquery } = require('../lib/profitCalc');
+const { returnedAmountSubquery, refundedAmountSubquery, attachEffectivePayment, getSalePayment } = require('../lib/profitCalc');
 const { isBlank, isValidDateString, isValidNonNegativeAmount, roundToCents } = require('../lib/validators');
 const { warehousesForUser, isWarehouseInScope } = require('../lib/warehouseAccess');
 const { writeAuditLog } = require('../lib/auditLog');
@@ -88,28 +89,26 @@ function buildItemsFromRequest(db, body) {
   return items;
 }
 
+// 客户文字和编号一起校验，旧页面或异常客户端不能用新名称配旧编号。
+function customerSelectionError(db, body) {
+  if (isBlank(body.customer_search)) return null;
+  if (isBlank(body.customer_id)) {
+    return body.customer_search === '散客' ? null : '请从搜索结果中选择客户，或清空搜索使用散客。';
+  }
+  const customer = db.prepare('SELECT name FROM customers WHERE id = ?').get(body.customer_id);
+  return customer && customer.name.trim() === String(body.customer_search).trim()
+    ? null : '客户名称与选定客户不一致，请从搜索结果中重新选择客户。';
+}
+
 // 按当前用户权限范围 + 可选日期范围，查询销售单列表（列表页和导出共用）
 // 计算"有效"欠款和收款状态：原始金额、原始已收款字段完全不动（保留真实历史记录），
 // 只是在读取展示的时候，把关联到这张单、已审核的退货金额顺带减掉。
 // 这样退货金额=0也不影响没有关联退货的普通订单，是老逻辑的自然扩展，不是另一套逻辑。
-function attachEffectivePayment(order) {
-  const returned = order.returned_amount || 0;
-  const effectiveTotal = order.total_amount - returned;
-  const effectiveDebt = effectiveTotal - order.paid_amount;
-  let effectiveStatus = 'unpaid';
-  if (effectiveDebt <= 0.001) effectiveStatus = 'paid';
-  else if (order.paid_amount > 0 || returned > 0) effectiveStatus = 'partial';
-  order.returned_amount = returned;
-  order.effective_total = effectiveTotal;
-  order.effective_debt = Math.max(0, effectiveDebt);
-  order.effective_status = effectiveStatus;
-  return order;
-}
 
 function queryOrders(db, user, start, end, customerId, guestOnly, unpaidOnly, pendingOnly, tagId = null) {
   let sql = `
     SELECT so.*, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name,
-           ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount
+           ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount, ${refundedAmountSubquery()} AS cash_refunded_amount
     FROM sales_orders so
     LEFT JOIN customers c ON c.id = so.customer_id
     LEFT JOIN warehouses w ON w.id = so.warehouse_id
@@ -225,7 +224,7 @@ router.get('/sales/summary', requireLogin, (req, res) => {
     };
     row.order_count += 1;
     row.total_amount += sale.effective_total;
-    row.paid_amount += sale.paid_amount || 0;
+    row.paid_amount += sale.net_received;
     row.total_debt += sale.effective_debt;
     byCustomer.set(key, row);
   }
@@ -259,7 +258,7 @@ router.get('/sales/export', requireLogin, (req, res) => {
   let sql = `
     SELECT so.id AS order_id, so.order_date, so.warehouse_id, so.status,
            so.total_amount, so.paid_amount,
-           ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount,
+           ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount, ${refundedAmountSubquery()} AS cash_refunded_amount,
            so.remarks, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name,
            (SELECT GROUP_CONCAT(name, '、') FROM (
              SELECT t.name FROM customer_tag_links l JOIN customer_tags t ON t.id = l.tag_id
@@ -283,16 +282,11 @@ router.get('/sales/export', requireLogin, (req, res) => {
   if (guestOnly) sql += ' AND so.customer_id IS NULL';
   if (pendingOnly) sql += " AND so.status = 'submitted'";
   sql += ' ORDER BY so.id DESC';
-  let rows_raw = db.prepare(sql).all(...params).map(r => {
-    const effectiveTotal = r.total_amount - r.returned_amount;
-    const effectiveDebt = effectiveTotal - r.paid_amount;
-    r.effective_status = effectiveDebt <= 0.001 ? 'paid' : ((r.paid_amount > 0 || r.returned_amount > 0) ? 'partial' : 'unpaid');
-    return r;
-  });
+  let rows_raw = db.prepare(sql).all(...params).map(attachEffectivePayment);
   if (unpaidOnly) rows_raw = rows_raw.filter(r => r.status === 'approved' && r.effective_status !== 'paid');
 
   const statusText = { draft: '草稿', submitted: '待审核', approved: '已审核', rejected: '已拒绝' };
-  const paymentText = { paid: '已收款', partial: '部分收款', unpaid: '未收款' };
+  const paymentText = { paid: '已结清', partial: '部分结算', unpaid: '未收款', refund_pending: '待退款' };
 
   const headers = ['单号', '日期', '客户', '客户标签', '仓库', '商品', '数量', '单位', '单价', '小计', '是否赠品', '收款状态', '审核状态', '录入人', '备注'];
   const rows = rows_raw.map(r => [
@@ -363,7 +357,7 @@ router.get('/sales/new', requireLogin, (req, res) => {
   });
 });
 
-router.post('/sales/new', requireLogin, (req, res) => {
+router.post('/sales/new', requireLogin, requireMutationKey, (req, res) => {
   const db = req.tenantDb;
   const { customer_id, warehouse_id, order_date, note, paid_amount, remarks } = req.body;
 
@@ -378,6 +372,9 @@ router.post('/sales/new', requireLogin, (req, res) => {
     res.status(400);
     return renderError('单据日期无效，请使用 YYYY-MM-DD 格式的真实日期');
   }
+
+  const selectionError = customerSelectionError(db, req.body);
+  if (selectionError) { res.status(400); return renderError(selectionError); }
 
   const items = buildItemsFromRequest(db, req.body);
   if (items.invalidDetailCount > 0) {
@@ -422,7 +419,7 @@ router.post('/sales/new', requireLogin, (req, res) => {
   else if (paid > 0) paymentStatus = 'partial';
   const status = (req.body.save_draft === '1' || req.body.save_draft === 'on') ? 'draft' : 'submitted';
 
-  const tx = db.transaction(() => {
+  return completeMutation(req, res, () => {
     const info = db.prepare(
       `INSERT INTO sales_orders (customer_id, warehouse_id, user_id, order_date, total_amount, paid_amount, payment_status, status, note, remarks)
        VALUES (?,?,?,?,?,?,?,?,?,?)`
@@ -432,12 +429,9 @@ router.post('/sales/new', requireLogin, (req, res) => {
     for (const it of items) {
       insertItem.run(soId, it.pid, it.qty, it.unitLabel, it.baseQty, it.price, it.gift ? 1 : 0, it.costSnapshot);
     }
-    return soId;
+    writeAuditLog(db, req.session.user, '新建销售单', '销售单', soId, `金额 ¥${total.toFixed(2)}`);
+    return { redirect: `/sales/${soId}?created=${status}` };
   });
-  const soId = tx();
-
-  writeAuditLog(db, req.session.user, '新建销售单', '销售单', soId, `金额 ¥${total.toFixed(2)}`);
-  res.redirect(`/sales/${soId}?created=${status}`);
 });
 
 // 编辑草稿单（仅创建人或管理员，仅 draft 状态）
@@ -477,6 +471,9 @@ router.post('/sales/:id/edit', requireLogin, (req, res) => {
     res.status(400);
     return renderError('单据日期无效，请使用 YYYY-MM-DD 格式的真实日期');
   }
+
+  const selectionError = customerSelectionError(db, req.body);
+  if (selectionError) { res.status(400); return renderError(selectionError); }
 
   const items = buildItemsFromRequest(db, req.body);
   if (items.invalidDetailCount > 0) {
@@ -562,55 +559,59 @@ router.post('/sales/:id/delete', requireLogin, (req, res) => {
 // 提交审核：draft -> submitted
 router.post('/sales/submit/:id', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  const order = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(req.params.id);
-  if (!order) return res.status(404).send('单据不存在');
-  if (order.status !== 'draft') return res.status(400).send('只有草稿状态可以提交审核');
-  if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限');
-  db.prepare("UPDATE sales_orders SET status = 'submitted' WHERE id = ?").run(order.id);
-  writeAuditLog(db, req.session.user, '提交销售单审核', '销售单', order.id, '状态：待审核');
-  res.redirect('/sales/' + order.id);
+  return completeTransaction(req, res, () => {
+    const order = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(req.params.id);
+    if (!order) return { status: 404, error: '单据不存在' };
+    if (order.status !== 'draft') return { status: 400, error: '只有草稿状态可以提交审核' };
+    if (!canEditOrWithdraw(order, req.session.user)) return { status: 403, error: '无权限' };
+    db.prepare("UPDATE sales_orders SET status = 'submitted' WHERE id = ?").run(order.id);
+    writeAuditLog(db, req.session.user, '提交销售单审核', '销售单', order.id, '状态：待审核');
+    return { redirect: '/sales/' + order.id };
+  });
 });
 
 // 撤回：submitted -> draft（撤回后可以编辑修改，库存此前未扣减，无需处理）
 router.post('/sales/withdraw/:id', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  const order = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(req.params.id);
-  if (!order) return res.status(404).send('单据不存在');
-  if (order.status !== 'submitted') return res.status(400).send('只有待审核状态可以撤回');
-  if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限撤回他人的订单');
-  db.prepare("UPDATE sales_orders SET status = 'draft' WHERE id = ?").run(order.id);
-  writeAuditLog(db, req.session.user, '撤回销售单', '销售单', order.id, '状态：草稿');
-  res.redirect('/sales/' + order.id);
+  return completeTransaction(req, res, () => {
+    const order = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(req.params.id);
+    if (!order) return { status: 404, error: '单据不存在' };
+    if (order.status !== 'submitted') return { status: 400, error: '只有待审核状态可以撤回' };
+    if (!canEditOrWithdraw(order, req.session.user)) return { status: 403, error: '无权限撤回他人的订单' };
+    db.prepare("UPDATE sales_orders SET status = 'draft' WHERE id = ?").run(order.id);
+    writeAuditLog(db, req.session.user, '撤回销售单', '销售单', order.id, '状态：草稿');
+    return { redirect: '/sales/' + order.id };
+  });
 });
 
 // 审核通过：submitted -> approved（这里才真正扣库存，扣减前重新校验库存是否充足）
 router.post('/sales/approve/:id', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  if (req.session.user.role !== 'admin') return res.status(403).send('无权限');
-  const order = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(req.params.id);
-  if (!order) return res.status(404).send('单据不存在');
-  if (order.status !== 'submitted') return res.status(400).send('只有待审核状态可以审核通过');
+  return completeTransaction(req, res, () => {
+    if (req.session.user.role !== 'admin') return { status: 403, error: '无权限' };
+    const order = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(req.params.id);
+    if (!order) return { status: 404, error: '单据不存在' };
+    if (order.status !== 'submitted') return { status: 400, error: '只有待审核状态可以审核通过' };
 
-  const items = db.prepare('SELECT * FROM sales_order_items WHERE sales_order_id = ?').all(order.id);
+    const items = db.prepare('SELECT * FROM sales_order_items WHERE sales_order_id = ?').all(order.id);
 
-  // 库存校验必须按商品汇总后再比：同一商品拆成多行明细时（比如库存 15、两行各 10），
-  // 逐行检查每一行都能通过（检查时库存还没扣），事务里第二行才扣成负数，
-  // 被 inventory 的 CHECK(quantity>=0) 拦下后用户只能看到全局兑底的泛化报错。先汇总就能给出准确提示。
-  const needed = new Map(); // product_id -> 应扣总数量（基础单位）
-  for (const it of items) {
-    needed.set(it.product_id, (needed.get(it.product_id) || 0) + it.base_quantity);
-  }
-  const getInv = db.prepare('SELECT quantity FROM inventory WHERE product_id=? AND warehouse_id=?');
-  for (const [pid, totalQty] of needed) {
-    const inv = getInv.get(pid, order.warehouse_id);
-    const have = inv ? inv.quantity : 0;
-    if (have < totalQty) {
-      const p = db.prepare('SELECT name FROM products WHERE id=?').get(pid);
-      return res.status(400).send(`审核失败：${p ? p.name : '商品'} 当前库存 ${have}，不足以扣减合计 ${totalQty}，请联系提交人调整数量或先补货`);
+    // 库存校验必须按商品汇总后再比：同一商品拆成多行明细时（比如库存 15、两行各 10），
+    // 逐行检查每一行都能通过（检查时库存还没扣），事务里第二行才扣成负数，
+    // 被 inventory 的 CHECK(quantity>=0) 拦下后用户只能看到全局兑底的泛化报错。先汇总就能给出准确提示。
+    const needed = new Map(); // product_id -> 应扣总数量（基础单位）
+    for (const it of items) {
+      needed.set(it.product_id, (needed.get(it.product_id) || 0) + it.base_quantity);
     }
-  }
+    const getInv = db.prepare('SELECT quantity FROM inventory WHERE product_id=? AND warehouse_id=?');
+    for (const [pid, totalQty] of needed) {
+      const inv = getInv.get(pid, order.warehouse_id);
+      const have = inv ? inv.quantity : 0;
+      if (have < totalQty) {
+        const p = db.prepare('SELECT name FROM products WHERE id=?').get(pid);
+        return { status: 400, error: `审核失败：${p ? p.name : '商品'} 当前库存 ${have}，不足以扣减合计 ${totalQty}，请联系提交人调整数量或先补货` };
+      }
+    }
 
-  const tx = db.transaction(() => {
     const decInv = db.prepare('UPDATE inventory SET quantity = quantity - ? WHERE product_id=? AND warehouse_id=?');
     const insertTxn = db.prepare(`
       INSERT INTO stock_transactions (product_id, warehouse_id, change_qty, type, ref_type, ref_id, user_id)
@@ -621,69 +622,70 @@ router.post('/sales/approve/:id', requireLogin, (req, res) => {
       insertTxn.run(it.product_id, order.warehouse_id, -it.base_quantity, order.id, req.session.user.id);
     }
     db.prepare("UPDATE sales_orders SET status = 'approved' WHERE id = ?").run(order.id);
-  });
-  tx();
-  writeAuditLog(db, req.session.user, '审核通过销售单', '销售单', order.id, '状态：已审核');
+    writeAuditLog(db, req.session.user, '审核通过销售单', '销售单', order.id, '状态：已审核');
 
-  res.redirect('/sales/' + order.id);
+    return { redirect: '/sales/' + order.id };
+  });
 });
 
 // 审核拒绝：submitted -> rejected（库存此前未扣减，无需处理）
 router.post('/sales/reject/:id', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  if (req.session.user.role !== 'admin') return res.status(403).send('无权限');
-  const order = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(req.params.id);
-  if (!order) return res.status(404).send('单据不存在');
-  if (order.status !== 'submitted') return res.status(400).send('只有待审核状态可以拒绝');
-  db.prepare("UPDATE sales_orders SET status = 'rejected' WHERE id = ?").run(order.id);
-  writeAuditLog(db, req.session.user, '审核拒绝销售单', '销售单', order.id, '状态：已拒绝');
-  res.redirect('/sales/' + order.id);
+  return completeTransaction(req, res, () => {
+    if (req.session.user.role !== 'admin') return { status: 403, error: '无权限' };
+    const order = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(req.params.id);
+    if (!order) return { status: 404, error: '单据不存在' };
+    if (order.status !== 'submitted') return { status: 400, error: '只有待审核状态可以拒绝' };
+    db.prepare("UPDATE sales_orders SET status = 'rejected' WHERE id = ?").run(order.id);
+    writeAuditLog(db, req.session.user, '审核拒绝销售单', '销售单', order.id, '状态：已拒绝');
+    return { redirect: '/sales/' + order.id };
+  });
 });
 
 // 反审核：approved/rejected -> submitted（如果原本是 approved，要把已经扣掉的库存加回来）
 router.post('/sales/unapprove/:id', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  if (req.session.user.role !== 'admin') return res.status(403).send('无权限');
-  const order = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(req.params.id);
-  if (!order) return res.status(404).send('单据不存在');
-  if (order.status !== 'approved' && order.status !== 'rejected') {
-    return res.status(400).send('只有已审核或已拒绝状态可以反审核');
-  }
-
-  // 反审核前先挡一道：逆向加回库存这件事，不能和任何"已经把货加回库存"的退货单叠加。
-  // 退货审核通过时会把退回的货加进它自己的仓库（见 returns.js 的 approve），
-  // 这里如果再把整单的库存加回去，同一批货就被加了两次，库存凭空多出来。
-  //   1) 直接关联本单的已审核退货 —— 必然是同一批货，无条件拦；
-  //   2) 同一仓库、未关联销售单的"自由退货"，且与本单商品有交集
-  //      —— 自由退货没有可靠的来源单据，无法证明不是本单退回的货；宁可要求先反审核退货，
-  //      也不能依赖可手填的日期作推断，否则回填旧日期即可绕过库存保护。
-  if (order.status === 'approved') {
-    const linkedReturns = db.prepare(
-      `SELECT id FROM return_orders WHERE related_sales_order_id = ? AND status = 'approved' ORDER BY id`
-    ).all(order.id);
-    const conflictingFreeReturns = db.prepare(`
-      SELECT DISTINCT ro.id
-      FROM return_orders ro
-      JOIN return_order_items roi ON roi.return_order_id = ro.id
-      WHERE ro.status = 'approved'
-        AND ro.related_sales_order_id IS NULL
-        AND ro.warehouse_id = ?
-        AND roi.product_id IN (SELECT product_id FROM sales_order_items WHERE sales_order_id = ?)
-      ORDER BY ro.id
-    `).all(order.warehouse_id, order.id);
-
-    const conflicts = linkedReturns.concat(conflictingFreeReturns);
-    if (conflicts.length > 0) {
-      const ids = conflicts.map(r => '#' + r.id).join('、');
-      return res.status(400).send(
-        `反审核失败：本仓库（或直接关联本单）的已审核退货单 ${ids} 与这张销售单存在商品重叠。` +
-        `这些退货审核通过时已经把退回的货加回了库存，直接反审核本单会把同一批货重复加回、导致库存虚增。` +
-        `请先反审核这些退货单，再来反审核本销售单。`
-      );
+  return completeTransaction(req, res, () => {
+    if (req.session.user.role !== 'admin') return { status: 403, error: '无权限' };
+    const order = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(req.params.id);
+    if (!order) return { status: 404, error: '单据不存在' };
+    if (order.status !== 'approved' && order.status !== 'rejected') {
+      return { status: 400, error: '只有已审核或已拒绝状态可以反审核' };
     }
-  }
 
-  const tx = db.transaction(() => {
+    // 反审核前先挡一道：逆向加回库存这件事，不能和任何"已经把货加回库存"的退货单叠加。
+    // 退货审核通过时会把退回的货加进它自己的仓库（见 returns.js 的 approve），
+    // 这里如果再把整单的库存加回去，同一批货就被加了两次，库存凭空多出来。
+    //   1) 直接关联本单的已审核退货 —— 必然是同一批货，无条件拦；
+    //   2) 同一仓库、未关联销售单的"自由退货"，且与本单商品有交集
+    //      —— 自由退货没有可靠的来源单据，无法证明不是本单退回的货；宁可要求先反审核退货，
+    //      也不能依赖可手填的日期作推断，否则回填旧日期即可绕过库存保护。
+    if (order.status === 'approved') {
+      const linkedReturns = db.prepare(
+        `SELECT id FROM return_orders WHERE related_sales_order_id = ? AND status = 'approved' ORDER BY id`
+      ).all(order.id);
+      const conflictingFreeReturns = db.prepare(`
+        SELECT DISTINCT ro.id
+        FROM return_orders ro
+        JOIN return_order_items roi ON roi.return_order_id = ro.id
+        WHERE ro.status = 'approved'
+          AND ro.related_sales_order_id IS NULL
+          AND ro.warehouse_id = ?
+          AND roi.product_id IN (SELECT product_id FROM sales_order_items WHERE sales_order_id = ?)
+        ORDER BY ro.id
+      `).all(order.warehouse_id, order.id);
+
+      const conflicts = linkedReturns.concat(conflictingFreeReturns);
+      if (conflicts.length > 0) {
+        const ids = conflicts.map(r => '#' + r.id).join('、');
+        return { status: 400, error:
+          `反审核失败：本仓库（或直接关联本单）的已审核退货单 ${ids} 与这张销售单存在商品重叠。` +
+          `这些退货审核通过时已经把退回的货加回了库存，直接反审核本单会把同一批货重复加回、导致库存虚增。` +
+          `请先反审核这些退货单，再来反审核本销售单。`
+         };
+      }
+    }
+
     if (order.status === 'approved') {
       // 把审核通过时扣掉的库存加回来
       const items = db.prepare('SELECT * FROM sales_order_items WHERE sales_order_id = ?').all(order.id);
@@ -704,21 +706,20 @@ router.post('/sales/unapprove/:id', requireLogin, (req, res) => {
       }
     }
     db.prepare("UPDATE sales_orders SET status = 'submitted' WHERE id = ?").run(order.id);
-  });
-  tx();
-  writeAuditLog(db, req.session.user, '反审核销售单', '销售单', order.id, '状态：待审核');
+    writeAuditLog(db, req.session.user, '反审核销售单', '销售单', order.id, '状态：待审核');
 
-  res.redirect('/sales/' + order.id);
+    return { redirect: '/sales/' + order.id };
+  });
 });
 
 // 记录收款：客户分批还钱、或者退货冲抵之后补齐尾款，都用这个。
 // 只加 paid_amount，不碰审核状态、不碰库存、不碰商品明细——跟"审核"是完全独立的两件事。
 // 只允许对已审核的单子收款：草稿还没定稿、被拒绝的单子不该发生真实收款。
-router.post('/sales/:id/record-payment', requireLogin, (req, res) => {
+router.post('/sales/:id/record-payment', requireLogin, requireMutationKey, (req, res) => {
   const db = req.tenantDb;
   if (req.session.user.role !== 'admin') return res.status(403).send('无权限，只有管理员能记录收款');
   // 先拿写锁，再读取订单和关联退货；跨实例收款必须基于前一笔已提交的累计值。
-  const result = db.transaction(() => {
+  return completeMutation(req, res, () => {
     const order = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(req.params.id);
     if (!order) return { status: 404, error: '单据不存在' };
     if (order.status !== 'approved') {
@@ -730,13 +731,12 @@ router.post('/sales/:id/record-payment', requireLogin, (req, res) => {
     const amount = roundToCents(amountRaw);
     if (!(amount > 0)) return { status: 400, error: '收款金额四舍五入到分后必须大于 0' };
 
-    // 收款累计不能超过"有效欠款"：总额 − 已收 − 关联已审核退货（允许 0.001 浮点误差）。
+    // 收款上限复用结算余额；退过现金的关联退货不会再次抵掉同一笔欠款。
     // 必须与详情页展示的欠款（attachEffectivePayment 的 effective_debt）同一套算法：
     // 页面欠款扣了退货、服务端封顶不扣的话，退货抵扣过的那部分钱还能再现金收一遍（双重收取）。
-    const returnedAmount = db.prepare(
-      `SELECT COALESCE(SUM(total_amount), 0) AS t FROM return_orders WHERE related_sales_order_id = ? AND status = 'approved'`
-    ).get(order.id).t;
-    const remaining = order.total_amount - (order.paid_amount || 0) - returnedAmount;
+    const settlement = getSalePayment(db, order.id);
+    const returnedAmount = settlement.returned_amount;
+    const remaining = settlement.effective_debt;
     if (remaining <= 0.001) {
       return { status: 400, error:
         `该单有效欠款已结清（总额 ¥${order.total_amount.toFixed(2)}，已收 ¥${(order.paid_amount || 0).toFixed(2)}` +
@@ -751,7 +751,7 @@ router.post('/sales/:id/record-payment', requireLogin, (req, res) => {
     // （以前漏了这行，导致"建单时只收定金、后来补完全款"的单子状态永远停在 partial）。
     //
     // 注意它的语义（2026-09-08 明确）：这里只记**现金收款进度**——实收现金相对单据金额收了多少，
-    // 不做退货抵扣。真正的"是否已结清"一律由「有效欠款 = 金额 − 已收 − 关联已审核退货」现算，
+    // 不做退货抵扣。真正的"是否已结清"一律由「结算余额 = 金额 − 已收 − 关联已审核退货 + 已退现金」现算，
     // 见 lib/profitCalc.js 的 salesSettledExpr，列表页/详情页/首页/报表全部走那一套。
     // 以前让 payment_status 兼职"结清判定"，落库快照追不上退货单的审核/反审核，
     // 定金 + 退货抵扣结清的单子会永远停在 partial，两边对不上账。
@@ -763,17 +763,15 @@ router.post('/sales/:id/record-payment', requireLogin, (req, res) => {
     db.prepare('UPDATE sales_orders SET paid_amount = ?, payment_status = ? WHERE id = ?')
       .run(newPaid, paymentStatus, order.id);
     writeAuditLog(db, req.session.user, '记录销售收款', '销售单', order.id, `本次收款 ¥${amount.toFixed(2)}，累计 ¥${newPaid.toFixed(2)}`);
-    return { orderId: order.id };
-  }).immediate();
-  if (result.error) return res.status(result.status).send(result.error);
-  res.redirect('/sales/' + result.orderId);
+    return { redirect: '/sales/' + order.id };
+  });
 });
 
 router.get('/sales/:id', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const order = db.prepare(`
     SELECT so.*, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name,
-           ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount
+           ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount, ${refundedAmountSubquery()} AS cash_refunded_amount
     FROM sales_orders so
     LEFT JOIN customers c ON c.id = so.customer_id
     LEFT JOIN warehouses w ON w.id = so.warehouse_id

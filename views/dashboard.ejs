@@ -64,7 +64,7 @@
       <div class="label">本月毛利</div>
     </div>
   </div>
-  <p class="muted stat-note">毛利按已收款订单计算，已扣除退货。</p>
+  <p class="muted stat-note">毛利按已结清订单计算，已扣除退货。</p>
 <% } %>
 
 <div class="card">
@@ -84,9 +84,11 @@
             <td>¥<%= o.total_amount.toFixed(2) %></td>
             <td>
               <% if (o.effective_status === 'paid') { %>
-                <span class="badge" style="background:#dcfce7;color:#166534">已收款</span>
-              <% } else if (o.effective_status === 'partial') { %>
-                <span class="badge" style="background:#fef3c7;color:#92400e">部分收款</span>
+                <span class="badge" style="background:#dcfce7;color:#166534">已结清</span>
+              <% } else if (o.effective_status === 'refund_pending') { %>
+      <span class="badge" style="background:#fef3c7;color:#92400e">待退款</span>
+      <% } else if (o.effective_status === 'partial') { %>
+                <span class="badge" style="background:#fef3c7;color:#92400e">部分结算</span>
               <% } else { %>
                 <span class="badge" style="background:#fee2e2;color:#991b1b">未收款</span>
               <% } %>
@@ -120,9 +122,11 @@
           <div class="order-card-bottom">
             <span class="order-card-amount">¥<%= o.total_amount.toFixed(2) %></span>
             <% if (o.effective_status === 'paid') { %>
-              <span class="badge" style="background:#dcfce7;color:#166534">已收款</span>
-            <% } else if (o.effective_status === 'partial') { %>
-              <span class="badge" style="background:#fef3c7;color:#92400e">部分收款</span>
+              <span class="badge" style="background:#dcfce7;color:#166534">已结清</span>
+            <% } else if (o.effective_status === 'refund_pending') { %>
+      <span class="badge" style="background:#fef3c7;color:#92400e">待退款</span>
+      <% } else if (o.effective_status === 'partial') { %>
+              <span class="badge" style="background:#fef3c7;color:#92400e">部分结算</span>
             <% } else { %>
               <span class="badge" style="background:#fee2e2;color:#991b1b">未收款</span>
             <% } %>

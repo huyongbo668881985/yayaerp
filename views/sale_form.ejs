@@ -5,6 +5,7 @@
   <% if (error) { %><div class="error" role="alert"><%= error %></div><% } %>
   <% if (order) { %><p class="muted">编辑后仍是草稿状态，保存后需要重新点"提交审核"。</p><% } %>
   <form method="POST" action="<%= order ? '/sales/' + order.id + '/edit' : '/sales/new' %>" id="saleForm">
+    <input type="hidden" name="_request_key" value="<%= typeof formValues !== 'undefined' && formValues && formValues._request_key ? formValues._request_key : newRequestKey() %>">
     <h2 class="form-section-heading">基本信息</h2>
     <div class="grid-3">
       <div class="form-row customer-picker-field">
@@ -12,7 +13,7 @@
         <div class="customer-picker" id="customerPicker">
           <div class="customer-picker-control">
             <span class="customer-picker-icon" aria-hidden="true">⌕</span>
-            <input id="customerSearch" class="customer-picker-search" type="search" placeholder="搜索名称、联系人、电话或地址" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="customerPickerResults" aria-autocomplete="list">
+            <input id="customerSearch" name="customer_search" value="<%= form.customer_search || '' %>" class="customer-picker-search" type="search" placeholder="搜索名称、联系人、电话或地址" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="customerPickerResults" aria-autocomplete="list">
             <button type="button" id="clearCustomer" class="customer-picker-clear" aria-label="清除已选客户" hidden>×</button>
           </div>
           <div id="customerPickerResults" class="customer-picker-results" role="listbox" hidden>
@@ -113,6 +114,7 @@
   }
 
   function selectCustomer(option) {
+    customerSearch.setCustomValidity('');
     customerId.value = option.dataset.customerId;
     customerSearch.value = customerLabel(option);
     clearCustomer.hidden = !customerId.value;
@@ -141,7 +143,13 @@
     openCustomerPicker();
     if (customerId.value) customerSearch.select();
   });
-  customerSearch.addEventListener('input', openCustomerPicker);
+  customerSearch.addEventListener('input', function() {
+    customerId.value = '';
+    clearCustomer.hidden = !customerSearch.value;
+    customerOptions.forEach(function(option) { option.setAttribute('aria-selected', 'false'); });
+    customerSearch.setCustomValidity(customerSearch.value.trim() ? '请从搜索结果中选择客户，或清空搜索使用散客。' : '');
+    openCustomerPicker();
+  });
   customerSearch.addEventListener('keydown', function(event) {
     const visibleOptions = customerOptions.filter(function(option) { return !option.hidden; });
     if (event.key === 'Escape') {
@@ -161,7 +169,9 @@
     }
     if (event.key === 'Enter') {
       event.preventDefault();
-      const option = visibleOptions[activeCustomerOption] || visibleOptions[0];
+      const exactMatches = visibleOptions.filter(function(item) { return customerLabel(item) === customerSearch.value.trim(); });
+      const option = activeCustomerOption >= 0 ? visibleOptions[activeCustomerOption]
+        : exactMatches.length === 1 ? exactMatches[0] : visibleOptions.length === 1 ? visibleOptions[0] : null;
       if (option) selectCustomer(option);
     }
   });
@@ -171,6 +181,8 @@
   clearCustomer.addEventListener('click', function() {
     customerId.value = '';
     customerSearch.value = '';
+    customerSearch.setCustomValidity('');
+    customerOptions.forEach(function(option) { option.setAttribute('aria-selected', 'false'); });
     clearCustomer.hidden = true;
     openCustomerPicker();
     customerSearch.focus();
@@ -189,9 +201,13 @@
   document.getElementById('saleForm').addEventListener('submit', function(event) {
     if (document.activeElement !== customerSearch) return;
     event.preventDefault();
-    const option = customerOptions.find(function(item) { return !item.hidden; });
-    if (option) selectCustomer(option);
+    openCustomerPicker();
+    customerSearch.reportValidity();
   });
+
+  if (customerSearch.value.trim() && !customerId.value && customerSearch.value !== '散客') {
+    customerSearch.setCustomValidity('请从搜索结果中选择客户，或清空搜索使用散客。');
+  }
 
   // 编辑模式下，把已有明细转换成和新建表单一致的结构（quantity 用录入时的原始数量，配合 unit_choice 换算）
   const EXISTING_ITEMS = <%- JSON.stringify(typeof draftItems !== 'undefined' ? draftItems : (typeof existingItems !== 'undefined' ? existingItems : []).map(function(it) {

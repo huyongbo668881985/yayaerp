@@ -11,18 +11,18 @@ node scripts/backup-run.js（手动 / 宿主机 crontab 每日触发）
    ├─ ② gzip 压缩    标准 gzip，gunzip 可解
    ├─ ③ 加密         openssl enc -aes-256-cbc -pbkdf2 -iter 262144
    │                 密钥 = 环境变量 BACKUP_ENCRYPTION_KEY
-   ├─ ④ 回读校验     解密 → 解压 → 校验 SQLite 文件头（保证当天快照 100% 可还原）
-   ├─ ⑤ 本地清理     删除文件日期早于 今天-7天 的快照（逐条记日志）
+   ├─ ④ 回读校验     解密 → 解压 → SQLite integrity_check + foreign_key_check
+   ├─ ⑤ 异地同步     rclone copy 只上传最终 .db.gz.enc（排除日志、明文和半成品）
    ├─ ⓪ 启动校验     R2 四项环境变量 + BACKUP_ENCRYPTION_KEY 缺任一项 → 点名报错并拒绝执行
-   └─ ⑥ rclone copy  整个备份目录同步到 Cloudflare R2
-                     R2 端过期删除由 bucket Lifecycle Rule 负责，应用层不删远端
+   └─ ⑥ 本地清理     本轮所有库及同步成功后，删除文件日期早于 今天-7天 的快照
+                     失败则保留全部历史备份；R2 端过期删除仍由 Lifecycle Rule 负责
    │
    └─ 任一环节失败 → 告警邮件（BACKUP_ALERT_EMAIL），退出码 1
 ```
 
 - 备份范围：`data/platform.db`（平台库）+ 全部租户库（含已暂停租户）；`sessions.db` 是临时会话不备份。
-- 产物命名：`{label}_{YYYY-MM-DD}.db.gz.enc`，label 为 `platform` 或租户代码，如 `demo_2026-09-09.db.gz.enc`。
-- 每次都是**全量快照**，无增量；库都在 KB~MB 级，全量最简单可靠。
+- 产物命名：`{label}_{YYYY-MM-DD}_{HHmmssSSSZ-随机码}.db.gz.enc`，label 为 `platform` 或 `tenant-<租户代码>`，避免租户代码 platform 覆盖平台库。日期用北京时间，时间段用 UTC。同一轮的平台库和租户库共用时间段与随机码；旧日期文件仍支持恢复和清理。
+- 每次都是**全量快照**，每个库使用在线一致性副本；不同库依次备份，不宣称跨库同一时刻的全局快照。租户清单读取失败或任一租户缺失都会报失败。
 - 备份目录：`data/backups/`（Docker volume 内，随 data 一起持久化）。
 
 ## 2. 环境变量总表（.env）
@@ -69,7 +69,13 @@ node scripts/backup-run.js
 docker compose exec jxc node scripts/backup-run.js
 ```
 
-crontab（**宿主机 cron 调容器**，每天凌晨 02:30）：
+先在宿主机创建日志目录，避免首次 cron 因重定向目录不存在而根本未运行：
+
+```bash
+mkdir -p /opt/jxc-app/data/backups
+```
+
+crontab（**宿主机 cron 调容器**，每天凌晨 02:30；确认宿主机时区）：
 
 ```cron
 30 2 * * * cd /opt/jxc-app && /usr/bin/docker compose exec -T jxc node scripts/backup-run.js >> /opt/jxc-app/data/backups/backup-cron.log 2>&1
@@ -82,7 +88,9 @@ crontab（**宿主机 cron 调容器**，每天凌晨 02:30）：
 ```
 
 - 日志追加到 `data/backups/backup-cron.log`，清理/同步/告警行为都在里面可查。
-- 同一天重复执行安全：本地同名文件覆盖；rclone copy 幂等（跳过远端相同文件）。
+- 同一天重跑生成新文件，成功文件不会被覆盖；校验成功后原子发布，失败时只清理本轮临时目录。
+- 同一数据目录使用 `data/.backup.lock` 拒绝并发任务。异常退出后，先检查备份进程和 cron，确认没有运行中的任务再手工删除锁；不能在任务运行中移除锁。
+- 清理失败也会令任务失败并告警。加密回读校验通过仍需实际恢复演练，不能据此宣称完整服务必然可恢复。
 
 ## 5. Cloudflare R2 配置步骤（控制台操作 + 服务器 .env 填写）
 
@@ -122,11 +130,21 @@ gunzip -c demo.db.gz > demo.db
 sqlite3 demo.db "PRAGMA integrity_check;"
 ```
 
-恢复上线：把还原出的 `.db` 放回 `data/tenants/<租户代码>.db`（平台库为 `data/platform.db`），重启服务。
+恢复脚本只在校验成功后生成 `.restore.db`，拒绝覆盖已有输出；错误密钥、损坏数据及外键异常都会失败并清理临时文件。
+
+恢复上线必须停止所有业务进程，避免旧 WAL 覆盖还原数据：
+
+1. 选择同一轮中成功的 `platform` 和全部租户快照，在独立目录逐一恢复并校验，检查单据和金额。
+2. `docker compose stop jxc`，同时暂停宿主机的备份/欠款快照 cron；将现有数据目录（包括 `.db`、`-wal`、`-shm`）整体复制到独立留存目录，保留回滚资料。
+3. 平台库放回 `data/platform.db`。逐一核对平台库 `tenants.db_path` 与新服务器实际路径；Docker 通常是 `/app/data/tenants/<代码>.db`，不同部署路径须在停机状态下修正。
+4. 租户库放回对应路径；先移走目标旧库的 `-wal` 和 `-shm`，绝不能将旧 WAL 与恢复库混用。恢复文件和目录属主/权限应匹配应用进程。
+5. `sessions.db` 不恢复：停机时移走该文件及 sidecar，让用户重新登录。重启后逐租户验证登录、库存、销售额、应收和退货，再恢复 cron。
+
+单租户恢复也须停机并核对平台路径；不要直接向运行中的 SQLite 文件覆盖写入。
 
 ## 7. 失败告警
 
-- 触发条件：任一库快照失败、rclone 同步非 0 退出/超时/启动失败。
+- 触发条件：租户清单读取失败、任一库快照失败、rclone 同步非 0 退出/超时/启动失败、本地清理失败。
 - 邮件包含：备份日期、失败时间、失败项（租户/环节）、错误信息（rclone stderr 截尾保留 800 字）、本地清理情况。
 - 收件人 `BACKUP_ALERT_EMAIL`，发信走现有 SMTP 配置。
 - 告警发送本身失败只记日志，不会让备份任务崩溃；任务退出码：全部成功 0，任一失败 1。
@@ -134,10 +152,10 @@ sqlite3 demo.db "PRAGMA integrity_check;"
 ## 8. 验证清单（部署后逐项打勾）
 
 - [ ] `docker compose exec jxc node scripts/backup-run.js` 成功，`data/backups/` 出现当天 `.db.gz.enc`，无明文 `.db.gz`/`.tmp` 残留
-- [ ] `node scripts/backup-restore.js <某个 .enc>` 还原出库且 `integrity_check: ok`
+- [ ] `node scripts/backup-restore.js <某个 .enc>` 还原出库且完整性、外键检查通过
 - [ ] R2 bucket 中出现对应加密对象
 - [ ] 故意改错 `R2_SECRET_ACCESS_KEY` 跑一次 → 收到告警邮件，内容可定位问题（退出码 + stderr）
-- [ ] 构造 8 天前文件名的历史快照跑一次 → 被删除，`backup-cron.log` 有 `[cleanup] 已删除过期快照` 记录
+- [ ] 构造 8 天前文件名的历史快照：整轮成功时删除；任一库或同步失败时保留，`backup-cron.log` 有 `[cleanup] 已删除过期快照` 记录
 - [ ] R2 Lifecycle Rule 状态 Enabled、前缀正确（R2 控制台 bucket → Settings 核对）
 
 ## 9. 故障排查
@@ -150,4 +168,5 @@ sqlite3 demo.db "PRAGMA integrity_check;"
 | `rclone 启动失败` | 容器内需镜像含 rclone（本仓库 Dockerfile 已装）；宿主机自行安装 |
 | 同步报 `AccessDenied` | R2 API Token 权限不足或失效，重新签发 Object Read & Write token |
 | 同步超时（15 分钟被终止） | 检查服务器到 R2 的网络；或调大 `R2_SYNC_TIMEOUT_MS` |
+| `备份任务锁已存在` | 确认前次任务已结束，核对锁内 PID/启动时间，再移除 data/.backup.lock；不要删除运行中任务的锁 |
 | 邮件收不到 | 检查 `SMTP_HOST` 与 `BACKUP_ALERT_EMAIL` 是否配置（未配置只跳过不报错） |

@@ -10,5 +10,27 @@ document.addEventListener('DOMContentLoaded', () => {
     input.name = '_csrf';
     input.value = token;
     form.prepend(input);
+    form.addEventListener('submit', event => {
+      if (event.defaultPrevented) return;
+      if (form.dataset.submitting === 'true') { event.preventDefault(); return; }
+      form.dataset.submitting = 'true';
+      // 保留提交按钮的 name/value（例如 save_draft），仅锁定后续点击。
+      for (const button of form.querySelectorAll('button[type="submit"]')) {
+        button.dataset.originalText = button.textContent;
+        button.setAttribute('aria-disabled', 'true');
+        button.textContent = '正在提交…';
+      }
+    });
+  }
+});
+
+window.addEventListener('pageshow', () => {
+  for (const form of document.querySelectorAll('form[data-submitting]')) {
+    delete form.dataset.submitting;
+    for (const button of form.querySelectorAll('button[data-original-text]')) {
+      button.textContent = button.dataset.originalText;
+      button.removeAttribute('aria-disabled');
+      delete button.dataset.originalText;
+    }
   }
 });

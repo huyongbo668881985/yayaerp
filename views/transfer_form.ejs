@@ -4,7 +4,8 @@
 <div class="card">
   <% if (error) { %><div class="error" role="alert"><%= error %></div><% } %>
   <% if (order) { %><p class="muted">编辑后仍是草稿状态，保存后需要重新点"提交审核"。</p><% } %>
-  <form method="POST" action="<%= order ? '/transfers/' + order.id + '/edit' : '/transfers/new' %>">
+  <form method="POST" action="<%= order ? '/transfers/' + order.id + '/edit' : '/transfers/new' %>" id="transferForm">
+    <input type="hidden" name="_request_key" value="<%= typeof formValues !== 'undefined' && formValues && formValues._request_key ? formValues._request_key : newRequestKey() %>">
     <h2 class="form-section-heading">基本信息</h2>
     <div class="grid-3">
       <div class="form-row">

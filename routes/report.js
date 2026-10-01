@@ -3,7 +3,7 @@ const { requireAdmin } = require('../middleware/auth');
 const { sendCsv } = require('../utils/csv');
 const {
   RETURN_SETTLED_EXPR, salesProfit, returnProfit,
-  returnedAmountSubquery, effectiveDebtExpr, salesSettledExpr
+  returnedAmountSubquery, refundedAmountSubquery, attachEffectivePayment, returnCostExpr, effectiveDebtExpr, salesSettledExpr
 } = require('../lib/profitCalc');
 const router = express.Router();
 
@@ -15,7 +15,7 @@ const router = express.Router();
 // 注意：不改 sales_orders 表本身的 total_amount/paid_amount，欠款和收款状态永远是"查询时现算"，
 // 这样原始单据数据永远保持真实历史记录，不会被退货悄悄覆盖掉。
 const RETURNED_AMOUNT_SUBQUERY = returnedAmountSubquery('so');
-// "有效欠款"：总金额 − 已收款 − 关联退货金额。<= 0.001 就算结清了（不管是收现金收的还是退货抵的）
+// 结算余额复用统一表达式，含关联退货现金退款；余额绝对值在容差内才是结清。
 const EFFECTIVE_DEBT_EXPR = effectiveDebtExpr('so');
 
 function buildDateFilter(alias, start, end) {
@@ -70,7 +70,7 @@ function getSalesOrderList(db, start, end, includeReceivable) {
   const { clause, params } = buildDateFilter('so', start, end);
   let sql = `
     SELECT so.id, so.order_date, c.name AS customer_name, w.name AS warehouse_name,
-           so.total_amount, so.paid_amount, ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount,
+           so.total_amount, so.paid_amount, ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount, ${refundedAmountSubquery()} AS cash_refunded_amount,
            COALESCE(SUM(soi.quantity * soi.unit_price - soi.base_quantity * soi.cost_price_snapshot), 0) AS order_profit
     FROM sales_orders so
     LEFT JOIN customers c ON c.id = so.customer_id
@@ -92,7 +92,7 @@ function getReturnOrderList(db, start, end, includeReceivable) {
   let sql = `
     SELECT ro.id, ro.order_date, c.name AS customer_name, w.name AS warehouse_name,
            ro.total_amount, ro.refunded_amount, ro.refund_status, ro.related_sales_order_id,
-           COALESCE(SUM(roi.quantity * roi.unit_price - roi.base_quantity * roi.cost_price_snapshot), 0) AS order_profit
+           COALESCE(SUM(roi.quantity * roi.unit_price - roi.base_quantity * ${returnCostExpr()}), 0) AS order_profit
     FROM return_orders ro
     LEFT JOIN customers c ON c.id = ro.customer_id
     LEFT JOIN warehouses w ON w.id = ro.warehouse_id
@@ -110,11 +110,7 @@ router.get('/reports', requireAdmin, (req, res) => {
   const includeReceivable = req.query.mode === 'with_receivable';
 
   const summary = getSummary(db, start, end);
-  const orders = getSalesOrderList(db, start, end, includeReceivable).map(o => {
-    const debt = o.total_amount - o.paid_amount - o.returned_amount;
-    o.effective_status = debt <= 0.001 ? 'paid' : ((o.paid_amount > 0 || o.returned_amount > 0) ? 'partial' : 'unpaid');
-    return o;
-  });
+  const orders = getSalesOrderList(db, start, end, includeReceivable).map(attachEffectivePayment);
   const returnOrders = getReturnOrderList(db, start, end, includeReceivable);
 
   res.render('report', { start: start || '', end: end || '', includeReceivable, summary, orders, returnOrders });
@@ -124,17 +120,17 @@ router.get('/reports/export', requireAdmin, (req, res) => {
   const db = req.tenantDb;
   const { start, end } = req.query;
   const includeReceivable = req.query.mode === 'with_receivable';
-  const orders = getSalesOrderList(db, start, end, includeReceivable);
+  const orders = getSalesOrderList(db, start, end, includeReceivable).map(attachEffectivePayment);
   const returnOrders = getReturnOrderList(db, start, end, includeReceivable);
 
-  const paymentText = { paid: '已收款', partial: '部分收款', unpaid: '未收款' };
+  const paymentText = { paid: '已结清', partial: '部分结算', unpaid: '未收款', refund_pending: '待退款' };
   const refundText = { refunded: '已退款', partial: '部分退款', unrefunded: '未退款' };
   const headers = ['类型', '单号', '日期', '客户', '仓库', '金额', '已收/已退', '状态', '该单毛利'];
   const rows = [
     ...orders.map(o => [
       '销售', o.id, o.order_date, o.customer_name || '散客', o.warehouse_name,
       o.total_amount.toFixed(2), o.paid_amount.toFixed(2),
-      (o.total_amount - o.paid_amount - o.returned_amount) <= 0.001 ? '已收款' : (o.paid_amount > 0 || o.returned_amount > 0 ? '部分收款' : '未收款'),
+      paymentText[o.effective_status],
       o.order_profit.toFixed(2)
     ]),
     ...returnOrders.map(o => [

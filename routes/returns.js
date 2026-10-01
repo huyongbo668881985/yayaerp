@@ -1,8 +1,10 @@
 const express = require('express');
+const { requireMutationKey, completeMutation, completeTransaction } = require('../lib/mutation');
 const { requireLogin } = require('../middleware/auth');
 const { sendCsv } = require('../utils/csv');
 const { todayLocalDate } = require('../utils/dates');
 const { costSnapshotPerBaseUnit } = require('../lib/priceCalc');
+const { getSalePayment } = require('../lib/profitCalc');
 const { isBlank, isValidDateString, isValidNonNegativeAmount, roundToCents } = require('../lib/validators');
 const { warehousesForUser, isWarehouseInScope } = require('../lib/warehouseAccess');
 const { submittedItemsFromBody } = require('../lib/formDraft');
@@ -70,7 +72,7 @@ function buildItemsFromRequest(db, body) {
     items.push({
       pid, qty, price: Number.isFinite(price) ? roundToCents(price) : price,
       invalidPrice: !isValidNonNegativeAmount(unit_price[i]),
-      unitLabel, baseQty, costSnapshot, productName: product.name
+      unitLabel, baseQty, costSnapshot, unitChoice: usePack ? 'pack' : 'base', productName: product.name
     });
   }
   items.invalidDetailCount = invalidDetailCount;
@@ -103,6 +105,7 @@ function validateLinkedReturn(db, {
   const soldRows = db.prepare(`
     SELECT soi.product_id, p.name AS product_name,
            SUM(soi.base_quantity) AS sold_quantity,
+           SUM(soi.base_quantity * soi.cost_price_snapshot) AS sold_cost,
            SUM(soi.quantity * soi.unit_price) AS sold_amount
     FROM sales_order_items soi
     JOIN products p ON p.id = soi.product_id
@@ -121,6 +124,32 @@ function validateLinkedReturn(db, {
     GROUP BY roi.product_id
   `).all(sale.id, excludeReturnId || -1);
   const previousByProduct = new Map(previousRows.map(row => [row.product_id, row]));
+
+  const originalItems = db.prepare('SELECT * FROM sales_order_items WHERE sales_order_id = ?').all(sale.id);
+  for (const item of items) {
+    const productId = Number(item.pid ?? item.product_id);
+    const sold = soldByProduct.get(productId);
+    if (!sold) continue; // 下方统一报告商品不在原单中的错误
+    const cost = sold.sold_cost / sold.sold_quantity;
+    if ('pid' in item) {
+      item.costSnapshot = cost;
+      if (item.unitChoice === 'pack') {
+        const matches = originalItems.filter(row => row.product_id === productId &&
+          (row.base_quantity > row.quantity || row.unit_label === item.unitLabel));
+        const units = new Map(matches.map(row => [row.unit_label + ':' + row.base_quantity / row.quantity, row]));
+        if (units.size !== 1) return `商品“${sold.product_name}”原单没有唯一箱规，请按基本单位办理退货`;
+        const original = [...units.values()][0];
+        item.unitLabel = original.unit_label;
+        item.baseQty = item.qty * original.base_quantity / original.quantity;
+      } else {
+        const original = originalItems.find(row => row.product_id === productId && row.base_quantity === row.quantity);
+        if (original) item.unitLabel = original.unit_label;
+        item.baseQty = item.qty;
+      }
+    } else {
+      item.cost_price_snapshot = cost;
+    }
+  }
 
   const currentByProduct = new Map();
   for (const item of items) {
@@ -152,6 +181,14 @@ function validateLinkedReturn(db, {
     }
   }
   return null;
+}
+
+function linkedRefundError(db, relatedId, total, refunded) {
+  if (!relatedId || refunded <= 0) return null;
+  const sale = getSalePayment(db, relatedId);
+  const available = sale ? Math.min(total, Math.max(0, total - sale.balance)) : 0;
+  return refunded > available + 0.001
+    ? `关联退货先抵扣原单欠款，最多可退现金 ¥${available.toFixed(2)}，已退款金额不能超过此数` : null;
 }
 
 // 明细里的人工负单价校验（与 sales.js 同口径）：负价退货会算出负的退款额和毛利
@@ -272,7 +309,7 @@ router.get('/returns/new', requireLogin, (req, res) => {
     today: todayLocalDate() });
 });
 
-router.post('/returns/new', requireLogin, (req, res) => {
+router.post('/returns/new', requireLogin, requireMutationKey, (req, res) => {
   const db = req.tenantDb;
   const { customer_id, warehouse_id, order_date, note, refunded_amount, remarks, related_sales_order_id } = req.body;
 
@@ -336,13 +373,15 @@ router.post('/returns/new', requireLogin, (req, res) => {
     res.status(400);
     return renderError(`退款金额（¥${refunded.toFixed(2)}）不能超过退货总额（¥${total.toFixed(2)}）`);
   }
+  const cashError = linkedRefundError(db, relatedId, total, refunded);
+  if (cashError) { res.status(400); return renderError(cashError); }
   let refundStatus = 'unrefunded';
   if (refunded >= total && total > 0) refundStatus = 'refunded';
   else if (refunded > 0) refundStatus = 'partial';
   // 点"存草稿"按钮会带 save_draft=1 → 存为 draft，之后在详情页继续编辑/提交审核
   const status = (req.body.save_draft === '1' || req.body.save_draft === 'on') ? 'draft' : 'submitted';
 
-  const tx = db.transaction(() => {
+  return completeMutation(req, res, () => {
     const info = db.prepare(
       `INSERT INTO return_orders (customer_id, warehouse_id, user_id, related_sales_order_id, order_date, total_amount, refunded_amount, refund_status, status, note, remarks)
        VALUES (?,?,?,?,?,?,?,?,?,?,?)`
@@ -352,11 +391,8 @@ router.post('/returns/new', requireLogin, (req, res) => {
     for (const it of items) {
       insertItem.run(roId, it.pid, it.qty, it.unitLabel, it.baseQty, it.price, it.costSnapshot);
     }
-    return roId;
+    return { redirect: `/returns/${roId}?created=${status}` };
   });
-  const roId = tx();
-
-  res.redirect(`/returns/${roId}?created=${status}`);
 });
 
 router.get('/returns/:id/edit', requireLogin, (req, res) => {
@@ -446,6 +482,8 @@ router.post('/returns/:id/edit', requireLogin, (req, res) => {
     res.status(400);
     return renderError(`退款金额（¥${refunded.toFixed(2)}）不能超过退货总额（¥${total.toFixed(2)}）`);
   }
+  const cashError = linkedRefundError(db, relatedId, total, refunded);
+  if (cashError) { res.status(400); return renderError(cashError); }
   let refundStatus = 'unrefunded';
   if (refunded >= total && total > 0) refundStatus = 'refunded';
   else if (refunded > 0) refundStatus = 'partial';
@@ -467,45 +505,48 @@ router.post('/returns/:id/edit', requireLogin, (req, res) => {
 
 router.post('/returns/submit/:id', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  const order = db.prepare('SELECT * FROM return_orders WHERE id = ?').get(req.params.id);
-  if (!order) return res.status(404).send('单据不存在');
-  if (order.status !== 'draft') return res.status(400).send('只有草稿状态可以提交审核');
-  if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限');
-  db.prepare("UPDATE return_orders SET status = 'submitted' WHERE id = ?").run(order.id);
-  res.redirect('/returns/' + order.id);
+  return completeTransaction(req, res, () => {
+    const order = db.prepare('SELECT * FROM return_orders WHERE id = ?').get(req.params.id);
+    if (!order) return { status: 404, error: '单据不存在' };
+    if (order.status !== 'draft') return { status: 400, error: '只有草稿状态可以提交审核' };
+    if (!canEditOrWithdraw(order, req.session.user)) return { status: 403, error: '无权限' };
+    db.prepare("UPDATE return_orders SET status = 'submitted' WHERE id = ?").run(order.id);
+    return { redirect: '/returns/' + order.id };
+  });
 });
 
 router.post('/returns/withdraw/:id', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  const order = db.prepare('SELECT * FROM return_orders WHERE id = ?').get(req.params.id);
-  if (!order) return res.status(404).send('单据不存在');
-  if (order.status !== 'submitted') return res.status(400).send('只有待审核状态可以撤回');
-  if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限撤回他人的退货单');
-  db.prepare("UPDATE return_orders SET status = 'draft' WHERE id = ?").run(order.id);
-  res.redirect('/returns/' + order.id);
+  return completeTransaction(req, res, () => {
+    const order = db.prepare('SELECT * FROM return_orders WHERE id = ?').get(req.params.id);
+    if (!order) return { status: 404, error: '单据不存在' };
+    if (order.status !== 'submitted') return { status: 400, error: '只有待审核状态可以撤回' };
+    if (!canEditOrWithdraw(order, req.session.user)) return { status: 403, error: '无权限撤回他人的退货单' };
+    db.prepare("UPDATE return_orders SET status = 'draft' WHERE id = ?").run(order.id);
+    return { redirect: '/returns/' + order.id };
+  });
 });
 
 // 审核通过：submitted -> approved，这一步把退回来的货真正加进库存
 router.post('/returns/approve/:id', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  if (req.session.user.role !== 'admin') return res.status(403).send('无权限');
-  const order = db.prepare('SELECT * FROM return_orders WHERE id = ?').get(req.params.id);
-  if (!order) return res.status(404).send('单据不存在');
-  if (order.status !== 'submitted') return res.status(400).send('只有待审核状态可以审核通过');
+  return completeTransaction(req, res, () => {
+    if (req.session.user.role !== 'admin') return { status: 403, error: '无权限' };
+    const order = db.prepare('SELECT * FROM return_orders WHERE id = ?').get(req.params.id);
+    if (!order) return { status: 404, error: '单据不存在' };
+    if (order.status !== 'submitted') return { status: 400, error: '只有待审核状态可以审核通过' };
 
-  let approvalError = null;
-  const tx = db.transaction(() => {
     const items = db.prepare('SELECT * FROM return_order_items WHERE return_order_id = ?').all(order.id);
-    // 校验与写库存放在同一事务里，避免两张待审核退货同时读取到相同的剩余额度后都通过。
     if (order.related_sales_order_id) {
-      approvalError = validateLinkedReturn(db, {
-        relatedSaleId: order.related_sales_order_id,
-        customerId: order.customer_id,
-        items,
-        sessionUser: req.session.user,
-        excludeReturnId: order.id
+      const relatedError = validateLinkedReturn(db, {
+        relatedSaleId: order.related_sales_order_id, customerId: order.customer_id,
+        items, sessionUser: req.session.user, excludeReturnId: order.id
       });
-      if (approvalError) return;
+      if (relatedError) return { status: 400, error: `审核失败：${relatedError}` };
+      const cashError = linkedRefundError(db, order.related_sales_order_id, order.total_amount, order.refunded_amount);
+      if (cashError) return { status: 400, error: `审核失败：${cashError}` };
+      const updateCost = db.prepare('UPDATE return_order_items SET cost_price_snapshot = ? WHERE id = ?');
+      for (const item of items) updateCost.run(item.cost_price_snapshot, item.id);
     }
     const upsertInv = db.prepare(`
       INSERT INTO inventory (product_id, warehouse_id, quantity) VALUES (?,?,?)
@@ -520,53 +561,57 @@ router.post('/returns/approve/:id', requireLogin, (req, res) => {
       insertTxn.run(it.product_id, order.warehouse_id, it.base_quantity, order.id, req.session.user.id);
     }
     db.prepare("UPDATE return_orders SET status = 'approved' WHERE id = ?").run(order.id);
-  });
-  tx();
-  if (approvalError) return res.status(400).send(`审核失败：${approvalError}`);
 
-  res.redirect('/returns/' + order.id);
+    return { redirect: '/returns/' + order.id };
+  });
 });
 
 router.post('/returns/reject/:id', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  if (req.session.user.role !== 'admin') return res.status(403).send('无权限');
-  const order = db.prepare('SELECT * FROM return_orders WHERE id = ?').get(req.params.id);
-  if (!order) return res.status(404).send('单据不存在');
-  if (order.status !== 'submitted') return res.status(400).send('只有待审核状态可以拒绝');
-  db.prepare("UPDATE return_orders SET status = 'rejected' WHERE id = ?").run(order.id);
-  res.redirect('/returns/' + order.id);
+  return completeTransaction(req, res, () => {
+    if (req.session.user.role !== 'admin') return { status: 403, error: '无权限' };
+    const order = db.prepare('SELECT * FROM return_orders WHERE id = ?').get(req.params.id);
+    if (!order) return { status: 404, error: '单据不存在' };
+    if (order.status !== 'submitted') return { status: 400, error: '只有待审核状态可以拒绝' };
+    db.prepare("UPDATE return_orders SET status = 'rejected' WHERE id = ?").run(order.id);
+    return { redirect: '/returns/' + order.id };
+  });
 });
 
 // 反审核：approved/rejected -> submitted。如果原本是 approved，要把加回去的库存再扣回来——
 // 扣之前先确认库存够不够，万一这批退回来的货已经又被卖出去了，硬扣会拉成负库存。
 router.post('/returns/unapprove/:id', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  if (req.session.user.role !== 'admin') return res.status(403).send('无权限');
-  const order = db.prepare('SELECT * FROM return_orders WHERE id = ?').get(req.params.id);
-  if (!order) return res.status(404).send('单据不存在');
-  if (order.status !== 'approved' && order.status !== 'rejected') {
-    return res.status(400).send('只有已审核或已拒绝状态可以反审核');
-  }
+  return completeTransaction(req, res, () => {
+    if (req.session.user.role !== 'admin') return { status: 403, error: '无权限' };
+    const order = db.prepare('SELECT * FROM return_orders WHERE id = ?').get(req.params.id);
+    if (!order) return { status: 404, error: '单据不存在' };
+    if (order.status !== 'approved' && order.status !== 'rejected') {
+      return { status: 400, error: '只有已审核或已拒绝状态可以反审核' };
+    }
 
-  const items = order.status === 'approved'
-    ? db.prepare('SELECT * FROM return_order_items WHERE return_order_id = ?').all(order.id)
-    : [];
-  if (order.status === 'approved') {
-    const getInv = db.prepare('SELECT quantity FROM inventory WHERE product_id=? AND warehouse_id=?');
-    for (const it of items) {
-      const inv = getInv.get(it.product_id, order.warehouse_id);
-      const have = inv ? inv.quantity : 0;
-      if (have < it.base_quantity) {
-        const p = db.prepare('SELECT name FROM products WHERE id=?').get(it.product_id);
-        return res.status(400).send(
-          `反审核失败：${p ? p.name : '商品'} 当前库存 ${have}，不足以扣回 ${it.base_quantity}` +
-          `（说明这批退货已经又被卖出去了），请先处理相关销售单再反审核这张退货单。`
-        );
+    if (order.status === 'approved' && order.refunded_amount > 0) {
+      return { status: 400, error: '该退货单已经退过现金，不能直接反审核。请先核对退款，避免账务记录失效。' };
+    }
+
+    const items = order.status === 'approved'
+      ? db.prepare('SELECT * FROM return_order_items WHERE return_order_id = ?').all(order.id)
+      : [];
+    if (order.status === 'approved') {
+      const getInv = db.prepare('SELECT quantity FROM inventory WHERE product_id=? AND warehouse_id=?');
+      for (const it of items) {
+        const inv = getInv.get(it.product_id, order.warehouse_id);
+        const have = inv ? inv.quantity : 0;
+        if (have < it.base_quantity) {
+          const p = db.prepare('SELECT name FROM products WHERE id=?').get(it.product_id);
+          return { status: 400, error:
+            `反审核失败：${p ? p.name : '商品'} 当前库存 ${have}，不足以扣回 ${it.base_quantity}` +
+            `（说明这批退货已经又被卖出去了），请先处理相关销售单再反审核这张退货单。`
+           };
+        }
       }
     }
-  }
 
-  const tx = db.transaction(() => {
     if (order.status === 'approved') {
       const decInv = db.prepare('UPDATE inventory SET quantity = quantity - ? WHERE product_id=? AND warehouse_id=?');
       // type 用 adjust 而不是沿用 sale_return：这笔流水 change_qty 是负数（把加回的扣回去），
@@ -581,21 +626,20 @@ router.post('/returns/unapprove/:id', requireLogin, (req, res) => {
       }
     }
     db.prepare("UPDATE return_orders SET status = 'submitted' WHERE id = ?").run(order.id);
-  });
-  tx();
 
-  res.redirect('/returns/' + order.id);
+    return { redirect: '/returns/' + order.id };
+  });
 });
 
 // 记录退款：与销售单的 record-payment 对称。之前 refunded_amount 只能在建单/编辑草稿时填，
 // 已审核的退货单之后再退钱就没地方记了，报表的"已退款"口径也永远停在旧值。
 // 只更新 refunded_amount / refund_status，不碰审核状态、不碰库存。
 // 只允许对已审核的退货单操作：钱对应的是已经确认入库的那批货。
-router.post('/returns/:id/record-refund', requireLogin, (req, res) => {
+router.post('/returns/:id/record-refund', requireLogin, requireMutationKey, (req, res) => {
   const db = req.tenantDb;
   if (req.session.user.role !== 'admin') return res.status(403).send('无权限，只有管理员能记录退款');
   // 先拿写锁，再读取累计退款；金额更新和审计日志一起提交或回滚。
-  const result = db.transaction(() => {
+  return completeMutation(req, res, () => {
     const order = db.prepare('SELECT * FROM return_orders WHERE id = ?').get(req.params.id);
     if (!order) return { status: 404, error: '单据不存在' };
     if (order.status !== 'approved') {
@@ -608,9 +652,16 @@ router.post('/returns/:id/record-refund', requireLogin, (req, res) => {
     if (!(amount > 0)) return { status: 400, error: '退款金额四舍五入到分后必须大于 0' };
 
     // 退款累计不能超过退货总额（与 record-payment 的封顶逻辑对称，允许 0.001 浮点误差）
-    const remaining = order.total_amount - (order.refunded_amount || 0);
+    let remaining = order.total_amount - (order.refunded_amount || 0);
+    if (order.related_sales_order_id) {
+      const sale = getSalePayment(db, order.related_sales_order_id);
+      if (!sale || sale.status !== 'approved') return { status: 400, error: '关联销售单未审核，不能记录退款' };
+      remaining = Math.min(remaining, sale.pending_refund);
+    }
     if (remaining <= 0.001) {
-      return { status: 400, error: `该单已退满（已退 ¥${(order.refunded_amount || 0).toFixed(2)} / 总额 ¥${order.total_amount.toFixed(2)}），无需再记退款` };
+      return { status: 400, error: order.related_sales_order_id
+        ? '该单当前无可退现金，退货已抵扣欠款或现金已退满，无需再记退款'
+        : `该单已退满（已退 ¥${(order.refunded_amount || 0).toFixed(2)} / 总额 ¥${order.total_amount.toFixed(2)}），无需再记退款` };
     }
     if (amount > remaining + 0.001) {
       return { status: 400, error: `退款金额（¥${amount.toFixed(2)}）超过该单剩余未退金额（¥${remaining.toFixed(2)}），最多还能退 ¥${remaining.toFixed(2)}` };
@@ -624,10 +675,8 @@ router.post('/returns/:id/record-refund', requireLogin, (req, res) => {
     db.prepare('UPDATE return_orders SET refunded_amount = ?, refund_status = ? WHERE id = ?')
       .run(newRefunded, refundStatus, order.id);
     writeAuditLog(db, req.session.user, '记录退货退款', '退货单', order.id, `本次退款 ¥${amount.toFixed(2)}，累计 ¥${newRefunded.toFixed(2)}`);
-    return { orderId: order.id };
-  }).immediate();
-  if (result.error) return res.status(result.status).send(result.error);
-  res.redirect('/returns/' + result.orderId);
+    return { redirect: '/returns/' + order.id };
+  });
 });
 
 router.get('/returns/:id', requireLogin, (req, res) => {
@@ -649,7 +698,9 @@ router.get('/returns/:id', requireLogin, (req, res) => {
     JOIN products p ON p.id = roi.product_id
     WHERE roi.return_order_id = ?
   `).all(req.params.id);
-  res.render('return_detail', { order, items, canManage: canEditOrWithdraw(order, req.session.user), created: req.query.created === order.status ? order.status : null });
+  const linkedSale = order.related_sales_order_id ? getSalePayment(db, order.related_sales_order_id) : null;
+  const refundableAmount = Math.max(0, Math.min(order.total_amount - (order.refunded_amount || 0), linkedSale ? linkedSale.pending_refund : Infinity));
+  res.render('return_detail', { linkedSale, refundableAmount, order, items, canManage: canEditOrWithdraw(order, req.session.user), created: req.query.created === order.status ? order.status : null });
 });
 
 module.exports = router;

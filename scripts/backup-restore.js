@@ -19,8 +19,8 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
-const Database = require('better-sqlite3');
-const { decryptFile, getEncryptionKey } = require('../lib/backupManager');
+const { pipeline } = require('stream/promises');
+const { decryptFile, getEncryptionKey, verifyDatabase } = require('../lib/backupManager');
 
 async function main() {
   const [srcArg, outDirArg] = process.argv.slice(2);
@@ -41,30 +41,22 @@ async function main() {
 
   // demo_2026-09-09.db.gz.enc -> demo_2026-09-09.db
   const baseName = path.basename(src).replace(/\.db\.gz(\.enc)?$/i, '');
-  const decGz = path.join(outDir, `${baseName}.restore.db.gz`);
   const outDb = path.join(outDir, `${baseName}.restore.db`);
+  if (fs.existsSync(outDb)) throw new Error(`输出文件已存在，拒绝覆盖：${outDb}`);
+  const tmpDir = fs.mkdtempSync(path.join(outDir, '.restore-'));
+  try {
+    const decGz = path.join(tmpDir, 'snapshot.gz');
+    const candidate = path.join(tmpDir, 'snapshot.db');
+    console.log(`[restore] 解密 ${path.basename(src)} ...`);
+    await decryptFile(src, decGz, key);
+    await pipeline(fs.createReadStream(decGz), zlib.createGunzip(), fs.createWriteStream(candidate, { mode: 0o600 }));
+    const tables = verifyDatabase(candidate);
+    fs.linkSync(candidate, outDb); // 校验成功后发布；目标文件存在时仍拒绝覆盖
+    console.log('[restore] SQLite 完整性及外键检查通过');
+    console.log(`[restore] 包含数据表：${tables.join(', ')}`);
+    console.log(`[restore] 完成，已还原到：${outDb}`);
+  } finally { fs.rmSync(tmpDir, { recursive: true, force: true }); }
 
-  console.log(`[restore] 解密 ${path.basename(src)} ...`);
-  await decryptFile(src, decGz, key);
-
-  console.log('[restore] 解压 gzip ...');
-  const dbBuf = zlib.gunzipSync(fs.readFileSync(decGz));
-  fs.writeFileSync(outDb, dbBuf);
-  fs.unlinkSync(decGz);
-
-  console.log('[restore] 校验 SQLite 完整性 ...');
-  const db = new Database(outDb, { readonly: true });
-  const integrity = db.pragma('integrity_check', { simple: true });
-  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map(r => r.name);
-  db.close();
-
-  console.log(`[restore] integrity_check: ${integrity}`);
-  console.log(`[restore] 包含数据表：${tables.join(', ')}`);
-  if (integrity !== 'ok') {
-    console.error('[restore] 完整性检查未通过！请检查快照文件是否完整、密钥是否正确');
-    process.exit(1);
-  }
-  console.log(`[restore] 完成，已还原到：${outDb}`);
 }
 
 main().catch(err => {

@@ -3,6 +3,7 @@
 <div class="card">
   <% if (error) { %><div class="error"><%= error %></div><% } %>
   <form method="POST" action="/purchases/new">
+    <input type="hidden" name="_request_key" value="<%= typeof formValues !== 'undefined' && formValues && formValues._request_key ? formValues._request_key : newRequestKey() %>">
     <div class="grid-3">
       <div class="form-row">
         <label>供应商（可选）</label>

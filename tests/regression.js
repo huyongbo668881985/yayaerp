@@ -24,7 +24,7 @@ let FAILS = 0, PASSES = 0;
 function ok(c, m) { if (c) { PASSES++; console.log('  PASS  ' + m); } else { FAILS++; console.log('  FAIL  ' + m); } }
 function section(t) { console.log('\n=== ' + t + ' ==='); }
 const enc = encodeURIComponent;
-const f = (o) => Object.entries(o).map(([k, v]) => enc(k) + '=' + enc(v)).join('&');
+const f = (o) => Object.entries({ _request_key: crypto.randomUUID(), ...o }).map(([k, v]) => enc(k) + '=' + enc(v)).join('&');
 
 function getFreePort() {
   return new Promise((resolve, reject) => {
@@ -236,7 +236,7 @@ function latestIdInList(html, pattern) {
   ok(invOf(invh, '啤酒A') === 200 && invOf(invh, '赠品C') === 45, '审核后 啤酒A 200 / 赠品C 45');
   r = await A.raw('/sales/' + so1);
   ok(r.text.includes('2400'), '销售单1 总额 2400');
-  ok(r.text.includes('部分收款'), '销售单1 部分收款');
+  ok(r.text.includes('部分结算'), '销售单1 部分结算');
   ok(r.text.includes('赠品'), '销售单1 含赠品行');
 
   r = await A.raw(`/sales/unapprove/${so1}`, { body: f({ _: '1' }) });

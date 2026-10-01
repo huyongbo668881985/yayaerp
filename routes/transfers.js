@@ -1,4 +1,5 @@
 const express = require('express');
+const { requireMutationKey, completeMutation, completeTransaction } = require('../lib/mutation');
 const { requireLogin } = require('../middleware/auth');
 const { todayLocalDate } = require('../utils/dates');
 const { isBlank, isValidDateString } = require('../lib/validators');
@@ -78,7 +79,7 @@ router.get('/transfers/new', requireLogin, (req, res) => {
   res.render('transfer_form', { warehouses, products, error: null, order: null, existingItems: [], today: todayLocalDate() });
 });
 
-router.post('/transfers/new', requireLogin, (req, res) => {
+router.post('/transfers/new', requireLogin, requireMutationKey, (req, res) => {
   const db = req.tenantDb;
   const { from_warehouse_id, to_warehouse_id, order_date, note, remarks } = req.body;
 
@@ -107,7 +108,7 @@ router.post('/transfers/new', requireLogin, (req, res) => {
   // 草稿/待审核阶段不动库存
   // 点"存草稿"按钮会带 save_draft=1 → 存为 draft，之后在详情页继续编辑/提交审核
   const status = (req.body.save_draft === '1' || req.body.save_draft === 'on') ? 'draft' : 'submitted';
-  const tx = db.transaction(() => {
+  return completeMutation(req, res, () => {
     const info = db.prepare(
       `INSERT INTO transfer_orders (from_warehouse_id, to_warehouse_id, user_id, order_date, note, status, remarks)
        VALUES (?,?,?,?,?,?,?)`
@@ -117,11 +118,8 @@ router.post('/transfers/new', requireLogin, (req, res) => {
     for (const it of items) {
       insertItem.run(toId, it.pid, it.qty, it.unitLabel, it.baseQty);
     }
-    return toId;
+    return { redirect: `/transfers/${toId}?created=${status}` };
   });
-  const toId = tx();
-
-  res.redirect(`/transfers/${toId}?created=${status}`);
 });
 
 // 编辑草稿单
@@ -187,52 +185,56 @@ router.post('/transfers/:id/edit', requireLogin, (req, res) => {
 // 提交审核：draft -> submitted
 router.post('/transfers/submit/:id', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  const order = db.prepare('SELECT * FROM transfer_orders WHERE id = ?').get(req.params.id);
-  if (!order) return res.status(404).send('单据不存在');
-  if (order.status !== 'draft') return res.status(400).send('只有草稿状态可以提交审核');
-  if (!canAccessTransfer(db, order, req.session.user)) return res.status(403).send('无权限');
-  db.prepare("UPDATE transfer_orders SET status = 'submitted' WHERE id = ?").run(order.id);
-  res.redirect('/transfers/' + order.id);
+  return completeTransaction(req, res, () => {
+    const order = db.prepare('SELECT * FROM transfer_orders WHERE id = ?').get(req.params.id);
+    if (!order) return { status: 404, error: '单据不存在' };
+    if (order.status !== 'draft') return { status: 400, error: '只有草稿状态可以提交审核' };
+    if (!canAccessTransfer(db, order, req.session.user)) return { status: 403, error: '无权限' };
+    db.prepare("UPDATE transfer_orders SET status = 'submitted' WHERE id = ?").run(order.id);
+    return { redirect: '/transfers/' + order.id };
+  });
 });
 
 // 撤回：submitted -> draft
 router.post('/transfers/withdraw/:id', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  const order = db.prepare('SELECT * FROM transfer_orders WHERE id = ?').get(req.params.id);
-  if (!order) return res.status(404).send('单据不存在');
-  if (order.status !== 'submitted') return res.status(400).send('只有待审核状态可以撤回');
-  if (!canAccessTransfer(db, order, req.session.user)) return res.status(403).send('无权限撤回他人的调拨单');
-  db.prepare("UPDATE transfer_orders SET status = 'draft' WHERE id = ?").run(order.id);
-  res.redirect('/transfers/' + order.id);
+  return completeTransaction(req, res, () => {
+    const order = db.prepare('SELECT * FROM transfer_orders WHERE id = ?').get(req.params.id);
+    if (!order) return { status: 404, error: '单据不存在' };
+    if (order.status !== 'submitted') return { status: 400, error: '只有待审核状态可以撤回' };
+    if (!canAccessTransfer(db, order, req.session.user)) return { status: 403, error: '无权限撤回他人的调拨单' };
+    db.prepare("UPDATE transfer_orders SET status = 'draft' WHERE id = ?").run(order.id);
+    return { redirect: '/transfers/' + order.id };
+  });
 });
 
 // 审核通过：submitted -> approved（这里才真正执行库存调拨，先重新校验调出仓库库存是否充足）
 router.post('/transfers/approve/:id', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  if (req.session.user.role !== 'admin') return res.status(403).send('无权限');
-  const order = db.prepare('SELECT * FROM transfer_orders WHERE id = ?').get(req.params.id);
-  if (!order) return res.status(404).send('单据不存在');
-  if (order.status !== 'submitted') return res.status(400).send('只有待审核状态可以审核通过');
+  return completeTransaction(req, res, () => {
+    if (req.session.user.role !== 'admin') return { status: 403, error: '无权限' };
+    const order = db.prepare('SELECT * FROM transfer_orders WHERE id = ?').get(req.params.id);
+    if (!order) return { status: 404, error: '单据不存在' };
+    if (order.status !== 'submitted') return { status: 400, error: '只有待审核状态可以审核通过' };
 
-  const items = db.prepare('SELECT * FROM transfer_order_items WHERE transfer_order_id = ?').all(order.id);
+    const items = db.prepare('SELECT * FROM transfer_order_items WHERE transfer_order_id = ?').all(order.id);
 
-  // 库存校验按商品汇总后再比（与 sales.js 同理）：同一商品拆多行时逐行检查都会通过，
-  // 事务里才扣成负数，报错变成全局兑底的泛化提示。
-  const needed = new Map(); // product_id -> 调出总量（基础单位）
-  for (const it of items) {
-    needed.set(it.product_id, (needed.get(it.product_id) || 0) + it.base_quantity);
-  }
-  const getInv = db.prepare('SELECT quantity FROM inventory WHERE product_id=? AND warehouse_id=?');
-  for (const [pid, totalQty] of needed) {
-    const inv = getInv.get(pid, order.from_warehouse_id);
-    const have = inv ? inv.quantity : 0;
-    if (have < totalQty) {
-      const p = db.prepare('SELECT name FROM products WHERE id=?').get(pid);
-      return res.status(400).send(`审核失败：${p ? p.name : '商品'} 调出仓库当前库存 ${have}，不足以调出合计 ${totalQty}`);
+    // 库存校验按商品汇总后再比（与 sales.js 同理）：同一商品拆多行时逐行检查都会通过，
+    // 事务里才扣成负数，报错变成全局兑底的泛化提示。
+    const needed = new Map(); // product_id -> 调出总量（基础单位）
+    for (const it of items) {
+      needed.set(it.product_id, (needed.get(it.product_id) || 0) + it.base_quantity);
     }
-  }
+    const getInv = db.prepare('SELECT quantity FROM inventory WHERE product_id=? AND warehouse_id=?');
+    for (const [pid, totalQty] of needed) {
+      const inv = getInv.get(pid, order.from_warehouse_id);
+      const have = inv ? inv.quantity : 0;
+      if (have < totalQty) {
+        const p = db.prepare('SELECT name FROM products WHERE id=?').get(pid);
+        return { status: 400, error: `审核失败：${p ? p.name : '商品'} 调出仓库当前库存 ${have}，不足以调出合计 ${totalQty}` };
+      }
+    }
 
-  const tx = db.transaction(() => {
     const decInv = db.prepare('UPDATE inventory SET quantity = quantity - ? WHERE product_id=? AND warehouse_id=?');
     const upsertInv = db.prepare(`
       INSERT INTO inventory (product_id, warehouse_id, quantity) VALUES (?,?,?)
@@ -253,54 +255,55 @@ router.post('/transfers/approve/:id', requireLogin, (req, res) => {
       insertTxnIn.run(it.product_id, order.to_warehouse_id, it.base_quantity, order.id, req.session.user.id);
     }
     db.prepare("UPDATE transfer_orders SET status = 'approved' WHERE id = ?").run(order.id);
-  });
-  tx();
 
-  res.redirect('/transfers/' + order.id);
+    return { redirect: '/transfers/' + order.id };
+  });
 });
 
 // 审核拒绝：submitted -> rejected
 router.post('/transfers/reject/:id', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  if (req.session.user.role !== 'admin') return res.status(403).send('无权限');
-  const order = db.prepare('SELECT * FROM transfer_orders WHERE id = ?').get(req.params.id);
-  if (!order) return res.status(404).send('单据不存在');
-  if (order.status !== 'submitted') return res.status(400).send('只有待审核状态可以拒绝');
-  db.prepare("UPDATE transfer_orders SET status = 'rejected' WHERE id = ?").run(order.id);
-  res.redirect('/transfers/' + order.id);
+  return completeTransaction(req, res, () => {
+    if (req.session.user.role !== 'admin') return { status: 403, error: '无权限' };
+    const order = db.prepare('SELECT * FROM transfer_orders WHERE id = ?').get(req.params.id);
+    if (!order) return { status: 404, error: '单据不存在' };
+    if (order.status !== 'submitted') return { status: 400, error: '只有待审核状态可以拒绝' };
+    db.prepare("UPDATE transfer_orders SET status = 'rejected' WHERE id = ?").run(order.id);
+    return { redirect: '/transfers/' + order.id };
+  });
 });
 
 // 反审核：approved/rejected -> submitted（approved 需要把调拨的库存退回去）
 router.post('/transfers/unapprove/:id', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  if (req.session.user.role !== 'admin') return res.status(403).send('无权限');
-  const order = db.prepare('SELECT * FROM transfer_orders WHERE id = ?').get(req.params.id);
-  if (!order) return res.status(404).send('单据不存在');
-  if (order.status !== 'approved' && order.status !== 'rejected') {
-    return res.status(400).send('只有已审核或已拒绝状态可以反审核');
-  }
+  return completeTransaction(req, res, () => {
+    if (req.session.user.role !== 'admin') return { status: 403, error: '无权限' };
+    const order = db.prepare('SELECT * FROM transfer_orders WHERE id = ?').get(req.params.id);
+    if (!order) return { status: 404, error: '单据不存在' };
+    if (order.status !== 'approved' && order.status !== 'rejected') {
+      return { status: 400, error: '只有已审核或已拒绝状态可以反审核' };
+    }
 
-  // 已审核的单子要把库存退回去；退之前先确认调入仓库还有没有这么多货
-  // （如果这批货已经在调入仓库被卖掉/再调走了一部分，硬退会把库存拉成负数）
-  const items = order.status === 'approved'
-    ? db.prepare('SELECT * FROM transfer_order_items WHERE transfer_order_id = ?').all(order.id)
-    : [];
-  if (order.status === 'approved') {
-    const getInv = db.prepare('SELECT quantity FROM inventory WHERE product_id=? AND warehouse_id=?');
-    for (const it of items) {
-      const inv = getInv.get(it.product_id, order.to_warehouse_id);
-      const have = inv ? inv.quantity : 0;
-      if (have < it.base_quantity) {
-        const p = db.prepare('SELECT name FROM products WHERE id=?').get(it.product_id);
-        return res.status(400).send(
-          `反审核失败：${p ? p.name : '商品'} 在调入仓库当前库存 ${have}，不足以退回 ${it.base_quantity}` +
-          `（说明这批货已经被销售或再次调走了一部分），请先处理相关的销售/调拨单再反审核这张调拨单。`
-        );
+    // 已审核的单子要把库存退回去；退之前先确认调入仓库还有没有这么多货
+    // （如果这批货已经在调入仓库被卖掉/再调走了一部分，硬退会把库存拉成负数）
+    const items = order.status === 'approved'
+      ? db.prepare('SELECT * FROM transfer_order_items WHERE transfer_order_id = ?').all(order.id)
+      : [];
+    if (order.status === 'approved') {
+      const getInv = db.prepare('SELECT quantity FROM inventory WHERE product_id=? AND warehouse_id=?');
+      for (const it of items) {
+        const inv = getInv.get(it.product_id, order.to_warehouse_id);
+        const have = inv ? inv.quantity : 0;
+        if (have < it.base_quantity) {
+          const p = db.prepare('SELECT name FROM products WHERE id=?').get(it.product_id);
+          return { status: 400, error:
+            `反审核失败：${p ? p.name : '商品'} 在调入仓库当前库存 ${have}，不足以退回 ${it.base_quantity}` +
+            `（说明这批货已经被销售或再次调走了一部分），请先处理相关的销售/调拨单再反审核这张调拨单。`
+           };
+        }
       }
     }
-  }
 
-  const tx = db.transaction(() => {
     if (order.status === 'approved') {
       const upsertInv = db.prepare(`
         INSERT INTO inventory (product_id, warehouse_id, quantity) VALUES (?,?,?)
@@ -324,10 +327,9 @@ router.post('/transfers/unapprove/:id', requireLogin, (req, res) => {
       }
     }
     db.prepare("UPDATE transfer_orders SET status = 'submitted' WHERE id = ?").run(order.id);
-  });
-  tx();
 
-  res.redirect('/transfers/' + order.id);
+    return { redirect: '/transfers/' + order.id };
+  });
 });
 
 router.get('/transfers/:id', requireLogin, (req, res) => {

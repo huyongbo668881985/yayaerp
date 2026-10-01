@@ -15,7 +15,7 @@
     <p><strong>关联销售单：</strong><a href="/sales/<%= order.related_sales_order_id %>">#<%= order.related_sales_order_id %></a>（<%= order.status === 'approved' ? '原单应收已扣减这次退货' : '审核通过后才会扣减原单应收' %>）</p>
   <% } %>
   <div class="detail-status-list">
-    <div><span>退款状态</span>
+    <div><span>现金退款状态</span>
     <% if (order.refund_status === 'refunded') { %>
       <span class="badge" style="background:#dcfce7;color:#166534">已退款</span>
     <% } else if (order.refund_status === 'partial') { %>
@@ -42,8 +42,9 @@
     <% } %>
   <div class="detail-finance-grid">
     <div><span>已退现金</span><strong>¥<%= (order.refunded_amount || 0).toFixed(2) %></strong></div>
-    <div><span>还差</span><strong class="detail-owing">¥<%= (order.total_amount - (order.refunded_amount || 0)).toFixed(2) %></strong></div>
+    <div><span><%= linkedSale ? '当前可退现金' : '待退现金' %></span><strong class="detail-owing">¥<%= refundableAmount.toFixed(2) %></strong></div>
   </div>
+  <% if (linkedSale) { %><p class="detail-state-note">关联退货先抵扣原单欠款，仅多收部分可退现金。原单当前欠款 ¥<%= linkedSale.effective_debt.toFixed(2) %>，待退现金 ¥<%= linkedSale.pending_refund.toFixed(2) %>。</p><% } %>
   <h2 class="detail-section-heading">退货商品</h2>
   <table class="detail-items-table">
     <tr><th>商品</th><th>数量</th><th>单价</th><th>小计</th></tr>
@@ -92,9 +93,10 @@
       </form>
     <% } %>
 
-    <% const refundRemaining = order.total_amount - (order.refunded_amount || 0); %>
+    <% const refundRemaining = refundableAmount; %>
     <% if (order.status === 'approved' && currentUser.role === 'admin' && refundRemaining > 0.001) { %>
       <form action="/returns/<%= order.id %>/record-refund" method="POST" style="display:flex; gap:6px; align-items:center">
+        <input type="hidden" name="_request_key" value="<%= newRequestKey() %>">
         <input type="number" name="amount" placeholder="本次退款金额" step="0.01" min="0.01" max="<%= refundRemaining.toFixed(2) %>" required style="width:140px">
         <button type="submit" class="btn btn-danger">记录退款</button>
       </form>

@@ -2,13 +2,13 @@ const express = require('express');
 const { requireLogin } = require('../middleware/auth');
 const { todayLocalDate } = require('../utils/dates');
 const {
-  profitOfPeriod, returnedAmountSubquery, effectiveDebtExpr, SETTLE_EPSILON
+  profitOfPeriod, returnedAmountSubquery, refundedAmountSubquery, attachEffectivePayment, effectiveDebtExpr
 } = require('../lib/profitCalc');
 const router = express.Router();
 
 // 统计口径说明（与经营报表 /reports 保持一致）：
 //   销售额 = 已审核销售单（按销售单日期）− 已审核退货单（按退货单日期）
-//   总欠款 = Σ max(0, 销售单金额 − 已收款 − 该单关联的已审核退货金额)
+//   总欠款 = Σ max(0, 销售单金额 − 已收款 − 该单关联的已审核退货金额 + 已退现金)
 //   毛利（仅管理员）= 明细行成本快照计算，只算已审核 + 有效欠款已结清的订单
 // 操作员登录时只统计自己名下的数据。
 
@@ -17,21 +17,12 @@ const router = express.Router();
 // 这里只是按本地 SQL 别名（销售单一律用 so）取一份，不再自己写第二遍定义。
 const RETURNED_AMOUNT_SUBQUERY = returnedAmountSubquery('so');
 
-// 有效欠款表达式：金额 − 已收款 − 关联退货，负数（多收/超抵）不算欠款
+// 结算余额包含现金退款；只累计正余额为欠款，负余额为待退款。
 const EFFECTIVE_DEBT_EXPR = effectiveDebtExpr('so');
 
 // 给一行销售单补上"有效欠款 / 有效收款状态"（与 sales.js 的 attachEffectivePayment 同一套算法）。
 // 首页的收款状态徽章必须走这里，不能直接读 so.payment_status——
 // 那个是落库快照、不扣退货，和销售列表页/详情页显示的结果对不上。
-function attachEffectiveStatus(o) {
-  const effectiveDebt = o.total_amount - (o.paid_amount || 0) - (o.returned_amount || 0);
-  o.effective_status = effectiveDebt <= SETTLE_EPSILON
-    ? 'paid'
-    : ((o.paid_amount > 0 || o.returned_amount > 0) ? 'partial' : 'unpaid');
-  o.effective_debt = Math.max(0, effectiveDebt);
-  return o;
-}
-
 router.get('/', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const user = req.session.user;
@@ -94,7 +85,7 @@ router.get('/', requireLogin, (req, res) => {
 
   // 毛利：仅管理员可见。口径与经营报表"不含应收"完全一致（SQL 唯一实现在 lib/profitCalc.js，
   // 避免仪表盘/报表再次分叉）：
-  //   已审核 + 有效欠款已结清（金额 − 已收现金 − 关联已审核退货 ≤ 0.001）的销售毛利
+  //   已审核 + 有效欠款已结清（结算余额绝对值 ≤ 0.001）的销售毛利
   //   − 同区间"已结清"退货冲减毛利（退货按退货单日期归属；"已结清" = 已现金退款，
   //     或所关联销售单的有效欠款已结清，即退货抵掉了尾款）。
   // 结清判定一律现算、不读 payment_status（那是落库快照，追不上退货单的审核/反审核），
@@ -129,14 +120,14 @@ router.get('/', requireLogin, (req, res) => {
   // 一登录就能撞见两个不一样的结果（2026-09-08 修）。
   const recentSales = db.prepare(`
     SELECT so.id, so.order_date, so.total_amount, so.paid_amount, so.status,
-           ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount,
+           ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount, ${refundedAmountSubquery()} AS cash_refunded_amount,
            c.name AS customer_name, w.name AS warehouse_name
     FROM sales_orders so
     LEFT JOIN customers c ON c.id = so.customer_id
     LEFT JOIN warehouses w ON w.id = so.warehouse_id
     ${operatorFilter ? 'WHERE so.user_id = ?' : ''}
     ORDER BY so.id DESC LIMIT 5
-  `).all(...(operatorFilter ? [user.id] : [])).map(attachEffectiveStatus);
+  `).all(...(operatorFilter ? [user.id] : [])).map(attachEffectivePayment);
 
   res.render('dashboard', {
     todaySales, monthlySales, totalDebt, pendingOrders, todayProfit, monthlyProfit,

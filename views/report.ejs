@@ -76,9 +76,11 @@
         <td>¥<%= o.paid_amount.toFixed(2) %></td>
         <td>
           <% if (o.effective_status === 'paid') { %>
-            <span class="badge" style="background:#dcfce7;color:#166534">已收款</span>
-          <% } else if (o.effective_status === 'partial') { %>
-            <span class="badge" style="background:#fef3c7;color:#92400e">部分收款</span>
+            <span class="badge" style="background:#dcfce7;color:#166534">已结清</span>
+          <% } else if (o.effective_status === 'refund_pending') { %>
+      <span class="badge" style="background:#fef3c7;color:#92400e">待退款</span>
+      <% } else if (o.effective_status === 'partial') { %>
+            <span class="badge" style="background:#fef3c7;color:#92400e">部分结算</span>
           <% } else { %>
             <span class="badge" style="background:#fee2e2;color:#991b1b">未收款</span>
           <% } %>
@@ -96,9 +98,11 @@
       <div class="order-card-top">
         <span class="order-card-id">#<%= o.id %> <%= o.customer_name || '散客' %></span>
         <% if (o.effective_status === 'paid') { %>
-          <span class="badge" style="background:#dcfce7;color:#166534">已收款</span>
-        <% } else if (o.effective_status === 'partial') { %>
-          <span class="badge" style="background:#fef3c7;color:#92400e">部分收款</span>
+          <span class="badge" style="background:#dcfce7;color:#166534">已结清</span>
+        <% } else if (o.effective_status === 'refund_pending') { %>
+      <span class="badge" style="background:#fef3c7;color:#92400e">待退款</span>
+      <% } else if (o.effective_status === 'partial') { %>
+          <span class="badge" style="background:#fef3c7;color:#92400e">部分结算</span>
         <% } else { %>
           <span class="badge" style="background:#fee2e2;color:#991b1b">未收款</span>
         <% } %>
@@ -175,12 +179,10 @@
     <strong style="color:#1A1A17">统计口径说明</strong><br>
     · 只统计「已审核」的单据，草稿 / 待审核 / 已拒绝不计入。<br>
     · 销售额 = 区间内已审核销售单金额 − 区间内已审核退货单金额，各自按自己的单据日期归属到区间。<br>
-    · 应收金额 = 销售单金额 − 已收款 − 该单关联的已审核退货金额，只累计仍大于 0 的部分。<br>
-    · <strong style="color:#1A1A17">「不含应收」毛利的判定只看销售单的收款状态</strong>（状态为「已收款」才计入），
-      <strong style="color:#1A1A17">不把退货抵扣视作已结清</strong>——与首页仪表盘口径保持一致。
-      因此可能出现这种情况：某单已收完全款、之后又发生退货，列表里收款状态显示「部分收款」，但它的毛利仍计入「不含应收」。<br>
-    · 退货单审核通过后冲减当期毛利；「不含应收」口径下，只有已退款、或所关联销售单已收款的退货单才参与冲减。<br>
-    · 毛利用开单那一刻存下的成本快照计算，事后修改商品成本价不会改写历史毛利。
+    · 结算余额 = 销售单金额 − 已收现金 − 已审核关联退货 + 已退现金。正数为欠款，负数为待退款，零余额才算已结清。<br>
+    · 应收金额只累计正余额；「不含应收」毛利只计已结清销售单，现金收齐或退货抵扣均可结清。<br>
+    · 退货按退货日期冲减毛利；「不含应收」口径下，已退现金或关联销售单已结清的退货参与冲减。<br>
+    · 销售成本使用开单快照；关联退货按原销售单该商品的每基本单位加权成本冲回，独立退货使用自身成本快照。
   </p>
 </div>
 

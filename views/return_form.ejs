@@ -5,6 +5,7 @@
   <% if (error) { %><div class="error" role="alert"><%= error %></div><% } %>
   <% if (order) { %><p class="muted">编辑后仍是草稿状态，保存后需要重新点"提交审核"。</p><% } %>
   <form method="POST" action="<%= order ? '/returns/' + order.id + '/edit' : '/returns/new' %>" id="returnForm">
+    <input type="hidden" name="_request_key" value="<%= typeof formValues !== 'undefined' && formValues && formValues._request_key ? formValues._request_key : newRequestKey() %>">
     <h2 class="form-section-heading">基本信息</h2>
     <div class="grid-3">
       <div class="form-row">
@@ -33,7 +34,7 @@
         <div id="saleLookupResults" class="sale-lookup-results" hidden></div>
         <label for="relatedSaleId" style="margin-top:8px">关联单号</label>
         <input id="relatedSaleId" type="number" name="related_sales_order_id" placeholder="也可直接填写单号" value="<%= form.related_sales_order_id || '' %>">
-        <span class="muted" style="font-size:12px">退货审核通过后，原销售单的应收金额会自动扣减。</span>
+        <span class="muted" style="font-size:12px">关联退货沿用原单箱规和成本；退货先抵欠款，仅多收部分可退现金。</span>
       </div>
     </div>
 
@@ -120,7 +121,7 @@
   const PRODUCTS = <%- JSON.stringify(products).replace(/</g, '\\u003c') %>;
   const EXISTING_ITEMS = <%- JSON.stringify(typeof draftItems !== 'undefined' ? draftItems : (typeof existingItems !== 'undefined' ? existingItems : []).map(function(it) {
     const p = products.find(function(pr) { return pr.id === it.product_id; });
-    const isPack = p && p.pack_unit && it.unit_label === p.pack_unit;
+    const isPack = p && p.pack_unit && (it.base_quantity !== it.quantity || it.unit_label === p.pack_unit);
     return {
       id: it.product_id,
       quantity: it.quantity,

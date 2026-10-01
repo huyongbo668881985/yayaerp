@@ -57,7 +57,7 @@
     </div>
     <div class="form-row sales-unpaid-filter">
       <input type="checkbox" name="unpaid" value="1" id="unpaidCheck" <%= unpaidOnly ? 'checked' : '' %> style="width:auto">
-      <label for="unpaidCheck" style="margin:0">只看未结清（欠款）</label>
+      <label for="unpaidCheck" style="margin:0">只看未结清（欠款 / 待退款）</label>
     </div>
     <% if (pendingOnly) { %><input type="hidden" name="pending" value="1"><% } %>
     <% if (guestOnly) { %><input type="hidden" name="guest" value="1"><% } %>
@@ -100,14 +100,16 @@
         <td><%= o.warehouse_name %></td>
         <td>¥<%= o.total_amount.toFixed(2) %></td>
         <td>¥<%= (o.paid_amount || 0).toFixed(2) %></td>
-        <td><% if (o.status === 'approved') { %>¥<%= o.effective_debt.toFixed(2) %><% if (o.returned_amount > 0) { %><span class="muted" style="font-size:11px">（已扣退货¥<%= o.returned_amount.toFixed(2) %>）</span><% } %><% } else { %><span class="muted">审核后生效</span><% } %></td>
+        <td><% if (o.status === 'approved') { %>¥<%= o.effective_debt.toFixed(2) %><% if (o.pending_refund > 0) { %><span class="detail-owing">待退 ¥<%= o.pending_refund.toFixed(2) %></span><% } %><% if (o.returned_amount > 0) { %><span class="muted" style="font-size:11px">（退货¥<%= o.returned_amount.toFixed(2) %>，已退现金¥<%= o.cash_refunded_amount.toFixed(2) %>）</span><% } %><% } else { %><span class="muted">审核后生效</span><% } %></td>
         <td>
           <% if (o.status !== 'approved') { %>
             <span class="badge badge-muted">待生效</span>
           <% } else if (o.effective_status === 'paid') { %>
-            <span class="badge" style="background:#dcfce7;color:#166534">已收款</span>
-          <% } else if (o.effective_status === 'partial') { %>
-            <span class="badge" style="background:#fef3c7;color:#92400e">部分收款</span>
+            <span class="badge" style="background:#dcfce7;color:#166534">已结清</span>
+          <% } else if (o.effective_status === 'refund_pending') { %>
+      <span class="badge" style="background:#fef3c7;color:#92400e">待退款</span>
+      <% } else if (o.effective_status === 'partial') { %>
+            <span class="badge" style="background:#fef3c7;color:#92400e">部分结算</span>
           <% } else { %>
             <span class="badge" style="background:#fee2e2;color:#991b1b">未收款</span>
           <% } %>
@@ -167,8 +169,9 @@
        rejected:  { text: '已拒绝', bg: '#fee2e2', fg: '#991b1b' }
      };
      const paymentMap2 = {
-       paid:    { text: '已收款',   bg: '#dcfce7', fg: '#166534' },
-       partial: { text: '部分收款', bg: '#fef3c7', fg: '#92400e' },
+       refund_pending: { text: '待退款', bg: '#fef3c7', fg: '#92400e' },
+       paid:    { text: '已结清',   bg: '#dcfce7', fg: '#166534' },
+       partial: { text: '部分结算', bg: '#fef3c7', fg: '#92400e' },
        unpaid:  { text: '未收款',   bg: '#fee2e2', fg: '#991b1b' }
      };
   %>
@@ -188,6 +191,7 @@
         <span class="order-card-amount"><small>订单金额</small>¥<%= o.total_amount.toFixed(2) %></span>
         <span class="badge" style="background:<%= pt.bg %>;color:<%= pt.fg %>"><%= pt.text %></span>
       </div>
+      <% if (o.status === 'approved' && o.pending_refund > 0) { %><div class="order-card-debt">待退现金 ¥<%= o.pending_refund.toFixed(2) %></div><% } %>
       <% if (o.status === 'approved' && o.effective_debt > 0) { %>
         <div class="order-card-debt">欠款 ¥<%= o.effective_debt.toFixed(2) %></div>
       <% } %>
@@ -249,6 +253,7 @@
   }
 
   function selectSalesCustomer(option) {
+    salesCustomerSearch.setCustomValidity('');
     salesCustomerId.value = option.dataset.customerId;
     salesCustomerSearch.value = salesCustomerLabel(option);
     clearSalesCustomer.hidden = !salesCustomerId.value;
@@ -260,7 +265,13 @@
     openSalesCustomerPicker();
     if (salesCustomerId.value) salesCustomerSearch.select();
   });
-  salesCustomerSearch.addEventListener('input', openSalesCustomerPicker);
+  salesCustomerSearch.addEventListener('input', function() {
+    salesCustomerId.value = '';
+    clearSalesCustomer.hidden = !salesCustomerSearch.value;
+    salesCustomerOptions.forEach(function(option) { option.setAttribute('aria-selected', 'false'); });
+    salesCustomerSearch.setCustomValidity(salesCustomerSearch.value.trim() ? '请从搜索结果中选择客户，或清空搜索查看全部客户。' : '');
+    openSalesCustomerPicker();
+  });
   salesCustomerSearch.addEventListener('keydown', function(event) {
     const visibleOptions = salesCustomerOptions.filter(function(option) { return !option.hidden; });
     if (event.key === 'Escape') {
@@ -280,7 +291,9 @@
     }
     if (event.key === 'Enter') {
       event.preventDefault();
-      const option = visibleOptions[activeSalesCustomerOption] || visibleOptions[0];
+      const exactMatches = visibleOptions.filter(function(item) { return salesCustomerLabel(item) === salesCustomerSearch.value.trim(); });
+      const option = activeSalesCustomerOption >= 0 ? visibleOptions[activeSalesCustomerOption]
+        : exactMatches.length === 1 ? exactMatches[0] : visibleOptions.length === 1 ? visibleOptions[0] : null;
       if (option) selectSalesCustomer(option);
     }
   });
@@ -290,6 +303,7 @@
   clearSalesCustomer.addEventListener('click', function() {
     salesCustomerId.value = '';
     salesCustomerSearch.value = '';
+    salesCustomerSearch.setCustomValidity('');
     clearSalesCustomer.hidden = true;
     salesCustomerOptions.forEach(function(option) { option.setAttribute('aria-selected', 'false'); });
     openSalesCustomerPicker();
@@ -308,7 +322,7 @@
   document.querySelector('.sales-filter-form').addEventListener('submit', function(event) {
     if (document.activeElement !== salesCustomerSearch) return;
     event.preventDefault();
-    const option = salesCustomerOptions.find(function(item) { return !item.hidden; });
-    if (option) selectSalesCustomer(option);
+    openSalesCustomerPicker();
+    salesCustomerSearch.reportValidity();
   });
 </script>
