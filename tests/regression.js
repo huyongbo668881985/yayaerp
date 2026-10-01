@@ -550,6 +550,9 @@ function latestIdInList(html, pattern) {
   ok(r.status === 401, 'debt-trend: 无 Key 401');
   apiKeys.revokeApiKey(snapKey.id); // 临时 Key 用完即吊销
 
+  section('K. 收款/退款事务、并发与审计日志');
+  await require('./payment-refund-test').runPaymentRefundTests(ok);
+
   console.log('\n========================================');
   console.log(`PASS: ${PASSES}   FAIL: ${FAILS}`);
   console.log(FAILS === 0 ? '全部通过' : '存在失败项');

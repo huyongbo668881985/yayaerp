@@ -6,6 +6,7 @@ const { costSnapshotPerBaseUnit } = require('../lib/priceCalc');
 const { isBlank, isValidDateString, isValidNonNegativeAmount, roundToCents } = require('../lib/validators');
 const { warehousesForUser, isWarehouseInScope } = require('../lib/warehouseAccess');
 const { submittedItemsFromBody } = require('../lib/formDraft');
+const { writeAuditLog } = require('../lib/auditLog');
 const router = express.Router();
 
 // 状态机跟销售单一致：submitted --审核通过--> approved（这一步才真正把库存加回去）
@@ -593,34 +594,40 @@ router.post('/returns/unapprove/:id', requireLogin, (req, res) => {
 router.post('/returns/:id/record-refund', requireLogin, (req, res) => {
   const db = req.tenantDb;
   if (req.session.user.role !== 'admin') return res.status(403).send('无权限，只有管理员能记录退款');
-  const order = db.prepare('SELECT * FROM return_orders WHERE id = ?').get(req.params.id);
-  if (!order) return res.status(404).send('单据不存在');
-  if (order.status !== 'approved') {
-    return res.status(400).send('只有已审核的退货单可以记录退款');
-  }
+  // 先拿写锁，再读取累计退款；金额更新和审计日志一起提交或回滚。
+  const result = db.transaction(() => {
+    const order = db.prepare('SELECT * FROM return_orders WHERE id = ?').get(req.params.id);
+    if (!order) return { status: 404, error: '单据不存在' };
+    if (order.status !== 'approved') {
+      return { status: 400, error: '只有已审核的退货单可以记录退款' };
+    }
 
-  const amountRaw = Number(req.body.amount);
-  if (!Number.isFinite(amountRaw) || !(amountRaw > 0)) return res.status(400).send('退款金额必须是大于 0 的有效数字');
-  const amount = roundToCents(amountRaw);
-  if (!(amount > 0)) return res.status(400).send('退款金额四舍五入到分后必须大于 0');
+    const amountRaw = Number(req.body.amount);
+    if (!Number.isFinite(amountRaw) || !(amountRaw > 0)) return { status: 400, error: '退款金额必须是大于 0 的有效数字' };
+    const amount = roundToCents(amountRaw);
+    if (!(amount > 0)) return { status: 400, error: '退款金额四舍五入到分后必须大于 0' };
 
-  // 退款累计不能超过退货总额（与 record-payment 的封顶逻辑对称，允许 0.001 浮点误差）
-  const remaining = order.total_amount - (order.refunded_amount || 0);
-  if (remaining <= 0.001) {
-    return res.status(400).send(`该单已退满（已退 ¥${(order.refunded_amount || 0).toFixed(2)} / 总额 ¥${order.total_amount.toFixed(2)}），无需再记退款`);
-  }
-  if (amount > remaining + 0.001) {
-    return res.status(400).send(`退款金额（¥${amount.toFixed(2)}）超过该单剩余未退金额（¥${remaining.toFixed(2)}），最多还能退 ¥${remaining.toFixed(2)}`);
-  }
+    // 退款累计不能超过退货总额（与 record-payment 的封顶逻辑对称，允许 0.001 浮点误差）
+    const remaining = order.total_amount - (order.refunded_amount || 0);
+    if (remaining <= 0.001) {
+      return { status: 400, error: `该单已退满（已退 ¥${(order.refunded_amount || 0).toFixed(2)} / 总额 ¥${order.total_amount.toFixed(2)}），无需再记退款` };
+    }
+    if (amount > remaining + 0.001) {
+      return { status: 400, error: `退款金额（¥${amount.toFixed(2)}）超过该单剩余未退金额（¥${remaining.toFixed(2)}），最多还能退 ¥${remaining.toFixed(2)}` };
+    }
 
-  const newRefunded = roundToCents((order.refunded_amount || 0) + amount);
-  let refundStatus = 'unrefunded';
-  if (order.total_amount > 0 && newRefunded >= order.total_amount) refundStatus = 'refunded';
-  else if (newRefunded > 0) refundStatus = 'partial';
+    const newRefunded = roundToCents((order.refunded_amount || 0) + amount);
+    let refundStatus = 'unrefunded';
+    if (order.total_amount > 0 && newRefunded >= order.total_amount) refundStatus = 'refunded';
+    else if (newRefunded > 0) refundStatus = 'partial';
 
-  db.prepare('UPDATE return_orders SET refunded_amount = ?, refund_status = ? WHERE id = ?')
-    .run(newRefunded, refundStatus, order.id);
-  res.redirect('/returns/' + order.id);
+    db.prepare('UPDATE return_orders SET refunded_amount = ?, refund_status = ? WHERE id = ?')
+      .run(newRefunded, refundStatus, order.id);
+    writeAuditLog(db, req.session.user, '记录退货退款', '退货单', order.id, `本次退款 ¥${amount.toFixed(2)}，累计 ¥${newRefunded.toFixed(2)}`);
+    return { orderId: order.id };
+  }).immediate();
+  if (result.error) return res.status(result.status).send(result.error);
+  res.redirect('/returns/' + result.orderId);
 });
 
 router.get('/returns/:id', requireLogin, (req, res) => {

@@ -705,51 +705,56 @@ router.post('/sales/unapprove/:id', requireLogin, (req, res) => {
 router.post('/sales/:id/record-payment', requireLogin, (req, res) => {
   const db = req.tenantDb;
   if (req.session.user.role !== 'admin') return res.status(403).send('无权限，只有管理员能记录收款');
-  const order = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(req.params.id);
-  if (!order) return res.status(404).send('单据不存在');
-  if (order.status !== 'approved') {
-    return res.status(400).send('只有已审核的销售单可以记录收款');
-  }
+  // 先拿写锁，再读取订单和关联退货；跨实例收款必须基于前一笔已提交的累计值。
+  const result = db.transaction(() => {
+    const order = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(req.params.id);
+    if (!order) return { status: 404, error: '单据不存在' };
+    if (order.status !== 'approved') {
+      return { status: 400, error: '只有已审核的销售单可以记录收款' };
+    }
 
-  const amountRaw = Number(req.body.amount);
-  if (!Number.isFinite(amountRaw) || !(amountRaw > 0)) return res.status(400).send('收款金额必须是大于 0 的有效数字');
-  const amount = roundToCents(amountRaw);
-  if (!(amount > 0)) return res.status(400).send('收款金额四舍五入到分后必须大于 0');
+    const amountRaw = Number(req.body.amount);
+    if (!Number.isFinite(amountRaw) || !(amountRaw > 0)) return { status: 400, error: '收款金额必须是大于 0 的有效数字' };
+    const amount = roundToCents(amountRaw);
+    if (!(amount > 0)) return { status: 400, error: '收款金额四舍五入到分后必须大于 0' };
 
-  // 收款累计不能超过"有效欠款"：总额 − 已收 − 关联已审核退货（允许 0.001 浮点误差）。
-  // 必须与详情页展示的欠款（attachEffectivePayment 的 effective_debt）同一套算法：
-  // 页面欠款扣了退货、服务端封顶不扣的话，退货抵扣过的那部分钱还能再现金收一遍（双重收取）。
-  const returnedAmount = db.prepare(
-    `SELECT COALESCE(SUM(total_amount), 0) AS t FROM return_orders WHERE related_sales_order_id = ? AND status = 'approved'`
-  ).get(order.id).t;
-  const remaining = order.total_amount - (order.paid_amount || 0) - returnedAmount;
-  if (remaining <= 0.001) {
-    return res.status(400).send(
-      `该单有效欠款已结清（总额 ¥${order.total_amount.toFixed(2)}，已收 ¥${(order.paid_amount || 0).toFixed(2)}` +
-      `，已扣关联退货 ¥${returnedAmount.toFixed(2)}），无需再记收款`
-    );
-  }
-  if (amount > remaining + 0.001) {
-    return res.status(400).send(`收款金额（¥${amount.toFixed(2)}）超过该单剩余未收金额（¥${remaining.toFixed(2)}），最多还能收 ¥${remaining.toFixed(2)}`);
-  }
+    // 收款累计不能超过"有效欠款"：总额 − 已收 − 关联已审核退货（允许 0.001 浮点误差）。
+    // 必须与详情页展示的欠款（attachEffectivePayment 的 effective_debt）同一套算法：
+    // 页面欠款扣了退货、服务端封顶不扣的话，退货抵扣过的那部分钱还能再现金收一遍（双重收取）。
+    const returnedAmount = db.prepare(
+      `SELECT COALESCE(SUM(total_amount), 0) AS t FROM return_orders WHERE related_sales_order_id = ? AND status = 'approved'`
+    ).get(order.id).t;
+    const remaining = order.total_amount - (order.paid_amount || 0) - returnedAmount;
+    if (remaining <= 0.001) {
+      return { status: 400, error:
+        `该单有效欠款已结清（总额 ¥${order.total_amount.toFixed(2)}，已收 ¥${(order.paid_amount || 0).toFixed(2)}` +
+        `，已扣关联退货 ¥${returnedAmount.toFixed(2)}），无需再记收款`
+      };
+    }
+    if (amount > remaining + 0.001) {
+      return { status: 400, error: `收款金额（¥${amount.toFixed(2)}）超过该单剩余未收金额（¥${remaining.toFixed(2)}），最多还能收 ¥${remaining.toFixed(2)}` };
+    }
 
-  // payment_status 必须跟着 paid_amount 一起更新，不能只加金额不改状态
-  // （以前漏了这行，导致"建单时只收定金、后来补完全款"的单子状态永远停在 partial）。
-  //
-  // 注意它的语义（2026-09-08 明确）：这里只记**现金收款进度**——实收现金相对单据金额收了多少，
-  // 不做退货抵扣。真正的"是否已结清"一律由「有效欠款 = 金额 − 已收 − 关联已审核退货」现算，
-  // 见 lib/profitCalc.js 的 salesSettledExpr，列表页/详情页/首页/报表全部走那一套。
-  // 以前让 payment_status 兼职"结清判定"，落库快照追不上退货单的审核/反审核，
-  // 定金 + 退货抵扣结清的单子会永远停在 partial，两边对不上账。
-  const newPaid = roundToCents((order.paid_amount || 0) + amount);
-  let paymentStatus = 'unpaid';
-  if (order.total_amount > 0 && newPaid >= order.total_amount) paymentStatus = 'paid';
-  else if (newPaid > 0) paymentStatus = 'partial';
+    // payment_status 必须跟着 paid_amount 一起更新，不能只加金额不改状态
+    // （以前漏了这行，导致"建单时只收定金、后来补完全款"的单子状态永远停在 partial）。
+    //
+    // 注意它的语义（2026-09-08 明确）：这里只记**现金收款进度**——实收现金相对单据金额收了多少，
+    // 不做退货抵扣。真正的"是否已结清"一律由「有效欠款 = 金额 − 已收 − 关联已审核退货」现算，
+    // 见 lib/profitCalc.js 的 salesSettledExpr，列表页/详情页/首页/报表全部走那一套。
+    // 以前让 payment_status 兼职"结清判定"，落库快照追不上退货单的审核/反审核，
+    // 定金 + 退货抵扣结清的单子会永远停在 partial，两边对不上账。
+    const newPaid = roundToCents((order.paid_amount || 0) + amount);
+    let paymentStatus = 'unpaid';
+    if (order.total_amount > 0 && newPaid >= order.total_amount) paymentStatus = 'paid';
+    else if (newPaid > 0) paymentStatus = 'partial';
 
-  db.prepare('UPDATE sales_orders SET paid_amount = ?, payment_status = ? WHERE id = ?')
-    .run(newPaid, paymentStatus, order.id);
-  writeAuditLog(db, req.session.user, '记录销售收款', '销售单', order.id, `本次收款 ¥${amount.toFixed(2)}，累计 ¥${newPaid.toFixed(2)}`);
-  res.redirect('/sales/' + order.id);
+    db.prepare('UPDATE sales_orders SET paid_amount = ?, payment_status = ? WHERE id = ?')
+      .run(newPaid, paymentStatus, order.id);
+    writeAuditLog(db, req.session.user, '记录销售收款', '销售单', order.id, `本次收款 ¥${amount.toFixed(2)}，累计 ¥${newPaid.toFixed(2)}`);
+    return { orderId: order.id };
+  }).immediate();
+  if (result.error) return res.status(result.status).send(result.error);
+  res.redirect('/sales/' + result.orderId);
 });
 
 router.get('/sales/:id', requireLogin, (req, res) => {
