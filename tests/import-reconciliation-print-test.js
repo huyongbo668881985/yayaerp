@@ -21,6 +21,8 @@ const databases=['a','b'].map(code=>{
 let server,base,passes=0;
 const check=async(label,work)=>{await work();passes++;console.log('  PASS  '+label);};
 async function request(route,{body,user=1,tenant=0,multipart}={}){
+  if(body && /^\/returns\/approve\//.test(route))body={goods_received:'1',...body};
+  if(body && route.endsWith('/record-refund'))body={refund_reference:'测试实际退款凭据',...body};
   const response=await fetch(base+route,{method:body||multipart?'POST':'GET',redirect:'manual',headers:{'X-Test-User':String(user),'X-Test-Tenant':String(tenant),...(body?{'Content-Type':'application/x-www-form-urlencoded'}:{})},...(body?{body:new URLSearchParams(body)}:multipart?{body:multipart}:{})});
   const text=await response.text();let json;try{json=JSON.parse(text);}catch(_){}
   return {status:response.status,location:response.headers.get('location'),text,json,headers:response.headers};
@@ -164,7 +166,7 @@ const ledgerCount=db=>db.prepare('SELECT COUNT(*) n FROM customer_ledger').get()
     const data=statement(db,customerId,today,today);assert.equal(data.opening,10000);assert.equal(data.ending,8700);assert.equal(data.receivable,9500);assert.equal(data.refundPending,800);assert.equal(data.rows.length,3);assert.equal(data.totals.received,2500);assert.equal(data.rows.at(-1).balance_cents,8700);
   });
   await check('旧库升级仅结转已审核旧账，重复迁移不重复入账，不伪造历史日期',()=>{
-    const old=openTenantDbByPath(path.join(dir,'legacy.db'));old.exec("DELETE FROM schema_migrations WHERE version=12;DROP TABLE customer_ledger;DROP TABLE ledger_metadata;DROP TABLE import_batches;INSERT INTO users(username,password_hash,name,role) VALUES ('old','x','旧管理员','admin');INSERT INTO warehouses(name) VALUES ('旧仓');INSERT INTO customers(name) VALUES ('旧客户');INSERT INTO sales_orders(customer_id,warehouse_id,user_id,order_date,total_amount,paid_amount,status) VALUES (1,1,1,'2020-01-01',100,30,'approved'),(1,1,1,'2020-01-02',999,1,'draft');");initSchema(old);let rows=old.prepare('SELECT * FROM customer_ledger').all();assert.equal(rows.length,1);assert.equal(rows[0].event_date,today);assert.equal(rows[0].document_date,'2020-01-01');assert.equal(rows[0].event_kind,'升级结转');assert.equal(statement(old,1,today,today).ending,7000);
+    const old=openTenantDbByPath(path.join(dir,'legacy.db'));old.exec("DELETE FROM schema_migrations WHERE version>=12;DROP TABLE customer_ledger_accounts;DROP TABLE customer_ledger;DROP TABLE ledger_metadata;DROP TABLE import_batches;INSERT INTO users(username,password_hash,name,role) VALUES ('old','x','旧管理员','admin');INSERT INTO warehouses(name) VALUES ('旧仓');INSERT INTO customers(name) VALUES ('旧客户');INSERT INTO sales_orders(customer_id,warehouse_id,user_id,order_date,total_amount,paid_amount,status) VALUES (1,1,1,'2020-01-01',100,30,'approved'),(1,1,1,'2020-01-02',999,1,'draft');");initSchema(old);let rows=old.prepare('SELECT * FROM customer_ledger').all();assert.equal(rows.length,1);assert.equal(rows[0].event_date,today);assert.equal(rows[0].document_date,'2020-01-01');assert.equal(rows[0].event_kind,'升级结转');assert.equal(statement(old,1,today,today).ending,7000);
     old.exec('DELETE FROM schema_migrations WHERE version=12');initSchema(old);assert.equal(ledgerCount(old),1);old.close();
   });
   console.log(`导入、对账与打印回归：${passes} PASS / 0 FAIL`);

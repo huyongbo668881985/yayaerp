@@ -1,6 +1,8 @@
 <% const query=new URLSearchParams({start,end}).toString(); %>
-<% if(!print) { %><%- include('partials/header') %><div class="page-heading-actions"><h1><%= customer.name %> · 客户对账单</h1><div class="action-row"><a class="btn btn-secondary" href="/reconciliation">返回对账</a><a class="btn btn-secondary" href="?format=csv&<%= query %>">导出 CSV</a><a class="btn" href="?print=1&<%= query %>">打印 / PDF</a></div></div>
+<% if(!print) { %><%- include('partials/header') %>
+<div class="page-heading-actions"><h1><%= customer.name %> · 客户对账单</h1><div class="action-row"><a class="btn btn-secondary" href="/reconciliation">返回对账</a><a class="btn btn-secondary" href="?format=csv&<%= query %>">导出 CSV</a><a class="btn" href="?print=1&<%= query %>">打印 / PDF</a></div></div>
 <% } else { %><%- include('partials/print_head',{title:customer.name+' · 客户对账单',back:'?'+query,receipt:false}) %><% } %>
+<% if(data.unverifiedReturnAccounts){ %><p class="flow-notice">有 <%= data.unverifiedReturnAccounts %> 笔历史退货流水缺少可还原的关联审计。旧金额保持原样，管理员需核对历史原单归属后使用分单应收和待退款汇总。</p><% } %>
 <p><%= start %> 至 <%= end %> · 客户：<%= customer.name %><% if(customer.phone){ %> · 电话：<%= customer.phone %><% } %></p>
 <p class="muted">按实际入账日期；<%= data.openingDate %> 的“升级结转”为旧账累计金额，不代表当日实际收款。余额为正表示净应收，为负表示净待退；不同单据不会自动冲抵。</p>
 <div class="statement-totals"><div><span>期初净余额</span><strong>¥<%= money(data.opening) %></strong></div><div><span>本期销售</span><strong>¥<%= money(data.totals.sales) %></strong></div><div><span>本期现金收款</span><strong>¥<%= money(data.totals.received) %></strong></div><div><span>本期退货</span><strong>¥<%= money(data.totals.returned) %></strong></div><div><span>本期现金退款</span><strong>¥<%= money(data.totals.refunded) %></strong></div><div><span>期末净余额</span><strong>¥<%= money(data.ending) %></strong></div></div>

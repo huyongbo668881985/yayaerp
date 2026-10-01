@@ -83,6 +83,8 @@ class Client {
     this.csrfToken = (await r.json()).token;
   }
   async raw(path, { body = null, method = null, origin = BASE } = {}) {
+    if (body !== null && /^\/returns\/approve\//.test(path)) body += '&goods_received=1';
+    if (body !== null && path.endsWith('/record-refund')) body += '&refund_reference=' + enc('测试实际退款凭据');
     const requestMethod = method || (body === null ? 'GET' : 'POST');
     if (!['GET', 'HEAD', 'OPTIONS'].includes(requestMethod)) await this.ensureCsrfToken();
     const headers = { Origin: origin };
@@ -294,7 +296,7 @@ function latestIdInList(html, pattern) {
   ok(r.status === 400, '销售单1 反审核被关联退货拦截');
   await A.raw(`/returns/${ro1}/record-refund`, { body: f({ amount: '600' }) });
   r = await A.raw('/returns/' + ro1);
-  ok(r.text.includes('已退款'), '退货退款 600 后已退款');
+  ok(r.text.includes('已结清'), '退货退款 600 后已结清');
 
   r = await A.raw('/returns/new', { body: f({ customer_id: String(custYi), warehouse_id: String(w1), order_date: '2026-09-08', related_sales_order_id: String(so1), items_json: JSON.stringify([{ id: pA, quantity: 1, price: 60, unit_choice: 'base' }]) }) });
   ok(r.status === 400 && r.text.includes('客户必须与关联销售单'), '关联退货客户不一致被拒');
@@ -303,7 +305,7 @@ function latestIdInList(html, pattern) {
   r = await A.raw('/returns/new', { body: f({ customer_id: String(custJia), warehouse_id: String(w1), order_date: '2026-09-08', related_sales_order_id: String(so1), items_json: JSON.stringify([{ id: pA, quantity: 31, price: 60, unit_choice: 'base' }]) }) });
   ok(r.status === 400 && r.text.includes('超过可退数量'), '多次关联退货累计超过原销售数量被拒');
   r = await A.raw('/returns/new', { body: f({ customer_id: String(custJia), warehouse_id: String(w1), order_date: '2026-09-08', related_sales_order_id: String(so1), items_json: JSON.stringify([{ id: pA, quantity: 1, price: 99999, unit_choice: 'base' }]) }) });
-  ok(r.status === 400 && r.text.includes('超过可退金额'), '关联退货金额超过原销售可退金额被拒');
+  ok(r.status === 400 && r.text.includes('单价必须沿用'), '关联退货不能篡改原销售单价');
 
   await A.raw('/inventory/adjust', { body: f({ product_id: String(pC), warehouse_id: String(w1), new_quantity: '40', reason: '盘亏' }) });
   invh = await gi();
@@ -319,7 +321,7 @@ function latestIdInList(html, pattern) {
   ok(r.status === 302, '无采购单的供应商可正常删除');
 
   // 自由退货
-  await A.raw('/returns/new', { body: f({ warehouse_id: String(w2), order_date: '2026-09-08', items_json: JSON.stringify([{ id: pB, quantity: 5, price: 150, unit_choice: 'base' }]) }) });
+  await A.raw('/returns/new', { body: f({ warehouse_id: String(w2), exception_reason: '管理员已核对旧纸质凭证', order_date: '2026-09-08', items_json: JSON.stringify([{ id: pB, quantity: 5, price: 150, unit_choice: 'base' }]) }) });
   r = await A.raw('/returns');
   const ro2 = latestIdInList(r.text, /\/returns\/(\d+)"/g);
   await A.raw(`/returns/submit/${ro2}`, { body: f({ _: '1' }) });
@@ -474,7 +476,7 @@ function latestIdInList(html, pattern) {
   r = await A.raw('/sales/new', { body: f({ warehouse_id: String(w1), customer_id: String(custJia), order_date: '2026-09-08', paid_amount: '999', items_json: JSON.stringify([{ id: pA, quantity: 2, price: 60, unit_choice: 'base' }]) }) });
   ok(r.status === 400 && r.text.includes('value="999"') && r.text.includes('const EXISTING_ITEMS = [{"id":') && r.text.includes('"quantity":2'), '销售校验失败后保留表单和商品明细');
   for (const invalidRefunded of ['-1', 'Infinity', 'not-a-number']) {
-    r = await A.raw('/returns/new', { body: f({ warehouse_id: String(w1), order_date: '2026-09-08', refunded_amount: invalidRefunded, items_json: JSON.stringify([{ id: pA, quantity: 1, price: 60, unit_choice: 'base' }]) }) });
+    r = await A.raw('/returns/new', { body: f({ warehouse_id: String(w1), exception_reason: '管理员核对原凭证', order_date: '2026-09-08', refunded_amount: invalidRefunded, items_json: JSON.stringify([{ id: pA, quantity: 1, price: 60, unit_choice: 'base' }]) }) });
     ok(r.status === 400 && r.text.includes('已退款金额'), `非法已退款 ${invalidRefunded} 被拒`);
   }
   r = await A.raw('/products/new', { body: f({ name: '非法价格商品', unit: '瓶', pack_size: '1', cost_price: 'Infinity', sale_price: '1', low_stock_threshold: '0' }) });

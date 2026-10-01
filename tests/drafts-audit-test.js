@@ -22,6 +22,8 @@ const databases = ['a','b'].map(code => {
 let server, base, passes = 0;
 const check = async (label, work) => { await work(); passes++; console.log('  PASS  ' + label); };
 async function request(route, {body, user=1, tenant=0}={}) {
+  if (body && /^\/returns\/approve\//.test(route)) body = { goods_received:'1', ...body };
+  if (body && route.endsWith('/record-refund')) body = { refund_reference:'测试实际退款凭据', ...body };
   const response = await fetch(base + route, { redirect:'manual', method:body ? 'POST':'GET',
     headers: { 'X-Test-User':String(user), 'X-Test-Tenant':String(tenant), ...(body ? {'Content-Type':'application/x-www-form-urlencoded'}:{}) },
     ...(body ? {body:new URLSearchParams(body)}:{}) });

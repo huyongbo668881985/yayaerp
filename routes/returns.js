@@ -5,19 +5,15 @@ const { sendCsv } = require('../utils/csv');
 const { todayLocalDate } = require('../utils/dates');
 const { costSnapshotPerBaseUnit } = require('../lib/priceCalc');
 const { getSalePayment } = require('../lib/profitCalc');
+const { saleItems, prepareOriginalItems, refundState } = require('../lib/returnWorkflow');
 const { isBlank, isValidDateString, isValidNonNegativeAmount, roundToCents } = require('../lib/validators');
 const { warehousesForUser, isWarehouseInScope } = require('../lib/warehouseAccess');
 const { submittedItemsFromBody } = require('../lib/formDraft');
 const { writeAuditLog } = require('../lib/auditLog');
 const router = express.Router();
 
-// 状态机跟销售单一致：submitted --审核通过--> approved（这一步才真正把库存加回去）
-//                      submitted --审核拒绝--> rejected
-//                      approved/rejected --反审核--> submitted（approved 需要把加回去的库存再扣回来，
-//                      扣之前要检查库存够不够——如果这批货已经又被卖出去了，硬扣会拉成负库存）
-// 退货不要求关联具体的原始销售单（按你的要求做成自由录入），所以数量上系统不做"不能超过原销售数量"的校验。
-// 但关联了销售单的退货，必须在销售单"已审核"（approved）的前提下才能审核通过：
-// 库存是销售审核时才扣的，货还没出库就退货入库，库存会凭空多出来。
+// 草稿/待审核可以修改；实际收货审核后固定原单、明细和财务归属。
+// 已审核只允许未退现金时留痕撤销，不能回到可修改状态。
 
 const SALE_STATUS_TEXT = { draft: '草稿', submitted: '待审核', approved: '已审核', rejected: '已拒绝' };
 
@@ -27,7 +23,7 @@ function canEditOrWithdraw(order, sessionUser) {
 
 function buildItemsFromRequest(db, body) {
   const { items_json } = body;
-  let product_id, quantity, unit_price, unit_choice;
+  let product_id, quantity, unit_price, unit_choice, original_item_id;
   if (items_json) {
     // 解析失败按"没有明细"处理，走上层正常报错，而不是抛 SyntaxError 变成 500 兑底页
     let parsed;
@@ -41,11 +37,13 @@ function buildItemsFromRequest(db, body) {
     quantity = parsed.map(i => i.quantity);
     unit_price = parsed.map(i => i.price);
     unit_choice = parsed.map(i => i.unit_choice || 'base');
+    original_item_id = parsed.map(i => i.original_sales_item_id);
   } else {
     product_id = body.product_id;
     quantity = body.quantity;
     unit_price = body.unit_price;
     unit_choice = body.unit_choice;
+    original_item_id = body.original_sales_item_id;
   }
   if (!Array.isArray(product_id)) product_id = [product_id];
   if (!Array.isArray(quantity)) quantity = [quantity];
@@ -60,7 +58,7 @@ function buildItemsFromRequest(db, body) {
     const qty = Number(quantity[i]);
     const price = Number(unit_price[i]);
     // 数量必须是正整数（与 sales.js 同规则）
-    if (!pid || !(qty > 0) || !Number.isInteger(qty)) { invalidDetailCount++; continue; }
+    if (!Number.isSafeInteger(pid) || pid <= 0 || !(qty > 0) || !Number.isSafeInteger(qty)) { invalidDetailCount++; continue; }
     const product = getProduct.get(pid);
     if (!product) { invalidDetailCount++; continue; }
     const usePack = unit_choice[i] === 'pack' && product.pack_unit;
@@ -72,6 +70,7 @@ function buildItemsFromRequest(db, body) {
     items.push({
       pid, qty, price: Number.isFinite(price) ? roundToCents(price) : price,
       invalidPrice: !isValidNonNegativeAmount(unit_price[i]),
+      originalSalesItemId: Number(Array.isArray(original_item_id) ? original_item_id[i] : original_item_id) || null,
       unitLabel, baseQty, costSnapshot, unitChoice: usePack ? 'pack' : 'base', productName: product.name
     });
   }
@@ -130,6 +129,7 @@ function validateLinkedReturn(db, {
     const productId = Number(item.pid ?? item.product_id);
     const sold = soldByProduct.get(productId);
     if (!sold) continue; // 下方统一报告商品不在原单中的错误
+    if (item.originalSalesItemId || item.original_sales_item_id) continue;
     const cost = sold.sold_cost / sold.sold_quantity;
     if ('pid' in item) {
       item.costSnapshot = cost;
@@ -210,7 +210,7 @@ function queryOrders(db, user, start, end) {
   if (start) { sql += ' AND ro.order_date >= ?'; params.push(start); }
   if (end) { sql += ' AND ro.order_date <= ?'; params.push(end); }
   sql += ' ORDER BY ro.id DESC';
-  return db.prepare(sql).all(...params);
+  return db.prepare(sql).all(...params).map(order => ({ ...order, settlement_label: refundState(db, order) }));
 }
 
 router.get('/returns', requireLogin, (req, res) => {
@@ -228,7 +228,7 @@ router.get('/returns/export', requireLogin, (req, res) => {
 
   let sql = `
     SELECT ro.id AS order_id, ro.order_date, ro.refund_status, ro.status,
-           ro.remarks, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name,
+           ro.remarks, ro.cancelled_at, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name,
            roi.quantity, roi.unit_label, roi.unit_price, p.name AS product_name
     FROM return_orders ro
     LEFT JOIN customers c ON c.id = ro.customer_id
@@ -251,7 +251,7 @@ router.get('/returns/export', requireLogin, (req, res) => {
   const csvRows = rows.map(r => [
     r.order_id, r.order_date, r.customer_name || '散客', r.warehouse_name, r.product_name,
     r.quantity, r.unit_label, r.unit_price.toFixed(2), (r.quantity * r.unit_price).toFixed(2),
-    refundText[r.refund_status] || r.refund_status, statusText[r.status] || r.status, r.user_name, r.remarks || ''
+    refundText[r.refund_status] || r.refund_status, r.cancelled_at ? '已撤销' : statusText[r.status] || r.status, r.user_name, r.remarks || ''
   ]);
   sendCsv(res, `退货单_${start || '起'}_${end || '止'}.csv`, headers, csvRows);
 });
@@ -295,30 +295,34 @@ router.get('/returns/sales-options', requireLogin, (req, res) => {
   res.json(req.tenantDb.prepare(sql).all(...params));
 });
 
-router.get('/returns/new', requireLogin, (req, res) => {
-  const db = req.tenantDb;
-  const warehouses = warehousesForUser(db, req.session.user);
-  const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
-  const requestedSaleId = Number(req.query.sale_id);
-  const linkedSale = Number.isInteger(requestedSaleId) && requestedSaleId > 0 && db.prepare(`SELECT so.id, so.customer_id, so.warehouse_id
-    FROM sales_orders so WHERE so.id = ? AND so.status = 'approved'${req.session.user.role === 'admin' ? '' : ' AND so.user_id = ?'}`)
-    .get(...(req.session.user.role === 'admin' ? [requestedSaleId] : [requestedSaleId, req.session.user.id]));
-  const customers = customersForForm(db, req.session.user, linkedSale ? linkedSale.customer_id : null);
-  res.render('return_form', { customers, warehouses, products, error: null, order: null, existingItems: [],
-    formValues: linkedSale ? { customer_id: linkedSale.customer_id || '', warehouse_id: linkedSale.warehouse_id, related_sales_order_id: linkedSale.id } : null,
-    today: todayLocalDate() });
-});
+function renderReturnForm(req, res, order = null, error = null, values = null) {
+  const db = req.tenantDb, user = req.session.user;
+  const form = values || order || {};
+  const saleId = Number(req.query.sale_id || form.related_sales_order_id);
+  const sale = Number.isSafeInteger(saleId) && saleId > 0
+    ? db.prepare("SELECT * FROM sales_orders WHERE id=? AND status='approved'").get(saleId) : null;
+  const linkedSale = sale && canEditOrWithdraw(sale, user) ? sale : null;
+  const formValues = values || (order ? null : linkedSale
+    ? { customer_id: linkedSale.customer_id || '', warehouse_id: linkedSale.warehouse_id, related_sales_order_id: linkedSale.id } : {});
+  res.render('return_form', {
+    customers: customersForForm(db, user, order?.customer_id || linkedSale?.customer_id),
+    warehouses: warehousesForUser(db, user),
+    products: db.prepare('SELECT * FROM products ORDER BY name').all(),
+    order, error, formValues, today: todayLocalDate(), linkedSale,
+    originalItems: linkedSale ? saleItems(db, linkedSale.id, order?.id || -1) : [],
+    exceptionMode: user.role === 'admin' && (!linkedSale && (req.query.exception === '1' || !!form.exception_reason || (!!order && !order.related_sales_order_id))),
+    existingItems: order ? db.prepare('SELECT * FROM return_order_items WHERE return_order_id=?').all(order.id) : [],
+    draftItems: values ? submittedItemsFromBody(values) : null
+  });
+}
+
+router.get('/returns/new', requireLogin, (req, res) => renderReturnForm(req, res));
 
 router.post('/returns/new', requireLogin, requireMutationKey, (req, res) => {
   const db = req.tenantDb;
-  const { customer_id, warehouse_id, order_date, note, refunded_amount, remarks, related_sales_order_id } = req.body;
+  const { customer_id, warehouse_id, order_date, note, refunded_amount, remarks, related_sales_order_id, exception_reason } = req.body;
 
-  const renderError = (msg) => {
-    const customers = customersForForm(db, req.session.user, null);
-    const warehouses = warehousesForUser(db, req.session.user);
-    const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
-    return res.render('return_form', { customers, warehouses, products, error: msg, order: null, existingItems: [], formValues: req.body, draftItems: submittedItemsFromBody(req.body), today: todayLocalDate() });
-  };
+  const renderError = msg => renderReturnForm(req, res, null, msg, req.body);
 
   if (!isBlank(order_date) && !isValidDateString(order_date)) {
     res.status(400);
@@ -344,7 +348,14 @@ router.post('/returns/new', requireLogin, requireMutationKey, (req, res) => {
   if (!isCustomerInScope(db, req.session.user, customer_id, null)) {
     return renderError('所选客户不在你的名下，无权使用：请选择自己负责的客户，或联系管理员处理');
   }
+  const exceptionReason = String(exception_reason || '').trim();
+  if (exceptionReason.length > 500) { res.status(400); return renderError('例外核实依据不能超过 500 字'); }
+  if (!relatedId && (req.session.user.role !== 'admin' || !exceptionReason)) {
+    res.status(400); return renderError('普通退货必须选择原销售单；无原单仅管理员核实凭证并填写例外原因后办理');
+  }
   if (relatedId) {
+    const originalError = prepareOriginalItems(db, relatedId, items);
+    if (originalError) { res.status(400); return renderError(originalError); }
     const relatedError = validateLinkedReturn(db, {
       relatedSaleId: relatedId,
       customerId: customer_id,
@@ -358,7 +369,7 @@ router.post('/returns/new', requireLogin, requireMutationKey, (req, res) => {
   }
 
   const total = roundToCents(items.reduce((s, it) => s + it.qty * it.price, 0));
-  if (!Number.isFinite(total) || total < 0) {
+  if (!Number.isSafeInteger(Math.round(total * 100)) || total < 0 || items.some(item => !Number.isSafeInteger(item.baseQty) || item.baseQty <= 0)) {
     res.status(400);
     return renderError('退货总额计算结果不合法，请检查商品数量和单价');
   }
@@ -373,6 +384,7 @@ router.post('/returns/new', requireLogin, requireMutationKey, (req, res) => {
     res.status(400);
     return renderError(`退款金额（¥${refunded.toFixed(2)}）不能超过退货总额（¥${total.toFixed(2)}）`);
   }
+  if (refunded > 0) { res.status(400); return renderError('新退货不能在开单时登记退款；请确认收货并审核后，再登记实际退款'); }
   const cashError = linkedRefundError(db, relatedId, total, refunded);
   if (cashError) { res.status(400); return renderError(cashError); }
   let refundStatus = 'unrefunded';
@@ -383,13 +395,13 @@ router.post('/returns/new', requireLogin, requireMutationKey, (req, res) => {
 
   return completeMutation(req, res, () => {
     const info = db.prepare(
-      `INSERT INTO return_orders (customer_id, warehouse_id, user_id, related_sales_order_id, order_date, total_amount, refunded_amount, refund_status, status, note, remarks)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?)`
-    ).run(customer_id || null, warehouse_id, req.session.user.id, relatedId, order_date || todayLocalDate(), total, refunded, refundStatus, status, note || '', remarks || '');
+      `INSERT INTO return_orders (customer_id, warehouse_id, user_id, related_sales_order_id, order_date, total_amount, refunded_amount, refund_status, status, note, remarks, workflow_version, exception_reason)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,1,?)`
+    ).run(customer_id || null, warehouse_id, req.session.user.id, relatedId, order_date || todayLocalDate(), total, refunded, refundStatus, status, note || '', remarks || '', relatedId ? '' : exceptionReason);
     const roId = info.lastInsertRowid;
-    const insertItem = db.prepare('INSERT INTO return_order_items (return_order_id, product_id, quantity, unit_label, base_quantity, unit_price, cost_price_snapshot) VALUES (?,?,?,?,?,?,?)');
+    const insertItem = db.prepare('INSERT INTO return_order_items (return_order_id, product_id, quantity, unit_label, base_quantity, unit_price, cost_price_snapshot, original_sales_item_id) VALUES (?,?,?,?,?,?,?,?)');
     for (const it of items) {
-      insertItem.run(roId, it.pid, it.qty, it.unitLabel, it.baseQty, it.price, it.costSnapshot);
+      insertItem.run(roId, it.pid, it.qty, it.unitLabel, it.baseQty, it.price, it.costSnapshot, it.originalSalesItemId);
     }
     return { redirect: `/returns/${roId}?created=${status}` };
   });
@@ -399,33 +411,26 @@ router.get('/returns/:id/edit', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const order = db.prepare('SELECT * FROM return_orders WHERE id = ?').get(req.params.id);
   if (!order) return res.status(404).send('单据不存在');
+  if (order.finalized_at) return res.status(400).send('该退货曾经入账，不能修改；请留痕撤销后重新开单');
   if (order.status !== 'draft') return res.status(400).send('只有草稿状态的退货单可以编辑，请先撤回');
   if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限编辑他人的退货单');
   if (!isWarehouseInScope(db, req.session.user, order.warehouse_id)) return res.status(403).send('无权限编辑非本人车辆的退货单');
 
-  const customers = customersForForm(db, req.session.user, order.customer_id);
-  const warehouses = warehousesForUser(db, req.session.user);
-  const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
-  const existingItems = db.prepare('SELECT * FROM return_order_items WHERE return_order_id = ?').all(order.id);
-  res.render('return_form', { customers, warehouses, products, error: null, order, existingItems, today: todayLocalDate() });
+  return renderReturnForm(req, res, order);
 });
 
 router.post('/returns/:id/edit', requireLogin, requireMutationKey, (req, res) => {
   const db = req.tenantDb;
   const order = db.prepare('SELECT * FROM return_orders WHERE id = ?').get(req.params.id);
   if (!order) return res.status(404).send('单据不存在');
+  if (order.finalized_at) return res.status(400).send('该退货曾经入账，不能修改；请留痕撤销后重新开单');
   if (order.status !== 'draft') return res.status(400).send('只有草稿状态的退货单可以编辑，请先撤回');
   if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限编辑他人的退货单');
   if (!isWarehouseInScope(db, req.session.user, order.warehouse_id)) return res.status(403).send('无权限编辑非本人车辆的退货单');
 
-  const { customer_id, warehouse_id, order_date, note, refunded_amount, remarks, related_sales_order_id } = req.body;
+  const { customer_id, warehouse_id, order_date, note, refunded_amount, remarks, related_sales_order_id, exception_reason } = req.body;
 
-  const renderError = (msg) => {
-    const customers = customersForForm(db, req.session.user, order.customer_id);
-    const warehouses = warehousesForUser(db, req.session.user);
-    const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
-    return res.render('return_form', { customers, warehouses, products, error: msg, order, existingItems: [], formValues: req.body, draftItems: submittedItemsFromBody(req.body), today: todayLocalDate() });
-  };
+  const renderError = msg => renderReturnForm(req, res, order, msg, req.body);
 
   if (!isBlank(order_date) && !isValidDateString(order_date)) {
     res.status(400);
@@ -452,7 +457,16 @@ router.post('/returns/:id/edit', requireLogin, requireMutationKey, (req, res) =>
   if (!isCustomerInScope(db, req.session.user, customer_id, order.customer_id)) {
     return renderError('所选客户不在你的名下，无权使用：请选择自己负责的客户，或联系管理员处理');
   }
+  const exceptionReason = String(exception_reason || order.exception_reason || '').trim();
+  if (exceptionReason.length > 500) { res.status(400); return renderError('例外核实依据不能超过 500 字'); }
+  if (!relatedId && (req.session.user.role !== 'admin' || !exceptionReason)) {
+    res.status(400); return renderError('普通退货必须选择原销售单；无原单仅管理员核实凭证并填写例外原因后办理');
+  }
   if (relatedId) {
+    if (order.workflow_version === 1) {
+      const originalError = prepareOriginalItems(db, relatedId, items, order.id);
+      if (originalError) { res.status(400); return renderError(originalError); }
+    }
     const relatedError = validateLinkedReturn(db, {
       relatedSaleId: relatedId,
       customerId: customer_id,
@@ -467,7 +481,7 @@ router.post('/returns/:id/edit', requireLogin, requireMutationKey, (req, res) =>
   }
 
   const total = roundToCents(items.reduce((s, it) => s + it.qty * it.price, 0));
-  if (!Number.isFinite(total) || total < 0) {
+  if (!Number.isSafeInteger(Math.round(total * 100)) || total < 0 || items.some(item => !Number.isSafeInteger(item.baseQty) || item.baseQty <= 0)) {
     res.status(400);
     return renderError('退货总额计算结果不合法，请检查商品数量和单价');
   }
@@ -482,6 +496,7 @@ router.post('/returns/:id/edit', requireLogin, requireMutationKey, (req, res) =>
     res.status(400);
     return renderError(`退款金额（¥${refunded.toFixed(2)}）不能超过退货总额（¥${total.toFixed(2)}）`);
   }
+  if (refunded !== (order.refunded_amount || 0)) { res.status(400); return renderError('草稿不能修改已退现金；实际退款请在审核后单独登记'); }
   const cashError = linkedRefundError(db, relatedId, total, refunded);
   if (cashError) { res.status(400); return renderError(cashError); }
   let refundStatus = 'unrefunded';
@@ -490,12 +505,12 @@ router.post('/returns/:id/edit', requireLogin, requireMutationKey, (req, res) =>
 
   return completeMutation(req, res, () => {
     db.prepare(
-      `UPDATE return_orders SET customer_id=?, warehouse_id=?, related_sales_order_id=?, order_date=?, total_amount=?, refunded_amount=?, refund_status=?, note=?, remarks=? WHERE id=?`
-    ).run(customer_id || null, warehouse_id, relatedId, order_date || order.order_date, total, refunded, refundStatus, note || '', remarks || '', order.id);
+      `UPDATE return_orders SET customer_id=?, warehouse_id=?, related_sales_order_id=?, order_date=?, total_amount=?, refunded_amount=?, refund_status=?, note=?, remarks=?, exception_reason=? WHERE id=?`
+    ).run(customer_id || null, warehouse_id, relatedId, order_date || order.order_date, total, refunded, refundStatus, note || '', remarks || '', relatedId ? '' : exceptionReason, order.id);
     db.prepare('DELETE FROM return_order_items WHERE return_order_id = ?').run(order.id);
-    const insertItem = db.prepare('INSERT INTO return_order_items (return_order_id, product_id, quantity, unit_label, base_quantity, unit_price, cost_price_snapshot) VALUES (?,?,?,?,?,?,?)');
+    const insertItem = db.prepare('INSERT INTO return_order_items (return_order_id, product_id, quantity, unit_label, base_quantity, unit_price, cost_price_snapshot, original_sales_item_id) VALUES (?,?,?,?,?,?,?,?)');
     for (const it of items) {
-      insertItem.run(order.id, it.pid, it.qty, it.unitLabel, it.baseQty, it.price, it.costSnapshot);
+      insertItem.run(order.id, it.pid, it.qty, it.unitLabel, it.baseQty, it.price, it.costSnapshot, it.originalSalesItemId);
     }
     return { redirect: '/returns/' + order.id };
   });
@@ -506,6 +521,7 @@ router.post('/returns/submit/:id', requireLogin, (req, res) => {
   return completeTransaction(req, res, () => {
     const order = db.prepare('SELECT * FROM return_orders WHERE id = ?').get(req.params.id);
     if (!order) return { status: 404, error: '单据不存在' };
+    if (order.finalized_at) return { status: 400, error: '该退货曾经入账，不能重新提交；请另开新单' };
     if (order.status !== 'draft') return { status: 400, error: '只有草稿状态可以提交审核' };
     if (!canEditOrWithdraw(order, req.session.user)) return { status: 403, error: '无权限' };
     db.prepare("UPDATE return_orders SET status = 'submitted' WHERE id = ?").run(order.id);
@@ -518,6 +534,7 @@ router.post('/returns/withdraw/:id', requireLogin, (req, res) => {
   return completeTransaction(req, res, () => {
     const order = db.prepare('SELECT * FROM return_orders WHERE id = ?').get(req.params.id);
     if (!order) return { status: 404, error: '单据不存在' };
+    if (order.finalized_at) return { status: 400, error: '该退货曾经入账，不能撤回修改' };
     if (order.status !== 'submitted') return { status: 400, error: '只有待审核状态可以撤回' };
     if (!canEditOrWithdraw(order, req.session.user)) return { status: 403, error: '无权限撤回他人的退货单' };
     db.prepare("UPDATE return_orders SET status = 'draft' WHERE id = ?").run(order.id);
@@ -533,9 +550,27 @@ router.post('/returns/approve/:id', requireLogin, (req, res) => {
     const order = db.prepare('SELECT * FROM return_orders WHERE id = ?').get(req.params.id);
     if (!order) return { status: 404, error: '单据不存在' };
     if (order.status !== 'submitted') return { status: 400, error: '只有待审核状态可以审核通过' };
+    if (order.finalized_at) return { status: 400, error: '该退货曾经入账，不能重复审核；请重新开单' };
+    if (req.body.goods_received !== '1') return { status: 400, error: '请先核实实际收到的可售商品、数量和退回仓库，再勾选收货确认' };
+    if (!order.related_sales_order_id && !order.exception_reason.trim()) return { status: 400, error: '无原单退货需撤回，由管理员补齐例外核实依据后再审核' };
 
     const items = db.prepare('SELECT * FROM return_order_items WHERE return_order_id = ?').all(order.id);
+    if (!items.length || items.some(item => !Number.isSafeInteger(item.quantity) || item.quantity <= 0
+      || !Number.isSafeInteger(item.base_quantity) || item.base_quantity <= 0 || !Number.isFinite(item.unit_price) || item.unit_price < 0)
+      || roundToCents(items.reduce((sum, item) => sum + item.quantity * item.unit_price, 0)) !== roundToCents(order.total_amount)) {
+      return { status: 400, error: '退货明细与金额不完整或不一致，请撤回核对，不能直接入库入账' };
+    }
     if (order.related_sales_order_id) {
+      if (order.workflow_version === 1) {
+        const prepared = items.map(item => ({ pid: item.product_id, qty: item.quantity, price: item.unit_price,
+          originalSalesItemId: item.original_sales_item_id, unitChoice: item.base_quantity > item.quantity ? 'pack' : 'base' }));
+        const originalError = prepareOriginalItems(db, order.related_sales_order_id, prepared, order.id);
+        if (originalError) return { status: 400, error: '审核失败：' + originalError };
+        for (let i = 0; i < items.length; i++) {
+          if (items[i].base_quantity !== prepared[i].baseQty || items[i].unit_label !== prepared[i].unitLabel
+            || items[i].cost_price_snapshot !== prepared[i].costSnapshot) return { status: 400, error: '原销售明细已变化，请撤回核对后重新办理退货' };
+        }
+      }
       const relatedError = validateLinkedReturn(db, {
         relatedSaleId: order.related_sales_order_id, customerId: order.customer_id,
         items, sessionUser: req.session.user, excludeReturnId: order.id
@@ -543,6 +578,14 @@ router.post('/returns/approve/:id', requireLogin, (req, res) => {
       if (relatedError) return { status: 400, error: `审核失败：${relatedError}` };
       const cashError = linkedRefundError(db, order.related_sales_order_id, order.total_amount, order.refunded_amount);
       if (cashError) return { status: 400, error: `审核失败：${cashError}` };
+    }
+    const incoming = new Map();
+    for (const item of items) incoming.set(item.product_id, (incoming.get(item.product_id) || 0) + item.base_quantity);
+    for (const [productId, quantity] of incoming) {
+      const have = db.prepare('SELECT quantity FROM inventory WHERE product_id=? AND warehouse_id=?').get(productId, order.warehouse_id)?.quantity || 0;
+      if (!Number.isSafeInteger(quantity) || !Number.isSafeInteger(have + quantity)) return { status: 400, error: '退货入库数量超出可精确记录范围，请管理员核对，不能直接审核' };
+    }
+    if (order.related_sales_order_id) {
       const updateCost = db.prepare('UPDATE return_order_items SET cost_price_snapshot = ? WHERE id = ?');
       for (const item of items) updateCost.run(item.cost_price_snapshot, item.id);
     }
@@ -558,7 +601,7 @@ router.post('/returns/approve/:id', requireLogin, (req, res) => {
       upsertInv.run(it.product_id, order.warehouse_id, it.base_quantity);
       insertTxn.run(it.product_id, order.warehouse_id, it.base_quantity, order.id, req.session.user.id);
     }
-    db.prepare("UPDATE return_orders SET status = 'approved' WHERE id = ?").run(order.id);
+    db.prepare("UPDATE return_orders SET status='approved',finalized_at=datetime('now'),received_at=datetime('now') WHERE id=?").run(order.id);
 
     return { redirect: '/returns/' + order.id };
   });
@@ -576,55 +619,44 @@ router.post('/returns/reject/:id', requireLogin, (req, res) => {
   });
 });
 
-// 反审核：approved/rejected -> submitted。如果原本是 approved，要把加回去的库存再扣回来——
-// 扣之前先确认库存够不够，万一这批退回来的货已经又被卖出去了，硬扣会拉成负库存。
+// 已拒绝但从未入账的单据可重新提交；已入账退货绝不退回可修改状态。
 router.post('/returns/unapprove/:id', requireLogin, (req, res) => {
-  const db = req.tenantDb;
   return completeTransaction(req, res, () => {
     if (req.session.user.role !== 'admin') return { status: 403, error: '无权限' };
-    const order = db.prepare('SELECT * FROM return_orders WHERE id = ?').get(req.params.id);
+    const order = req.tenantDb.prepare('SELECT * FROM return_orders WHERE id=?').get(req.params.id);
     if (!order) return { status: 404, error: '单据不存在' };
-    if (order.status !== 'approved' && order.status !== 'rejected') {
-      return { status: 400, error: '只有已审核或已拒绝状态可以反审核' };
-    }
+    if (order.finalized_at || order.cancelled_at || order.status === 'approved') return { status: 400, error: '已入账退货不可反审核修改；未退款且库存足够时，请填写原因留痕撤销后重开' };
+    if (order.status !== 'rejected') return { status: 400, error: '只有未入账的已拒绝退货可以重新提交' };
+    req.tenantDb.prepare("UPDATE return_orders SET status='submitted' WHERE id=?").run(order.id);
+    return { redirect: '/returns/' + order.id };
+  });
+});
 
-    if (order.status === 'approved' && order.refunded_amount > 0) {
-      return { status: 400, error: '该退货单已经退过现金，不能直接反审核。请先核对退款，避免账务记录失效。' };
+router.post('/returns/:id/cancel', requireLogin, requireMutationKey, (req, res) => {
+  const db = req.tenantDb;
+  return completeMutation(req, res, () => {
+    if (req.session.user.role !== 'admin') return { status: 403, error: '只有管理员能撤销退货' };
+    const order = db.prepare('SELECT * FROM return_orders WHERE id=?').get(req.params.id);
+    if (!order) return { status: 404, error: '单据不存在' };
+    if (order.status !== 'approved' || order.cancelled_at) return { status: 400, error: '只有已审核退货可以留痕撤销，不能重复撤销' };
+    if (order.refunded_amount > 0) return { status: 400, error: '这张退货已退过现金，不能撤销；请管理员先核实实际钱款，不能通过改旧单消除退款记录' };
+    const reason = String(req.body.cancel_reason || '').trim();
+    if (!reason || reason.length > 500) return { status: 400, error: '请填写撤销原因（1 至 500 字）' };
+    if (req.body.goods_reversal_confirmed !== '1') return { status: 400, error: '请先核实原收货记录有误或货物已实际退回客户，再确认撤销库存' };
+    const items = db.prepare('SELECT product_id,SUM(base_quantity) quantity FROM return_order_items WHERE return_order_id=? GROUP BY product_id').all(order.id);
+    if (!items.length || items.some(item => !Number.isSafeInteger(item.quantity) || item.quantity <= 0)) return { status: 400, error: '原退货数量记录不完整，不能直接撤销；请管理员核对原库存流水' };
+    for (const item of items) {
+      const have = db.prepare('SELECT quantity FROM inventory WHERE product_id=? AND warehouse_id=?').get(item.product_id, order.warehouse_id)?.quantity || 0;
+      if (have < item.quantity) return { status: 400, error: '退货库存不足以扣回，不能撤销；请管理员核实后续出库记录' };
     }
-
-    const items = order.status === 'approved'
-      ? db.prepare('SELECT * FROM return_order_items WHERE return_order_id = ?').all(order.id)
-      : [];
-    if (order.status === 'approved') {
-      const getInv = db.prepare('SELECT quantity FROM inventory WHERE product_id=? AND warehouse_id=?');
-      for (const it of items) {
-        const inv = getInv.get(it.product_id, order.warehouse_id);
-        const have = inv ? inv.quantity : 0;
-        if (have < it.base_quantity) {
-          const p = db.prepare('SELECT name FROM products WHERE id=?').get(it.product_id);
-          return { status: 400, error:
-            `反审核失败：${p ? p.name : '商品'} 当前库存 ${have}，不足以扣回 ${it.base_quantity}` +
-            `（说明这批退货已经又被卖出去了），请先处理相关销售单再反审核这张退货单。`
-           };
-        }
-      }
+    for (const item of items) {
+      db.prepare('UPDATE inventory SET quantity=quantity-? WHERE product_id=? AND warehouse_id=?').run(item.quantity, item.product_id, order.warehouse_id);
+      db.prepare("INSERT INTO stock_transactions(product_id,warehouse_id,change_qty,type,ref_type,ref_id,user_id) VALUES (?,?,?,'adjust','return_order_cancel',?,?)")
+        .run(item.product_id, order.warehouse_id, -item.quantity, order.id, req.session.user.id);
     }
-
-    if (order.status === 'approved') {
-      const decInv = db.prepare('UPDATE inventory SET quantity = quantity - ? WHERE product_id=? AND warehouse_id=?');
-      // type 用 adjust 而不是沿用 sale_return：这笔流水 change_qty 是负数（把加回的扣回去），
-      // 还标"销售退货入库"会出现"退货入库 -4"的矛盾记录；ref_type 仍可追溯到被反审核的退货单。
-      const insertTxn = db.prepare(`
-        INSERT INTO stock_transactions (product_id, warehouse_id, change_qty, type, ref_type, ref_id, user_id)
-        VALUES (?,?,?,'adjust','return_order_unapprove',?,?)
-      `);
-      for (const it of items) {
-        decInv.run(it.base_quantity, it.product_id, order.warehouse_id);
-        insertTxn.run(it.product_id, order.warehouse_id, -it.base_quantity, order.id, req.session.user.id);
-      }
-    }
-    db.prepare("UPDATE return_orders SET status = 'submitted' WHERE id = ?").run(order.id);
-
+    // 保留原明细和已审核时间。rejected + cancelled_at 是终态，旧版状态约束无需重建。
+    db.prepare("UPDATE return_orders SET status='rejected',finalized_at=COALESCE(finalized_at,datetime('now')),cancelled_at=datetime('now'),cancel_reason=?,cancelled_by=? WHERE id=?")
+      .run(reason, req.session.user.id, order.id);
     return { redirect: '/returns/' + order.id };
   });
 });
@@ -665,6 +697,8 @@ router.post('/returns/:id/record-refund', requireLogin, requireMutationKey, (req
       return { status: 400, error: `退款金额（¥${amount.toFixed(2)}）超过该单剩余未退金额（¥${remaining.toFixed(2)}），最多还能退 ¥${remaining.toFixed(2)}` };
     }
 
+    const reference = String(req.body.refund_reference || '').trim();
+    if (!reference || reference.length > 500) return { status: 400, error: '请填写实际退款凭据或说明（1 至 500 字）' };
     const newRefunded = roundToCents((order.refunded_amount || 0) + amount);
     let refundStatus = 'unrefunded';
     if (order.total_amount > 0 && newRefunded >= order.total_amount) refundStatus = 'refunded';
@@ -672,6 +706,7 @@ router.post('/returns/:id/record-refund', requireLogin, requireMutationKey, (req
 
     db.prepare('UPDATE return_orders SET refunded_amount = ?, refund_status = ? WHERE id = ?')
       .run(newRefunded, refundStatus, order.id);
+    db.prepare('INSERT INTO return_refund_records(return_order_id,amount_cents,reference,user_id) VALUES (?,?,?,?)').run(order.id, Math.round(amount * 100), reference, req.session.user.id);
     writeAuditLog(db, req.session.user, '记录退货退款', '退货单', order.id, `本次退款 ¥${amount.toFixed(2)}，累计 ¥${newRefunded.toFixed(2)}`);
     return { redirect: '/returns/' + order.id };
   });
@@ -697,8 +732,10 @@ router.get('/returns/:id', requireLogin, (req, res) => {
     WHERE roi.return_order_id = ?
   `).all(req.params.id);
   const linkedSale = order.related_sales_order_id ? getSalePayment(db, order.related_sales_order_id) : null;
-  const refundableAmount = Math.max(0, Math.min(order.total_amount - (order.refunded_amount || 0), linkedSale ? linkedSale.pending_refund : Infinity));
-  res.render('return_detail', { linkedSale, refundableAmount, order, items, canManage: canEditOrWithdraw(order, req.session.user), created: req.query.created === order.status ? order.status : null });
+  const refundableAmount = order.status === 'approved' && !order.cancelled_at
+    ? Math.max(0, Math.min(order.total_amount - (order.refunded_amount || 0), linkedSale ? linkedSale.pending_refund : Infinity)) : 0;
+  const refunds = db.prepare('SELECT r.*,u.name user_name FROM return_refund_records r LEFT JOIN users u ON u.id=r.user_id WHERE return_order_id=? ORDER BY r.id').all(order.id);
+  res.render('return_detail', { settlementLabel: refundState(db, order), refunds, linkedSale, refundableAmount, order, items, canManage: canEditOrWithdraw(order, req.session.user), created: req.query.created === order.status ? order.status : null });
 });
 
 module.exports = router;

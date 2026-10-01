@@ -17,7 +17,7 @@ if (!isMainThread) {
   let pauseRead = false;
   db.prepare = sql => {
     const statement = prepare(sql);
-    if (/^SELECT \* FROM (sales_orders|return_orders|transfer_orders|purchase_orders) WHERE id = \?$/.test(sql)) {
+    if (/^SELECT \* FROM (sales_orders|return_orders|transfer_orders|purchase_orders) WHERE id\s*=\s*\?$/.test(sql)) {
       const get = statement.get.bind(statement);
       statement.get = (...params) => {
         const order = get(...params);
@@ -63,8 +63,8 @@ if (!isMainThread) {
       (warehouse_id, user_id, order_date, total_amount, paid_amount, payment_status, status)
       VALUES (1, 1, '2026-10-01', ?, ?, ?, ?)`).run(total, paid, paid ? 'partial' : 'unpaid', status).lastInsertRowid);
     const refund = (total = 100, refunded = 0, status = 'approved', related = null) => Number(db.prepare(`INSERT INTO return_orders
-      (warehouse_id, user_id, order_date, total_amount, refunded_amount, refund_status, status, related_sales_order_id)
-      VALUES (1, 1, '2026-10-01', ?, ?, ?, ?, ?)`).run(total, refunded, refunded ? 'partial' : 'unrefunded', status, related).lastInsertRowid);
+      (warehouse_id, user_id, order_date, total_amount, refunded_amount, refund_status, status, related_sales_order_id, exception_reason)
+      VALUES (1, 1, '2026-10-01', ?, ?, ?, ?, ?, '已核对测试原凭证')`).run(total, refunded, refunded ? 'partial' : 'unrefunded', status, related).lastInsertRowid);
     const snapshot = (kind, id) => ({
       order: db.prepare(`SELECT * FROM ${kind === 'sales' ? 'sales_orders' : 'return_orders'} WHERE id = ?`).get(id),
       logs: db.prepare('SELECT * FROM audit_logs ORDER BY id').all()
@@ -82,7 +82,7 @@ if (!isMainThread) {
         const response = await fetch(`${workers[instance].base}/${kind}/${id}/record-${kind === 'sales' ? 'payment' : 'refund'}`, {
           method: 'POST', redirect: 'manual',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...headers },
-          body: new URLSearchParams({ amount, _request_key: headers['x-request-key'] || require('crypto').randomUUID() })
+          body: new URLSearchParams({ amount, refund_reference: '测试实际退款凭据', _request_key: headers['x-request-key'] || require('crypto').randomUUID() })
         });
         return { status: response.status, text: await response.text(), location: response.headers.get('location') };
       };
@@ -182,7 +182,7 @@ if (!isMainThread) {
         INSERT INTO inventory (product_id,warehouse_id,quantity) VALUES (1,1,200),(1,2,200);`);
       for (const kind of ['sales', 'returns', 'transfers']) {
         for (const action of ['approve', 'unapprove']) {
-          await check(`${kind}跨实例重复${action}只改变一次库存与单据状态`, async () => {
+          await check(`${kind}跨实例重复${kind === 'returns' && action === 'unapprove' ? 'cancel' : action}只改变一次库存与单据状态`, async () => {
             const status = action === 'approve' ? 'submitted' : 'approved';
             const id = kind === 'sales' ? sale(50, 0, status) : kind === 'returns' ? refund(50, 0, status)
               : Number(db.prepare(`INSERT INTO transfer_orders (from_warehouse_id,to_warehouse_id,user_id,order_date,status)
@@ -191,8 +191,10 @@ if (!isMainThread) {
             if (kind === 'transfers') db.prepare('INSERT INTO transfer_order_items (transfer_order_id,product_id,quantity,unit_label,base_quantity) VALUES (?,1,10,?,10)').run(id, '瓶');
             else db.prepare(`INSERT INTO ${table}_order_items (${table}_order_id,product_id,quantity,unit_label,base_quantity,unit_price,cost_price_snapshot) VALUES (?,1,10,?,10,5,3)`).run(id, '瓶');
             const before = db.prepare('SELECT quantity FROM inventory WHERE product_id=1 AND warehouse_id=1').get().quantity;
-            const request = (instance, pause) => fetch(`${workers[instance].base}/${kind}/${action}/${id}`, {
-              method: 'POST', redirect: 'manual', headers: pause ? { 'x-test-pause-read': '1' } : {}
+            const cancelReturn = kind === 'returns' && action === 'unapprove';
+            const request = (instance, pause) => fetch(`${workers[instance].base}/${cancelReturn ? 'returns/' + id + '/cancel' : kind + '/' + action + '/' + id}`, {
+              method:'POST', redirect:'manual', headers:{'Content-Type':'application/x-www-form-urlencoded',...(pause ? {'x-test-pause-read':'1'} : {})},
+              body:new URLSearchParams({goods_received:'1',goods_reversal_confirmed:'1',cancel_reason:'核实原收货记录有误',_request_key:require('crypto').randomUUID()})
             });
             Atomics.store(gate, 0, 0);
             const read = once(workers[0], 'message');
@@ -209,7 +211,7 @@ if (!isMainThread) {
               const sign = (kind === 'returns' ? 1 : -1) * (action === 'approve' ? 1 : -1);
               assert.equal(db.prepare('SELECT quantity FROM inventory WHERE product_id=1 AND warehouse_id=1').get().quantity, before + sign * 10);
               const ref = kind === 'sales' ? 'sales_order' : kind === 'returns' ? 'return_order' : 'transfer_order';
-              assert.equal(db.prepare('SELECT COUNT(*) c FROM stock_transactions WHERE ref_type=? AND ref_id=?').get(ref + (action === 'unapprove' ? '_unapprove' : ''), id).c, kind === 'transfers' ? 2 : 1);
+              assert.equal(db.prepare('SELECT COUNT(*) c FROM stock_transactions WHERE ref_type=? AND ref_id=?').get(ref + (action === 'unapprove' ? (kind === 'returns' ? '_cancel' : '_unapprove') : ''), id).c, kind === 'transfers' ? 2 : 1);
             } finally {
               clearTimeout(releaseTimer); Atomics.store(gate, 0, 1); Atomics.notify(gate, 0);
               await Promise.allSettled([first, second]);

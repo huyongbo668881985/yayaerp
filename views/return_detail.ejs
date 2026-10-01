@@ -14,17 +14,11 @@
     <% if (order.note) { %><div><span>内部备注</span><strong><%= order.note %></strong></div><% } %>
   </div>
   <% if (order.related_sales_order_id) { %>
-    <p><strong>关联销售单：</strong><a href="/sales/<%= order.related_sales_order_id %>">#<%= order.related_sales_order_id %></a>（<%= order.status === 'approved' ? '原单应收已扣减这次退货' : '审核通过后才会扣减原单应收' %>）</p>
+    <p><strong>关联销售单：</strong><a href="/sales/<%= order.related_sales_order_id %>">#<%= order.related_sales_order_id %></a>（<%= order.cancelled_at ? '这次退货已撤销，原单归属和历史明细保留' : order.status === 'approved' ? '原单应收已扣减这次退货' : '审核通过后才会扣减原单应收' %>）</p>
   <% } %>
   <div class="detail-status-list">
-    <div><span>现金退款状态</span>
-    <% if (order.refund_status === 'refunded') { %>
-      <span class="badge" style="background:#dcfce7;color:#166534">已退款</span>
-    <% } else if (order.refund_status === 'partial') { %>
-      <span class="badge" style="background:#fef3c7;color:#92400e">部分退款</span>
-    <% } else { %>
-      <span class="badge" style="background:#fee2e2;color:#991b1b">未退款</span>
-    <% } %>
+    <div><span>结算状态</span>
+    <span class="badge"><%= settlementLabel %></span>
     </div>
     <div><span>审核状态</span>
     <%
@@ -34,7 +28,7 @@
         approved:  { text: '已审核', bg: '#dbeafe', fg: '#1e40af' },
         rejected:  { text: '已拒绝', bg: '#fee2e2', fg: '#991b1b' }
       };
-      const st = statusMap[order.status] || { text: order.status, bg: '#f3f4f6', fg: '#6b7280' };
+      const st = order.cancelled_at ? { text: '已撤销', bg: '#f3f4f6', fg: '#6b7280' } : statusMap[order.status] || { text: order.status, bg: '#f3f4f6', fg: '#6b7280' };
     %>
     <span class="badge" style="background:<%= st.bg %>;color:<%= st.fg %>"><%= st.text %></span>
     </div>
@@ -44,9 +38,12 @@
     <% } %>
   <div class="detail-finance-grid">
     <div><span>已退现金</span><strong>¥<%= (order.refunded_amount || 0).toFixed(2) %></strong></div>
-    <div><span><%= linkedSale ? '当前可退现金' : '待退现金' %></span><strong class="detail-owing">¥<%= refundableAmount.toFixed(2) %></strong></div>
+    <div><span>当前可退现金</span><strong class="detail-owing">¥<%= refundableAmount.toFixed(2) %></strong></div>
   </div>
   <% if (linkedSale) { %><p class="detail-state-note">关联退货先抵扣原单欠款，仅多收部分可退现金。原单当前欠款 ¥<%= linkedSale.effective_debt.toFixed(2) %>，待退现金 ¥<%= linkedSale.pending_refund.toFixed(2) %>。</p><% } %>
+  <% if (order.exception_reason) { %><p>例外核实依据：<%= order.exception_reason %></p><% } %>
+  <% if (order.finalized_at) { %><p class="detail-state-note">已入账记录固定，不能修改原单、客户、商品或金额。</p><% } %>
+  <% if (order.cancelled_at) { %><p class="flow-notice">已撤销：<%= order.cancel_reason %>。库存及退货抵扣已冲回，原记录保留。</p><% } %>
   <h2 class="detail-section-heading">退货商品</h2>
   <table class="detail-items-table">
     <tr><th>商品</th><th>数量</th><th>单价</th><th>小计</th></tr>
@@ -67,44 +64,56 @@
   <p class="right"><strong>总计：¥<%= order.total_amount.toFixed(2) %></strong></p>
 
   <div class="detail-actions">
-    <% if (order.status === 'draft' && canManage) { %>
+    <% if (order.status === 'draft' && !order.finalized_at && canManage) { %>
       <a class="btn" href="/returns/<%= order.id %>/edit">编辑</a>
       <form action="/returns/submit/<%= order.id %>" method="POST">
         <button type="submit" class="btn" style="background:#16a34a">提交审核</button>
       </form>
     <% } %>
 
-    <% if (order.status === 'submitted' && canManage) { %>
+    <% if (order.status === 'submitted' && !order.finalized_at && canManage) { %>
       <form action="/returns/withdraw/<%= order.id %>" method="POST">
         <button type="submit" class="btn btn-secondary">撤回修改</button>
       </form>
     <% } %>
 
-    <% if (order.status === 'submitted' && currentUser.role === 'admin') { %>
+    <% if (order.status === 'submitted' && !order.finalized_at && currentUser.role === 'admin') { %>
       <form action="/returns/approve/<%= order.id %>" method="POST">
-        <button type="submit" class="btn" style="background:#16a34a">审核通过（入库）</button>
+        <label class="return-confirm"><input type="checkbox" name="goods_received" value="1" required>已核实实际收到的可售商品、数量和退回仓库</label>
+        <button type="submit" class="btn" style="background:#16a34a">确认收货并审核</button>
       </form>
       <form action="/returns/reject/<%= order.id %>" method="POST">
         <button type="submit" class="btn btn-danger">审核拒绝</button>
       </form>
     <% } %>
 
-    <% if ((order.status === 'approved' || order.status === 'rejected') && currentUser.role === 'admin') { %>
-      <form action="/returns/unapprove/<%= order.id %>" method="POST" onsubmit="return confirm('反审核会把该退货单退回待审核状态<% if (order.status === 'approved') { %>，并把加回去的库存再扣回来<% } %>，确认继续？')">
-        <button type="submit" class="btn btn-secondary">反审核</button>
-      </form>
+    <% if (order.status === 'rejected' && !order.finalized_at && currentUser.role === 'admin') { %>
+      <form action="/returns/unapprove/<%= order.id %>" method="POST"><button type="submit" class="btn btn-secondary">重新提交审核</button></form>
+    <% } %>
+    <% if (order.status === 'approved' && !order.refunded_amount && currentUser.role === 'admin') { %>
+      <details class="return-cancel-panel"><summary>录错了：留痕撤销后重开</summary>
+        <form action="/returns/<%= order.id %>/cancel" method="POST" class="return-money-form">
+          <input type="hidden" name="_request_key" value="<%= newRequestKey() %>">
+          <label>撤销原因<input type="text" name="cancel_reason" maxlength="500" required placeholder="说明原单错误和实际货物处理"></label>
+          <label class="return-confirm"><input type="checkbox" name="goods_reversal_confirmed" value="1" required>原收货记录有误或货物已实际退回客户，确认扣回退货库存</label>
+          <button type="submit" class="btn btn-danger">确认撤销（扣回库存及抵扣）</button>
+        </form>
+      </details>
     <% } %>
 
     <% const refundRemaining = refundableAmount; %>
     <% if (order.status === 'approved' && currentUser.role === 'admin' && refundRemaining > 0.001) { %>
-      <form action="/returns/<%= order.id %>/record-refund" method="POST" style="display:flex; gap:6px; align-items:center">
+      <form action="/returns/<%= order.id %>/record-refund" method="POST" class="return-money-form">
         <input type="hidden" name="_request_key" value="<%= newRequestKey() %>">
-        <input type="number" name="amount" placeholder="本次退款金额" step="0.01" min="0.01" max="<%= refundRemaining.toFixed(2) %>" required style="width:140px">
-        <button type="submit" class="btn btn-danger">记录退款</button>
+        <input type="number" name="amount" placeholder="本次退款金额" step="0.01" min="0.01" max="<%= refundRemaining.toFixed(2) %>" required aria-label="本次实际退款金额">
+        <input type="text" name="refund_reference" maxlength="500" placeholder="实际退款凭据或说明" aria-label="实际退款凭据或说明" required>
+        <button type="submit" class="btn btn-danger">登记实际退款</button>
       </form>
     <% } %>
 
     <a class="btn btn-secondary" href="/returns">返回列表</a>
+    <% if (order.cancelled_at && currentUser.role === 'admin') { %><a class="btn" href="/returns/new<%= order.related_sales_order_id ? '?sale_id=' + order.related_sales_order_id : '?exception=1' %>">核对后重新开单</a><% } %>
   </div>
+  <% if (refunds.length) { %><h2 class="detail-section-heading">实际退款记录</h2><% refunds.forEach(refund => { %><p>¥<%= (refund.amount_cents / 100).toFixed(2) %> · <%= refund.reference %> · <%= refund.user_name %> · <%= formatDateTime(refund.created_at) %></p><% }); } %>
 </div>
 <%- include('partials/footer') %>

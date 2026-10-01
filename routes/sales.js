@@ -664,6 +664,8 @@ router.post('/sales/unapprove/:id', requireLogin, (req, res) => {
     //      —— 自由退货没有可靠的来源单据，无法证明不是本单退回的货；宁可要求先反审核退货，
     //      也不能依赖可手填的日期作推断，否则回填旧日期即可绕过库存保护。
     if (order.status === 'approved') {
+      const history = db.prepare('SELECT id FROM return_orders WHERE related_sales_order_id=? AND finalized_at IS NOT NULL ORDER BY id').all(order.id);
+      if (history.length) return { status: 400, error: `该销售单已有退货入账历史 ${history.map(row => '#' + row.id).join('、')}，原单和明细必须保留，不能反审核改写；请通过新单据处理后续业务。` };
       const linkedReturns = db.prepare(
         `SELECT id FROM return_orders WHERE related_sales_order_id = ? AND status = 'approved' ORDER BY id`
       ).all(order.id);
@@ -684,7 +686,7 @@ router.post('/sales/unapprove/:id', requireLogin, (req, res) => {
         return { status: 400, error:
           `反审核失败：本仓库（或直接关联本单）的已审核退货单 ${ids} 与这张销售单存在商品重叠。` +
           `这些退货审核通过时已经把退回的货加回了库存，直接反审核本单会把同一批货重复加回、导致库存虚增。` +
-          `请先反审核这些退货单，再来反审核本销售单。`
+          `请管理员先核实退货来源与钱货记录，不能直接改写原销售单。`
          };
       }
     }
@@ -793,7 +795,7 @@ router.get('/sales/:id', requireLogin, (req, res) => {
     WHERE soi.sales_order_id = ?
   `).all(req.params.id);
   const relatedReturns = db.prepare(`
-    SELECT id, order_date, total_amount, refund_status, status
+    SELECT id, order_date, total_amount, refund_status, status, cancelled_at, finalized_at
     FROM return_orders WHERE related_sales_order_id = ? ORDER BY id DESC
   `).all(req.params.id);
   res.render('sale_detail', { order, items, relatedReturns, canManage: canEditOrWithdraw(order, req.session.user), created: req.query.created === order.status ? order.status : null });

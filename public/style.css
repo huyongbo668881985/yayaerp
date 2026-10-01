@@ -758,3 +758,21 @@ button[aria-disabled="true"] { cursor: wait; opacity: .65; }
 /* 导入与对账 */
 .action-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.action-row form{margin:0}.action-row .btn:disabled{background:#e2e8f0;color:#64748b;cursor:not-allowed}.import-types{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.import-types .card{margin-bottom:0}.import-types p{min-height:3em}.import-preview-wrap{overflow:auto}.import-preview-wrap table{min-width:900px}.import-preview-wrap td{max-width:200px;overflow-wrap:anywhere}.statement-selector{display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:12px;align-items:end}.statement-selector .form-row{margin:0}.statement-totals{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}.statement-totals div{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px;min-width:0}.statement-totals span,.statement-totals strong{display:block}.statement-totals span{color:#64748b;font-size:13px}.statement-totals strong{font-size:20px;overflow-wrap:anywhere}.statement-table-wrap{overflow:auto}.statement-table-wrap table{min-width:650px}.statement-table-wrap small{display:block;color:#64748b;font-size:12px}.detail-print-actions{margin-bottom:12px}
 @media(max-width:768px){.import-types{grid-template-columns:1fr}.import-types p{min-height:0}.import-preview-wrap,.statement-table-wrap{display:none}.statement-selector{grid-template-columns:repeat(2,minmax(0,1fr))}.statement-selector .form-row:first-child,.statement-selector button{grid-column:1/-1}.statement-selector button,.action-row .btn{min-height:44px}.statement-totals{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.statement-totals div{padding:10px}.statement-totals strong{font-size:18px}.customer-heading-buttons{flex-wrap:wrap}.page-heading-actions{flex-wrap:wrap;gap:8px}.import-types h2{font-size:18px}}
+
+/* 原销售明细退货只需确认数量；金额和单位沿用原单。 */
+.item-row.return-source-row { display:grid; grid-template-areas:none; grid-template-columns:minmax(0,2fr) minmax(90px,1fr) minmax(90px,1fr) auto; align-items:end; gap:10px; }
+.return-source-row label { min-width:0; }
+.return-source-row select[hidden] { display:none; }
+.return-confirm { display:flex; align-items:flex-start; gap:8px; line-height:1.6; }
+.return-confirm input[type=checkbox] { width:auto; flex-shrink:0; margin-top:6px; }
+.return-money-form { display:flex; flex-wrap:wrap; gap:10px; align-items:end; width:100%; }
+.return-money-form > input { flex:1 1 180px; min-width:0; }
+.return-money-form > label { flex:1 1 240px; min-width:0; }
+.return-cancel-panel { width:100%; margin-top:12px; }
+.return-cancel-panel summary { cursor:pointer; margin-bottom:10px; }
+@media(max-width:640px) {
+  .item-row.return-source-row { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+  .return-source-row > label:first-child { grid-column:1 / -1; }
+  .return-source-row > button { grid-column:2; justify-self:end; }
+  .return-money-form > input, .return-money-form > label, .return-money-form > button { flex-basis:100%; width:100%; }
+}

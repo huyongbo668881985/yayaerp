@@ -24,7 +24,7 @@
 
 <div class="card desktop-table-wrap">
   <table>
-    <tr><th>单号</th><th>日期</th><th>客户</th><th>退回仓库</th><th>金额</th><th>退款状态</th><th>审核状态</th><th>录入人</th></tr>
+    <tr><th>单号</th><th>日期</th><th>客户</th><th>退回仓库</th><th>金额</th><th>结算情况</th><th>审核状态</th><th>录入人</th></tr>
     <% orders.forEach(function(o) { %>
       <tr>
         <td><a href="/returns/<%= o.id %>">#<%= o.id %></a></td>
@@ -33,13 +33,7 @@
         <td><%= o.warehouse_name %></td>
         <td>¥<%= o.total_amount.toFixed(2) %></td>
         <td>
-          <% if (o.refund_status === 'refunded') { %>
-            <span class="badge" style="background:#dcfce7;color:#166534">已退款</span>
-          <% } else if (o.refund_status === 'partial') { %>
-            <span class="badge" style="background:#fef3c7;color:#92400e">部分退款</span>
-          <% } else { %>
-            <span class="badge" style="background:#fee2e2;color:#991b1b">未退款</span>
-          <% } %>
+          <span class="badge"><%= o.settlement_label %></span>
         </td>
         <td>
           <%
@@ -49,7 +43,7 @@
               approved:  { text: '已审核', bg: '#dbeafe', fg: '#1e40af' },
               rejected:  { text: '已拒绝', bg: '#fee2e2', fg: '#991b1b' }
             };
-            const st = statusMap[o.status] || { text: o.status, bg: '#f3f4f6', fg: '#6b7280' };
+            const st = o.cancelled_at ? { text: '已撤销', bg: '#f3f4f6', fg: '#6b7280' } : statusMap[o.status] || { text: o.status, bg: '#f3f4f6', fg: '#6b7280' };
           %>
           <span class="badge" style="background:<%= st.bg %>;color:<%= st.fg %>"><%= st.text %></span>
         </td>
@@ -68,7 +62,7 @@
          approved:  { text: '已审核', bg: '#dbeafe', fg: '#1e40af' },
          rejected:  { text: '已拒绝', bg: '#fee2e2', fg: '#991b1b' }
        };
-       const st2 = statusMap2[o.status] || { text: o.status, bg: '#f3f4f6', fg: '#6b7280' };
+       const st2 = o.cancelled_at ? { text: '已撤销', bg: '#f3f4f6', fg: '#6b7280' } : statusMap2[o.status] || { text: o.status, bg: '#f3f4f6', fg: '#6b7280' };
     %>
     <a href="/returns/<%= o.id %>" class="order-card">
       <div class="order-card-top">
@@ -81,13 +75,7 @@
       </div>
       <div class="order-card-bottom">
         <span class="order-card-amount">¥<%= o.total_amount.toFixed(2) %></span>
-        <% if (o.refund_status === 'refunded') { %>
-          <span class="badge" style="background:#dcfce7;color:#166534">已退款</span>
-        <% } else if (o.refund_status === 'partial') { %>
-          <span class="badge" style="background:#fef3c7;color:#92400e">部分退款</span>
-        <% } else { %>
-          <span class="badge" style="background:#fee2e2;color:#991b1b">未退款</span>
-        <% } %>
+        <span class="badge"><%= o.settlement_label %></span>
       </div>
     </a>
   <% }) %>

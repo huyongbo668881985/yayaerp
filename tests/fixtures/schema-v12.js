@@ -1,5 +1,6 @@
+// 固定的升级前数据库建表代码，用于验证真实 v12 数据迁移，禁止跟随新迁移改动。
 const bcrypt = require('bcryptjs');
-const { addColumnIfMissing, applyMigration } = require('./migrations');
+const { addColumnIfMissing, applyMigration } = require('../../lib/migrations');
 
 // 兼容旧数据库：所有升级均通过显式版本记录执行；失败会中止启动并保留错误上下文。
 // stock_transactions 表建表时 type 字段的 CHECK 约束里没有 'sale_return'（退货入库）这个值，
@@ -411,8 +412,8 @@ ON debt_snapshots(snapshot_date, user_id);
       CREATE INDEX IF NOT EXISTS idx_customer_ledger_customer_date ON customer_ledger(customer_id,event_date,id);
       CREATE TRIGGER IF NOT EXISTS customer_ledger_no_update BEFORE UPDATE ON customer_ledger BEGIN SELECT RAISE(ABORT, '对账流水只允许追加'); END;
       CREATE TRIGGER IF NOT EXISTS customer_ledger_no_delete BEFORE DELETE ON customer_ledger BEGIN SELECT RAISE(ABORT, '对账流水只允许追加'); END;`);
-      const { todayLocalDate } = require('../utils/dates');
-      const { cents } = require('./customerLedger');
+      const { todayLocalDate } = require('../../utils/dates');
+      const { cents } = require('../../lib/customerLedger');
       const date = todayLocalDate();
       const initialized = db.prepare("INSERT OR IGNORE INTO ledger_metadata(key,value) VALUES ('opening_date',?)").run(date).changes;
       const insert = db.prepare(`INSERT INTO customer_ledger(customer_id,document_type,document_id,document_date,event_date,event_kind,
@@ -423,10 +424,6 @@ ON debt_snapshots(snapshot_date, user_id);
       }
     }).immediate();
   });
-
-  db.transaction(() => applyMigration(db, 13, 'immutable return settlement and confirmed return workflow', () => {
-    require('./returnWorkflow').migrateReturnWorkflow(db);
-  })).immediate();
 
 }
 

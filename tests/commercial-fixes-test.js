@@ -22,6 +22,8 @@ function apiGet(route) {
 }
 const newKey = () => crypto.randomUUID();
 async function post(route, body, key = newKey()) {
+  if (/^\/returns\/approve\//.test(route)) body = { goods_received: '1', ...body };
+  if (route.endsWith('/record-refund')) body = { refund_reference: '测试实际退款凭据', ...body };
   const response = await fetch(base + route, {
     method: 'POST', redirect: 'manual', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ ...body, ...(key === null ? {} : { _request_key: key }) })
@@ -82,11 +84,11 @@ const idOf = response => Number(response.location.match(/\/(\d+)/)[1]);
     assert.equal(profitOfPeriod(db).profit, 24);
     assert.equal((await post(`/returns/${returnId}/record-refund`, { amount: '1' })).status, 400);
   });
-  await check('旧关联退货错误成本在报告中按原单冲回，原始快照保留', () => {
-    db.prepare('UPDATE return_order_items SET cost_price_snapshot=6 WHERE return_order_id=?').run(returnId);
+  await check('已入账关联退货成本不能改写，毛利保持原销售快照', () => {
+    assert.throws(() => db.prepare('UPDATE return_order_items SET cost_price_snapshot=6 WHERE return_order_id=?').run(returnId), /不可改写/);
     assert.equal(getSummary(db).profitWithReceivable, 24);
     assert.equal(apiGet('/reports/direct-dashboard').settled.gross_profit, 24);
-    assert.equal(db.prepare('SELECT cost_price_snapshot c FROM return_order_items WHERE return_order_id=?').get(returnId).c, 6);
+    assert.equal(db.prepare('SELECT cost_price_snapshot c FROM return_order_items WHERE return_order_id=?').get(returnId).c, 3);
   });
   await check('已有现金退款会增加原单应收，报表、SQL 结算、欠款快照一致', async () => {
     // 模拟升级前已经记下的错误退款；不改原始现金记录，只修计算口径。

@@ -1,5 +1,5 @@
 (() => {
-  const fields = ['customer_id','customer_search','supplier_id','warehouse_id','from_warehouse_id','to_warehouse_id','order_date','paid_amount','refunded_amount','remarks','note','related_sales_order_id','draft_revision','_request_key'];
+  const fields = ['customer_id','customer_search','supplier_id','warehouse_id','from_warehouse_id','to_warehouse_id','order_date','paid_amount','refunded_amount','remarks','note','related_sales_order_id','draft_revision','_request_key','exception_reason'];
   const expiry = 7 * 86400000;
   const prefix = 'jxc-order-draft:v1:';
   function entries(scope) {
@@ -45,6 +45,7 @@
       }
       const rows = Array.from(form.querySelectorAll('#items .item-row')).map(row => ({
         id: row.querySelector('[name="product_id"]').value,
+        original_sales_item_id: row.querySelector('[name="original_sales_item_id"]')?.value || null,
         quantity: row.querySelector('[name="quantity"]').value,
         unit_choice: row.querySelector('[name="unit_choice"]').value,
         unit_label: row.querySelector('[name="unit_choice"]').selectedOptions[0]?.textContent || '',
@@ -84,8 +85,11 @@
       if (entry.rows.some(item => item.id && !products.some(option => option.value === item.id))) {
         status.textContent = '暂存中的商品已不可选，请查看暂存内容，重新选择当前可用商品。'; return;
       }
-      if (entry.rows.some(item => item.id && item.unit_size != null && item.unit_size !== (item.unit_choice === 'pack' ? Number(products.find(option => option.value === item.id)?.dataset.packSize || 1) : 1))) {
+      if (entry.rows.some(item => item.id && !item.original_sales_item_id && item.unit_size != null && item.unit_size !== (item.unit_choice === 'pack' ? Number(products.find(option => option.value === item.id)?.dataset.packSize || 1) : 1))) {
         status.textContent = '商品箱规已变化，这份暂存仅供核对。请查看暂存内容，按当前箱规重新填写。'; return;
+      }
+      if (window.returnSourceSaleId && Number(entry.values.related_sales_order_id) !== window.returnSourceSaleId) {
+        status.textContent = '这份退货暂存属于另一张原销售单，请从对应原单打开退货页面后恢复。'; return;
       }
       restoring = true;
       for (const name of fields) {
@@ -100,6 +104,7 @@
         row.querySelector('[name="unit_choice"]').value = item.unit_choice;
         row.querySelector('[name="quantity"]').value = item.quantity;
         const price = row.querySelector('[name="unit_price"]'); if (price) price.value = item.is_gift ? '0' : item.price;
+        if (typeof window.restoreReturnRow === 'function') window.restoreReturnRow(row, item);
         const search = row.querySelector('.product-search'); if (search) { search.value = item.search; search.setCustomValidity(select.value ? '' : '请从搜索结果中选择商品'); }
       }
       if (!entry.rows.length) window.addRow();

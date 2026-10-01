@@ -54,7 +54,7 @@
   <% if (relatedReturns && relatedReturns.length > 0) { %>
     <p>
       <strong>关联退货单：</strong>
-      <% relatedReturns.forEach(function(ro, idx) { %><a href="/returns/<%= ro.id %>">#<%= ro.id %></a>（¥<%= ro.total_amount.toFixed(2) %>，<%= ro.status === 'approved' ? '已审核' : (ro.status === 'submitted' ? '待审核' : (ro.status === 'rejected' ? '已拒绝' : '草稿')) %>）<%= idx < relatedReturns.length - 1 ? '、' : '' %><% }) %>
+      <% relatedReturns.forEach(function(ro, idx) { %><a href="/returns/<%= ro.id %>">#<%= ro.id %></a>（¥<%= ro.total_amount.toFixed(2) %>，<%= ro.cancelled_at ? '已撤销' : ro.status === 'approved' ? '已审核' : (ro.status === 'submitted' ? '待审核' : (ro.status === 'rejected' ? '已拒绝' : '草稿')) %>）<%= idx < relatedReturns.length - 1 ? '、' : '' %><% }) %>
     </p>
   <% } %>
   <h2 class="detail-section-heading">商品明细</h2>
@@ -104,9 +104,13 @@
     <% } %>
 
     <% if ((order.status === 'approved' || order.status === 'rejected') && currentUser.role === 'admin') { %>
+      <% if (relatedReturns.some(ro => ro.finalized_at)) { %>
+        <p class="muted">已有退货入账历史，原销售单和明细固定，不能反审核改写。</p>
+      <% } else { %>
       <form action="/sales/unapprove/<%= order.id %>" method="POST" onsubmit="return confirm('反审核会把该订单退回待审核状态<% if (order.status === 'approved') { %>，并把已扣减的库存加回来<% } %>，确认继续？')">
         <button type="submit" class="btn btn-secondary">反审核</button>
       </form>
+      <% } %>
     <% } %>
 
     <% if (order.status === 'approved' && currentUser.role === 'admin' && order.effective_debt > 0.001) { %>
