@@ -1,15 +1,19 @@
 <%- include('partials/header') %>
-<div class="page-heading-actions"><h1>客户管理</h1><a class="btn customer-add-trigger" href="#customerNewPanel" onclick="document.getElementById('customerNewPanel').open=true">＋新增</a></div>
+<div class="page-heading-actions"><h1>客户管理</h1><div class="customer-heading-buttons"><% if (isAdmin) { %><a class="btn btn-secondary customer-tag-trigger" href="#customerTagManagement" onclick="document.getElementById('customerTagManagement').open=true">管理标签</a><% } %><a class="btn customer-add-trigger" href="#customerNewPanel" onclick="document.getElementById('customerNewPanel').open=true">＋新增</a></div></div>
 <div class="card customer-search-card">
   <form method="GET" action="/customers" class="customer-search-form">
     <div class="form-row">
       <label for="customerQuery">查询客户</label>
       <input id="customerQuery" type="search" name="q" value="<%= query %>" placeholder="名称、联系人、电话或地址">
     </div>
+    <div class="form-row customer-tag-filter">
+      <label for="customerTagFilter">客户标签</label>
+      <select id="customerTagFilter" name="tag"><option value="">全部标签</option><% tags.forEach(function(tag) { %><option value="<%= tag.id %>" <%= tagId === tag.id ? 'selected' : '' %>><%= tag.name %></option><% }) %></select>
+    </div>
     <button type="submit" class="btn btn-secondary">查询</button>
-    <% if (query) { %><a class="btn btn-secondary" href="/customers">清除</a><% } %>
+    <% if (query || tagId) { %><a class="btn btn-secondary" href="/customers">清除</a><% } %>
   </form>
-  <p class="muted customer-count"><%= query ? '查询结果 ' + displayedCustomerCount + ' 位' : '客户数量 ' + totalCustomerCount + ' 位' %><% if (query) { %>（共 <%= totalCustomerCount %> 位客户）<% } %></p>
+  <p class="muted customer-count"><%= query || tagId ? '查询结果 ' + displayedCustomerCount + ' 位' : '客户数量 ' + totalCustomerCount + ' 位' %><% if (query || tagId) { %>（共 <%= totalCustomerCount %> 位客户）<% } %></p>
 </div>
 <details class="card customer-new-panel" id="customerNewPanel" open>
   <summary>新增客户 <span>展开填写</span></summary>
@@ -31,7 +35,8 @@
     <% } else { %>
       <p class="muted" style="grid-column: 1 / -1">新增的客户会自动归到你名下</p>
     <% } %>
-    <div><button class="btn" type="submit">新增</button></div>
+    <%- include('partials/customer_tag_choices', { tags, selectedTagIds: [] }) %>
+    <div class="customer-create-actions"><button class="btn" type="submit">新增</button></div>
   </form>
   </div>
 </details>
@@ -46,6 +51,7 @@
 </script>
 
 <% if (isAdmin) { %>
+<%- include('partials/customer_tag_management') %>
 <details class="card customer-reassign">
   <summary>
     <span>更多管理 · 批量转移客户归属</span>
@@ -79,7 +85,7 @@
     <tr><th>名称</th><th>联系人</th><th>电话</th><th>地址</th><th>归属业务员</th><th>操作</th></tr>
     <% customers.forEach(function(c) { %>
       <tr>
-        <td><%= c.name %></td>
+        <td class="customer-name-cell"><%= c.name %><%- include('partials/customer_tag_chips', { tags: c.tags }) %></td>
         <td><%= c.contact || '-' %></td>
         <td><%= c.phone || '-' %></td>
         <td><%= c.address || '-' %></td>
@@ -111,6 +117,7 @@
       <div class="order-card-top">
         <span class="order-card-id"><%= c.name %></span>
       </div>
+      <%- include('partials/customer_tag_chips', { tags: c.tags }) %>
       <div class="order-card-mid">
         <span><%= c.contact || '-' %><% if (c.phone) { %> · <a href="tel:<%= c.phone.replace(/[^+\d]/g, '') %>" class="customer-contact-link"><%= c.phone %></a><% } %></span>
         <span><%= c.operator_name || '未指定业务员' %></span>

@@ -1,0 +1,44 @@
+<details class="card customer-tag-management" id="customerTagManagement" <%= tagError || tagSuccess ? 'open' : '' %>>
+  <summary><span>标签管理</span><span class="muted"><%= tags.length %> / <%= maxTags %> 个 <span aria-hidden="true">⌄</span></span></summary>
+  <div class="customer-tag-management-content">
+    <p class="muted">标签可用于客户和销售订单筛选，一个客户可以选择多个标签。</p>
+    <% if (tagError) { %><div class="error" role="alert"><%= tagError %></div><% } %>
+    <% if (tagSuccess) { %><div class="success" role="status"><%= tagSuccess %></div><% } %>
+    <% if (tags.length < maxTags) { %>
+    <form method="POST" action="/customer-tags/new" class="customer-tag-create">
+      <div class="form-row"><label for="newTagName">新增标签</label><input id="newTagName" type="text" name="name" required maxlength="20" placeholder="如：流通" value="<%= tagDraft.id ? '' : tagDraft.name %>"></div>
+      <fieldset class="customer-tag-palette"><legend>选择颜色</legend>
+        <% tagColors.forEach(function(color) { %>
+          <label class="customer-tag-color-choice tag-color-<%= color.value %>"><input type="radio" name="color" value="<%= color.value %>" <%= color.value === (tagDraft.id ? 'blue' : tagDraft.color) ? 'checked' : '' %>><span><%= color.name %></span></label>
+        <% }) %>
+      </fieldset>
+      <button class="btn" type="submit">新增标签</button>
+    </form>
+    <% } else { %><p class="muted">标签已达 50 个上限，可编辑或删除现有标签。</p><% } %>
+    <p class="muted customer-tag-hint">名称最多 20 字，不能包含逗号或顿号。点击已有标签可修改名称和颜色。</p>
+    <div class="customer-tag-management-list">
+      <% tags.forEach(function(tag) { %>
+      <details class="customer-tag-management-item" <%= tagDraft.id === tag.id ? 'open' : '' %>>
+        <summary><span class="customer-tag-chip tag-color-<%= tag.color %>"><%= tag.name %></span><span class="muted">编辑 <span aria-hidden="true">›</span></span></summary>
+        <div class="customer-tag-edit-content">
+          <form method="POST" action="/customer-tags/<%= tag.id %>/edit" class="customer-tag-edit">
+            <div class="form-row"><label for="tagName<%= tag.id %>">标签名称</label><input id="tagName<%= tag.id %>" type="text" name="name" required maxlength="20" value="<%= tagDraft.id === tag.id ? tagDraft.name : tag.name %>"></div>
+            <div class="form-row"><label for="tagColor<%= tag.id %>">颜色</label><select id="tagColor<%= tag.id %>" name="color"><% tagColors.forEach(function(color) { %><option value="<%= color.value %>" <%= color.value === (tagDraft.id === tag.id ? tagDraft.color : tag.color) ? 'selected' : '' %>><%= color.name %></option><% }) %></select></div>
+            <button class="btn btn-secondary" type="submit">保存标签</button>
+          </form>
+          <form method="POST" action="/customer-tags/<%= tag.id %>/delete" onsubmit="return confirm('确认删除这个标签？只会解除客户的标签关联，不会删除客户或订单。')"><button class="btn customer-tag-delete" type="submit">删除标签</button></form>
+        </div>
+      </details>
+      <% }) %>
+      <% if (!tags.length) { %><p class="muted">还没有标签，先创建一个试试。</p><% } %>
+    </div>
+  </div>
+</details>
+<script>
+  (function() {
+    const panel = document.getElementById('customerTagManagement');
+    function reveal() { if (location.hash === '#customerTagManagement') panel.open = true; }
+    reveal();
+    window.addEventListener('hashchange', reveal);
+  })();
+</script>

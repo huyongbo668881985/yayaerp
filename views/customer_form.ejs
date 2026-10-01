@@ -1,6 +1,6 @@
 <%- include('partials/header') %>
 <h1>编辑客户</h1>
-<div class="card" style="max-width:520px">
+<div class="card customer-edit-card" style="max-width:640px">
   <% if (error) { %><div class="error"><%= error %></div><% } %>
   <form method="POST" action="/customers/<%= customer.id %>/edit">
     <div class="form-row"><label>名称 *</label><input type="text" name="name" required pattern="\S+" title="客户名称不能包含空格" value="<%= customer.name %>"></div>
@@ -18,8 +18,9 @@
         </select>
       </div>
     <% } %>
-    <button class="btn" type="submit">保存</button>
-    <a class="btn btn-secondary" href="/customers">取消</a>
+    <%- include('partials/customer_tag_choices', { tags, selectedTagIds }) %>
+    <div class="customer-edit-actions"><button class="btn" type="submit">保存</button>
+    <a class="btn btn-secondary" href="/customers">取消</a></div>
   </form>
 </div>
 <%- include('partials/footer') %>

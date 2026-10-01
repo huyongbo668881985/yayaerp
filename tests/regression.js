@@ -553,6 +553,9 @@ function latestIdInList(html, pattern) {
   section('K. 收款/退款事务、并发与审计日志');
   await require('./payment-refund-test').runPaymentRefundTests(ok);
 
+  section('L. 客户标签、权限与销售筛选/导出');
+  await require('./customer-tags-test').runCustomerTagTests(ok);
+
   console.log('\n========================================');
   console.log(`PASS: ${PASSES}   FAIL: ${FAILS}`);
   console.log(FAILS === 0 ? '全部通过' : '存在失败项');

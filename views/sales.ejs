@@ -17,7 +17,7 @@
 </div>
 
 <details class="card sales-filter-panel" id="salesFilterPanel" open>
-  <summary>筛选订单<%= start || end || customerId || unpaidOnly || pendingOnly ? ' · 已应用条件' : '' %></summary>
+  <summary>筛选订单<%= start || end || customerId || unpaidOnly || pendingOnly || tagId ? ' · 已应用条件' : '' %></summary>
   <form method="GET" action="/sales" class="sales-filter-form">
     <div class="form-row" style="margin-bottom:0">
       <label>开始日期</label>
@@ -51,16 +51,27 @@
         <input type="hidden" name="customer_id" id="salesCustomerId" value="<%= customerId || '' %>">
       </div>
     </div>
+    <div class="form-row sales-tag-filter">
+      <label for="salesTagFilter">客户标签</label>
+      <select id="salesTagFilter" name="tag_id"><option value="">全部标签</option><% tags.forEach(function(tag) { %><option value="<%= tag.id %>" <%= tagId === tag.id ? 'selected' : '' %>><%= tag.name %></option><% }) %></select>
+    </div>
     <div class="form-row sales-unpaid-filter">
       <input type="checkbox" name="unpaid" value="1" id="unpaidCheck" <%= unpaidOnly ? 'checked' : '' %> style="width:auto">
       <label for="unpaidCheck" style="margin:0">只看未结清（欠款）</label>
     </div>
     <% if (pendingOnly) { %><input type="hidden" name="pending" value="1"><% } %>
+    <% if (guestOnly) { %><input type="hidden" name="guest" value="1"><% } %>
+    <input type="hidden" name="sort" value="<%= sort %>"><input type="hidden" name="order" value="<%= order %>">
+    <div class="sales-filter-actions">
     <button type="submit" class="btn btn-secondary">筛选</button>
     <a class="btn btn-secondary" href="/sales">清除</a>
-    <a class="btn" href="/sales/export?start=<%= start %>&end=<%= end %>&customer_id=<%= customerId || '' %><%= guestOnly ? '&guest=1' : '' %><%= unpaidOnly ? '&unpaid=1' : '' %><%= pendingOnly ? '&pending=1' : '' %>">导出CSV</a>
+    <a class="btn" href="/sales/export<%= salesQueryString({ page: null }) %>">导出CSV</a>
+    </div>
   </form>
 </details>
+<% if (tagId) { const selectedTag = tags.find(function(tag) { return tag.id === tagId; }); %>
+  <div class="sales-tag-context"><span>客户标签：<strong><%= selectedTag ? selectedTag.name : '标签不存在' %></strong></span><a href="/sales<%= salesQueryString({ tag_id: null, page: null }) %>">清除标签筛选</a></div>
+<% } %>
 <script>
   (function() {
     const panel = document.getElementById('salesFilterPanel');

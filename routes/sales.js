@@ -8,6 +8,7 @@ const { isBlank, isValidDateString, isValidNonNegativeAmount, roundToCents } = r
 const { warehousesForUser, isWarehouseInScope } = require('../lib/warehouseAccess');
 const { writeAuditLog } = require('../lib/auditLog');
 const { submittedItemsFromBody } = require('../lib/formDraft');
+const { parseTagId, getCustomerTags } = require('../lib/customerTags');
 const router = express.Router();
 
 // 关联到某张销售单、且已审核的退货金额。
@@ -105,7 +106,7 @@ function attachEffectivePayment(order) {
   return order;
 }
 
-function queryOrders(db, user, start, end, customerId, guestOnly, unpaidOnly, pendingOnly) {
+function queryOrders(db, user, start, end, customerId, guestOnly, unpaidOnly, pendingOnly, tagId = null) {
   let sql = `
     SELECT so.*, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name,
            ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount
@@ -123,6 +124,7 @@ function queryOrders(db, user, start, end, customerId, guestOnly, unpaidOnly, pe
   if (start) { sql += ' AND so.order_date >= ?'; params.push(start); }
   if (end) { sql += ' AND so.order_date <= ?'; params.push(end); }
   if (customerId) { sql += ' AND so.customer_id = ?'; params.push(customerId); }
+  if (tagId) { sql += ' AND so.customer_id IN (SELECT customer_id FROM customer_tag_links WHERE tag_id = ?)'; params.push(tagId); }
   if (guestOnly) sql += ' AND so.customer_id IS NULL';
   if (pendingOnly) sql += " AND so.status = 'submitted'";
   sql += ' ORDER BY so.id DESC';
@@ -175,8 +177,10 @@ router.get('/sales', requireLogin, (req, res) => {
   const pendingOnly = user.role === 'admin' && req.query.pending === '1';
   const { sort, order } = parseSort(req.query, ['date', 'amount', 'debt'], 'date');
   const customers = customersForForm(db, user, null);
+  const tagId = parseTagId(req.query.tag_id);
+  const tags = getCustomerTags(db);
 
-  const allOrders = queryOrders(db, user, start, end, customerId, guestOnly, unpaidOnly, pendingOnly);
+  const allOrders = queryOrders(db, user, start, end, customerId, guestOnly, unpaidOnly, pendingOnly, tagId);
   sortRows(allOrders, sort, order, (row, field) => ({
     date: row.order_date,
     amount: row.total_amount,
@@ -193,7 +197,8 @@ router.get('/sales', requireLogin, (req, res) => {
   res.render('sales', {
     orders, user, customers, customerId, guestOnly, start: start || '', end: end || '', unpaidOnly, pendingOnly,
     sort, order, page, totalPages, totalOrders,
-    salesQueryString
+    tags, tagId,
+    salesQueryString: params => salesQueryString({ start, end, customer_id: customerId, guest: guestOnly ? 1 : '', unpaid: unpaidOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort, order, tag_id: tagId, ...params })
   });
 });
 
@@ -249,12 +254,17 @@ router.get('/sales/export', requireLogin, (req, res) => {
   const guestOnly = req.query.guest === '1';
   const unpaidOnly = req.query.unpaid === '1';
   const pendingOnly = user.role === 'admin' && req.query.pending === '1';
+  const tagId = parseTagId(req.query.tag_id);
 
   let sql = `
     SELECT so.id AS order_id, so.order_date, so.warehouse_id, so.status,
            so.total_amount, so.paid_amount,
            ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount,
            so.remarks, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name,
+           (SELECT GROUP_CONCAT(name, '、') FROM (
+             SELECT t.name FROM customer_tag_links l JOIN customer_tags t ON t.id = l.tag_id
+             WHERE l.customer_id = so.customer_id ORDER BY t.id
+           )) AS customer_tags,
            soi.quantity, soi.unit_label, soi.unit_price, soi.is_gift, p.name AS product_name
     FROM sales_orders so
     LEFT JOIN customers c ON c.id = so.customer_id
@@ -269,6 +279,7 @@ router.get('/sales/export', requireLogin, (req, res) => {
   if (start) { sql += ' AND so.order_date >= ?'; params.push(start); }
   if (end) { sql += ' AND so.order_date <= ?'; params.push(end); }
   if (customerId) { sql += ' AND so.customer_id = ?'; params.push(customerId); }
+  if (tagId) { sql += ' AND so.customer_id IN (SELECT customer_id FROM customer_tag_links WHERE tag_id = ?)'; params.push(tagId); }
   if (guestOnly) sql += ' AND so.customer_id IS NULL';
   if (pendingOnly) sql += " AND so.status = 'submitted'";
   sql += ' ORDER BY so.id DESC';
@@ -283,11 +294,12 @@ router.get('/sales/export', requireLogin, (req, res) => {
   const statusText = { draft: '草稿', submitted: '待审核', approved: '已审核', rejected: '已拒绝' };
   const paymentText = { paid: '已收款', partial: '部分收款', unpaid: '未收款' };
 
-  const headers = ['单号', '日期', '客户', '仓库', '商品', '数量', '单位', '单价', '小计', '是否赠品', '收款状态', '审核状态', '录入人', '备注'];
+  const headers = ['单号', '日期', '客户', '客户标签', '仓库', '商品', '数量', '单位', '单价', '小计', '是否赠品', '收款状态', '审核状态', '录入人', '备注'];
   const rows = rows_raw.map(r => [
     r.order_id,
     r.order_date,
     r.customer_name || '散客',
+    r.customer_tags || '',
     r.warehouse_name,
     r.product_name,
     r.quantity,

@@ -1,5 +1,7 @@
 const express = require('express');
 const { requireLogin, requireAdmin } = require('../middleware/auth');
+const { writeAuditLog } = require('../lib/auditLog');
+const { TAG_COLORS, MAX_TAGS, parseTagId, getCustomerTags, validateTag, replaceCustomerTags, validTagIds, attachCustomerTags } = require('../lib/customerTags');
 const router = express.Router();
 
 // 客户名称是业务识别键：同一租户内不允许重名，也不接受任何空白字符。
@@ -49,6 +51,7 @@ router.get('/customers', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const user = req.session.user;
   const query = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  const tagId = parseTagId(req.query.tag);
   const baseSql = `
     SELECT c.*, u.name AS operator_name
     FROM customers c
@@ -60,16 +63,82 @@ router.get('/customers', requireLogin, (req, res) => {
     ? `${scopeClause ? ' AND' : ' WHERE'} (c.name LIKE ? OR c.contact LIKE ? OR c.phone LIKE ? OR c.address LIKE ?)`
     : '';
   const searchParams = query ? Array(4).fill(`%${query}%`) : [];
-  const customers = db.prepare(baseSql + scopeClause + searchClause + ' ORDER BY c.id DESC')
-    .all(...scopeParams, ...searchParams);
+  const tagClause = tagId
+    ? `${scopeClause || searchClause ? ' AND' : ' WHERE'} c.id IN (SELECT customer_id FROM customer_tag_links WHERE tag_id = ?)`
+    : '';
+  const customers = db.prepare(baseSql + scopeClause + searchClause + tagClause + ' ORDER BY c.id DESC')
+    .all(...scopeParams, ...searchParams, ...(tagId ? [tagId] : []));
+  attachCustomerTags(db, customers);
   const totalCustomerCount = db.prepare(`SELECT COUNT(*) AS count FROM customers c${scopeClause}`)
     .get(...scopeParams).count;
   const users = db.prepare('SELECT id, name, role FROM users ORDER BY name').all();
   res.render('customers', {
     customers, users, isAdmin: user.role === 'admin', query,
     totalCustomerCount, displayedCustomerCount: customers.length,
+    tags: getCustomerTags(db), tagId, tagColors: TAG_COLORS, maxTags: MAX_TAGS,
+    tagError: typeof req.query.tag_error === 'string' ? req.query.tag_error : null,
+    tagSuccess: typeof req.query.tag_success === 'string' ? req.query.tag_success : null,
+    tagDraft: {
+      id: parseTagId(req.query.tag_edit_id),
+      name: typeof req.query.tag_name === 'string' ? req.query.tag_name : '',
+      color: TAG_COLORS.some(color => color.value === req.query.tag_color) ? req.query.tag_color : 'blue'
+    },
     error: typeof req.query.error === 'string' ? req.query.error : null
   });
+});
+
+function tagResponse(res, result, success, draft = null) {
+  const key = result.error ? 'tag_error' : 'tag_success';
+  const query = new URLSearchParams({ [key]: result.error || success });
+  if (result.error && draft) {
+    if (draft.id) query.set('tag_edit_id', String(draft.id));
+    if (typeof draft.name === 'string') query.set('tag_name', draft.name.slice(0, 200));
+    if (typeof draft.color === 'string') query.set('tag_color', draft.color);
+  }
+  return res.redirect('/customers?' + query.toString() + '#customerTagManagement');
+}
+
+router.post('/customer-tags/new', requireAdmin, (req, res) => {
+  const db = req.tenantDb;
+  const result = db.transaction(() => {
+    const check = validateTag(db, req.body.name, req.body.color);
+    if (check.error) return check;
+    if (db.prepare('SELECT COUNT(*) AS count FROM customer_tags').get().count >= MAX_TAGS) {
+      return { error: '标签数量已达上限，最多可创建 50 个标签' };
+    }
+    const tag = db.prepare('INSERT INTO customer_tags (name, color) VALUES (?, ?)').run(check.name, check.color);
+    writeAuditLog(db, req.session.user, '新增客户标签', '客户标签', Number(tag.lastInsertRowid), `名称：${check.name}`);
+    return {};
+  }).immediate();
+  tagResponse(res, result, '标签已新增', req.body);
+});
+
+router.post('/customer-tags/:id/edit', requireAdmin, (req, res) => {
+  const db = req.tenantDb;
+  const result = db.transaction(() => {
+    const tag = db.prepare('SELECT * FROM customer_tags WHERE id = ?').get(req.params.id);
+    if (!tag) return { error: '标签不存在' };
+    const check = validateTag(db, req.body.name, req.body.color, tag.id);
+    if (check.error) return check;
+    db.prepare('UPDATE customer_tags SET name = ?, color = ? WHERE id = ?').run(check.name, check.color, tag.id);
+    writeAuditLog(db, req.session.user, '修改客户标签', '客户标签', tag.id, `名称：${tag.name} → ${check.name}，颜色：${check.color}`);
+    return {};
+  }).immediate();
+  tagResponse(res, result, '标签已保存', { id: req.params.id, name: req.body.name, color: req.body.color });
+});
+
+router.post('/customer-tags/:id/delete', requireAdmin, (req, res) => {
+  const db = req.tenantDb;
+  const result = db.transaction(() => {
+    const tag = db.prepare('SELECT * FROM customer_tags WHERE id = ?').get(req.params.id);
+    if (!tag) return { error: '标签不存在' };
+    // 即使连接关闭了 foreign_keys，也先解除关联；客户与历史订单保持完整。
+    db.prepare('DELETE FROM customer_tag_links WHERE tag_id = ?').run(tag.id);
+    db.prepare('DELETE FROM customer_tags WHERE id = ?').run(tag.id);
+    writeAuditLog(db, req.session.user, '删除客户标签', '客户标签', tag.id, `名称：${tag.name}`);
+    return {};
+  }).immediate();
+  tagResponse(res, result, '标签已删除，客户和订单不受影响');
 });
 
 router.post('/customers/new', requireLogin, (req, res) => {
@@ -81,8 +150,11 @@ router.post('/customers/new', requireLogin, (req, res) => {
   const operatorId = req.session.user.role === 'admin'
     ? (req.body.operator_id || null)
     : req.session.user.id;
-  db.prepare('INSERT INTO customers (name, contact, phone, address, operator_id) VALUES (?,?,?,?,?)')
-    .run(nameCheck.name, contact || '', phone || '', address || '', operatorId);
+  db.transaction(() => {
+    const customer = db.prepare('INSERT INTO customers (name, contact, phone, address, operator_id) VALUES (?,?,?,?,?)')
+      .run(nameCheck.name, contact || '', phone || '', address || '', operatorId);
+    replaceCustomerTags(db, Number(customer.lastInsertRowid), req.body.tag_ids);
+  }).immediate();
   res.redirect('/customers');
 });
 
@@ -101,7 +173,8 @@ router.get('/customers/:id/edit', requireLogin, (req, res) => {
     return res.status(403).send('只能编辑自己名下的客户，如需修改请联系管理员');
   }
   const users = db.prepare('SELECT id, name, role FROM users ORDER BY name').all();
-  res.render('customer_form', { customer, users, error: null, isAdmin: req.session.user.role === 'admin' });
+  const selectedTagIds = db.prepare('SELECT tag_id FROM customer_tag_links WHERE customer_id = ?').all(customer.id).map(link => link.tag_id);
+  res.render('customer_form', { customer, users, error: null, tags: getCustomerTags(db), selectedTagIds, isAdmin: req.session.user.role === 'admin' });
 });
 
 router.post('/customers/:id/edit', requireLogin, (req, res) => {
@@ -115,17 +188,20 @@ router.post('/customers/:id/edit', requireLogin, (req, res) => {
   const nameCheck = validateCustomerName(db, req.body.name, customer.id);
   if (nameCheck.error) {
     const users = db.prepare('SELECT id, name, role FROM users ORDER BY name').all();
-    return res.render('customer_form', { customer, users, error: nameCheck.error, isAdmin: req.session.user.role === 'admin' });
+    return res.render('customer_form', { customer, users, error: nameCheck.error, tags: getCustomerTags(db), selectedTagIds: validTagIds(db, req.body.tag_ids), isAdmin: req.session.user.role === 'admin' });
   }
-  if (req.session.user.role === 'admin') {
-    // 管理员可以改归属业务员
-    db.prepare('UPDATE customers SET name=?, contact=?, phone=?, address=?, operator_id=? WHERE id=?')
-      .run(nameCheck.name, contact || '', phone || '', address || '', req.body.operator_id || null, req.params.id);
-  } else {
-    // 操作员编辑不改归属人，避免误操作把客户转给别人
-    db.prepare('UPDATE customers SET name=?, contact=?, phone=?, address=? WHERE id=?')
-      .run(nameCheck.name, contact || '', phone || '', address || '', req.params.id);
-  }
+  db.transaction(() => {
+    if (req.session.user.role === 'admin') {
+      // 管理员可以改归属业务员
+      db.prepare('UPDATE customers SET name=?, contact=?, phone=?, address=?, operator_id=? WHERE id=?')
+        .run(nameCheck.name, contact || '', phone || '', address || '', req.body.operator_id || null, req.params.id);
+    } else {
+      // 操作员编辑不改归属人，避免误操作把客户转给别人
+      db.prepare('UPDATE customers SET name=?, contact=?, phone=?, address=? WHERE id=?')
+        .run(nameCheck.name, contact || '', phone || '', address || '', req.params.id);
+    }
+    replaceCustomerTags(db, customer.id, req.body.tag_ids);
+  }).immediate();
   res.redirect('/customers');
 });
 
@@ -153,7 +229,10 @@ router.post('/customers/:id/delete', requireAdmin, (req, res) => {
     ].filter(Boolean).join('、');
     return res.status(400).send(`无法删除：该客户名下还有 ${detail} 记录，请先处理相关单据（或者不删，改个名字标记为停用）`);
   }
-  db.prepare('DELETE FROM customers WHERE id = ?').run(req.params.id);
+  db.transaction(() => {
+    db.prepare('DELETE FROM customer_tag_links WHERE customer_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM customers WHERE id = ?').run(req.params.id);
+  }).immediate();
   res.redirect('/customers');
 });
 

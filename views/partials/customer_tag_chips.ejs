@@ -1,0 +1,5 @@
+<% if (tags.length) { %>
+  <div class="customer-tag-chips" aria-label="客户标签">
+    <% tags.forEach(function(tag) { %><span class="customer-tag-chip tag-color-<%= tag.color %>"><%= tag.name %></span><% }) %>
+  </div>
+<% } %>

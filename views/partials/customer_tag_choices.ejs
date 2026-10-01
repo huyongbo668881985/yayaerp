@@ -1,0 +1,32 @@
+<fieldset class="customer-tag-field" style="grid-column:1 / -1">
+  <legend>客户标签 <span class="muted" data-tag-count>已选 <%= selectedTagIds.length %> 个</span></legend>
+  <% if (tags.length) { %>
+    <p class="muted customer-tag-hint">可多选，点击标签即可选中或取消。</p>
+    <% if (tags.length > 8) { %><input type="search" class="customer-tag-search" placeholder="查找标签" aria-label="查找可选客户标签"><% } %>
+    <div class="customer-tag-choices">
+      <% tags.forEach(function(tag) { %>
+        <label class="customer-tag-choice tag-color-<%= tag.color %>" data-tag-name="<%= tag.name.toLocaleLowerCase() %>">
+          <input type="checkbox" name="tag_ids" value="<%= tag.id %>" <%= selectedTagIds.includes(tag.id) ? 'checked' : '' %>>
+          <span><%= tag.name %></span>
+        </label>
+      <% }) %>
+    </div>
+    <p class="muted customer-tag-no-match" hidden>没有匹配的标签</p>
+  <% } else { %>
+    <p class="muted customer-tag-hint">暂无标签，管理员可在客户页创建。</p>
+  <% } %>
+</fieldset>
+<script>
+  document.querySelectorAll('.customer-tag-field').forEach(function(field) {
+    const choices = Array.from(field.querySelectorAll('.customer-tag-choice'));
+    field.addEventListener('change', function() {
+      field.querySelector('[data-tag-count]').textContent = '已选 ' + field.querySelectorAll('input[type=checkbox]:checked').length + ' 个';
+    });
+    const search = field.querySelector('.customer-tag-search');
+    if (search) search.addEventListener('input', function() {
+      const keyword = search.value.trim().toLocaleLowerCase();
+      choices.forEach(function(choice) { choice.hidden = !choice.dataset.tagName.includes(keyword); });
+      field.querySelector('.customer-tag-no-match').hidden = choices.some(function(choice) { return !choice.hidden; });
+    });
+  });
+</script>
