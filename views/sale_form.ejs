@@ -43,6 +43,14 @@
         <label>日期</label>
         <input type="date" name="order_date" value="<%= form.order_date || today %>">
       </div>
+      <div class="form-row">
+        <label for="saleResponsible">负责人 *</label>
+        <select id="saleResponsible" name="responsible_id" required>
+          <% const selectedResponsibleId = form.responsible_id || (order && order.user_id) || currentUser.id; %>
+          <% responsibleOptions.forEach(function(person) { %><option value="<%= person.id %>" <%= String(selectedResponsibleId) === String(person.id) ? 'selected' : '' %>><%= person.name %>（<%= person.username %>）<%= person.active ? '' : ' · 已停用' %></option><% }) %>
+        </select>
+        <span class="muted responsible-field-hint">默认由录入人负责，可按实际分工调整。</span>
+      </div>
     </div>
 
     <h2 class="form-section-heading">商品明细</h2>

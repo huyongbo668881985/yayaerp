@@ -10,6 +10,7 @@ const { warehousesForUser, isWarehouseInScope } = require('../lib/warehouseAcces
 const { writeAuditLog } = require('../lib/auditLog');
 const { submittedItemsFromBody } = require('../lib/formDraft');
 const { parseTagId, getCustomerTags } = require('../lib/customerTags');
+const { responsibleUsers, resolveResponsible } = require('../lib/salesResponsibility');
 const router = express.Router();
 
 // 关联到某张销售单、且已审核的退货金额。
@@ -105,14 +106,34 @@ function customerSelectionError(db, body) {
 // 只是在读取展示的时候，把关联到这张单、已审核的退货金额顺带减掉。
 // 这样退货金额=0也不影响没有关联退货的普通订单，是老逻辑的自然扩展，不是另一套逻辑。
 
-function queryOrders(db, user, start, end, customerId, guestOnly, unpaidOnly, pendingOnly, tagId = null, orderStatus = '') {
+function settlementFilter(query) {
+  if (['all', 'outstanding', 'settled'].includes(query.settlement)) {
+    return query.settlement === 'all' ? '' : query.settlement;
+  }
+  // 保留旧链接（含客户页、收藏链接）的未结清筛选。
+  return query.unpaid === '1' ? 'outstanding' : '';
+}
+
+function responsibleFilter(query) {
+  const id = Number(query.responsible_id);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+function filterSettlement(rows, settlement) {
+  if (!settlement) return rows;
+  return rows.filter(row => row.status === 'approved' &&
+    (settlement === 'settled' ? row.effective_status === 'paid' : row.effective_status !== 'paid'));
+}
+
+function queryOrders(db, user, start, end, customerId, guestOnly, settlement, pendingOnly, tagId = null, orderStatus = '', responsibleId = null) {
   let sql = `
-    SELECT so.*, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name,
+    SELECT so.*, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name, ru.name AS responsible_name,
            ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount, ${refundedAmountSubquery()} AS cash_refunded_amount
     FROM sales_orders so
     LEFT JOIN customers c ON c.id = so.customer_id
     LEFT JOIN warehouses w ON w.id = so.warehouse_id
     LEFT JOIN users u ON u.id = so.user_id
+    LEFT JOIN users ru ON ru.id = COALESCE(so.responsible_id, so.user_id)
     WHERE 1=1
   `;
   const params = [];
@@ -123,14 +144,13 @@ function queryOrders(db, user, start, end, customerId, guestOnly, unpaidOnly, pe
   if (start) { sql += ' AND so.order_date >= ?'; params.push(start); }
   if (end) { sql += ' AND so.order_date <= ?'; params.push(end); }
   if (customerId) { sql += ' AND so.customer_id = ?'; params.push(customerId); }
+  if (responsibleId) { sql += ' AND COALESCE(so.responsible_id, so.user_id) = ?'; params.push(responsibleId); }
   if (tagId) { sql += ' AND so.customer_id IN (SELECT customer_id FROM customer_tag_links WHERE tag_id = ?)'; params.push(tagId); }
   if (guestOnly) sql += ' AND so.customer_id IS NULL';
   if (pendingOnly) sql += " AND so.status = 'submitted'";
   if (orderStatus) { sql += ' AND so.status = ?'; params.push(orderStatus); }
   sql += ' ORDER BY so.id DESC';
-  let orders = db.prepare(sql).all(...params).map(attachEffectivePayment);
-  if (unpaidOnly) orders = orders.filter(o => o.status === 'approved' && o.effective_status !== 'paid');
-  return orders;
+  return filterSettlement(db.prepare(sql).all(...params).map(attachEffectivePayment), settlement);
 }
 
 function parseSort(query, allowed, defaultSort, defaultOrder = 'desc') {
@@ -159,9 +179,9 @@ function salesQueryString(params) {
   return text ? `?${text}` : '';
 }
 
-// 销售单列表 - 管理员看全部，操作员看自己的；支持日期、客户与未结清筛选。
+// 销售单列表 - 管理员看全部，操作员看自己的；支持日期、客户、结清状态与负责人筛选。
 // 管理员可使用 ?pending=1 集中查看所有待审核销售单，避免遗漏审核；操作员即使手动拼接该参数也不会生效。
-// 分页：每页 50 条。"只看未结清"是查询后按有效欠款在内存里过滤的，
+// 分页：每页 50 条。结清状态按关联退货与现金退款后的有效余额过滤，
 // 所以先全量查询+过滤，再内存切片分页，保证筛选和分页的组合结果正确。
 // （SQLite 本地查询几千行很快，真正的开销是渲染 HTML，只渲染当页即可。）
 const SALES_PAGE_SIZE = 50;
@@ -173,7 +193,11 @@ router.get('/sales', requireLogin, (req, res) => {
   const requestedCustomerId = Number(req.query.customer_id);
   const customerId = Number.isInteger(requestedCustomerId) && requestedCustomerId > 0 ? requestedCustomerId : null;
   const guestOnly = req.query.guest === '1';
-  const unpaidOnly = req.query.unpaid === '1';
+  const settlement = settlementFilter(req.query);
+  const responsibleId = responsibleFilter(req.query);
+  const responsibleOptions = db.prepare(`SELECT id, name, username, active FROM users
+    WHERE ${user.role === 'admin' ? 'active = 1 OR EXISTS (SELECT 1 FROM sales_orders WHERE COALESCE(responsible_id, user_id) = users.id)' : 'id = ? OR EXISTS (SELECT 1 FROM sales_orders WHERE user_id = ? AND COALESCE(responsible_id, user_id) = users.id)'}
+    ORDER BY active DESC, name, id`).all(...(user.role === 'admin' ? [] : [user.id, user.id]));
   const pendingOnly = user.role === 'admin' && req.query.pending === '1';
   const orderStatus = req.query.status === 'draft' ? 'draft' : '';
   const { sort, order } = parseSort(req.query, ['date', 'amount', 'debt'], 'date');
@@ -181,7 +205,7 @@ router.get('/sales', requireLogin, (req, res) => {
   const tagId = parseTagId(req.query.tag_id);
   const tags = getCustomerTags(db);
 
-  const allOrders = queryOrders(db, user, start, end, customerId, guestOnly, unpaidOnly, pendingOnly, tagId, orderStatus);
+  const allOrders = queryOrders(db, user, start, end, customerId, guestOnly, settlement, pendingOnly, tagId, orderStatus, responsibleId);
   const draftCount = db.prepare("SELECT COUNT(*) n FROM sales_orders WHERE status='draft'" + (user.role === 'admin' ? '' : ' AND user_id=?')).get(...(user.role === 'admin' ? [] : [user.id])).n;
   sortRows(allOrders, sort, order, (row, field) => ({
     date: row.order_date,
@@ -197,10 +221,10 @@ router.get('/sales', requireLogin, (req, res) => {
 
   const orders = allOrders.slice((page - 1) * SALES_PAGE_SIZE, page * SALES_PAGE_SIZE);
   res.render('sales', {
-    orders, user, customers, customerId, guestOnly, start: start || '', end: end || '', unpaidOnly, pendingOnly,
+    orders, user, customers, customerId, guestOnly, start: start || '', end: end || '', settlement, responsibleId, responsibleOptions, pendingOnly,
     sort, order, page, totalPages, totalOrders, orderStatus, draftCount,
     tags, tagId,
-    salesQueryString: params => salesQueryString({ start, end, customer_id: customerId, guest: guestOnly ? 1 : '', unpaid: unpaidOnly ? 1 : '', pending: pendingOnly ? 1 : '', status: orderStatus, sort, order, tag_id: tagId, ...params })
+    salesQueryString: params => salesQueryString({ start, end, customer_id: customerId, guest: guestOnly ? 1 : '', settlement, responsible_id: responsibleId, unpaid: req.query.unpaid === '1' && settlement === 'outstanding' ? 1 : '', pending: pendingOnly ? 1 : '', status: orderStatus, sort, order, tag_id: tagId, ...params })
   });
 });
 
@@ -254,7 +278,8 @@ router.get('/sales/export', requireLogin, (req, res) => {
   const requestedCustomerId = Number(req.query.customer_id);
   const customerId = Number.isInteger(requestedCustomerId) && requestedCustomerId > 0 ? requestedCustomerId : null;
   const guestOnly = req.query.guest === '1';
-  const unpaidOnly = req.query.unpaid === '1';
+  const settlement = settlementFilter(req.query);
+  const responsibleId = responsibleFilter(req.query);
   const pendingOnly = user.role === 'admin' && req.query.pending === '1';
   const orderStatus = req.query.status === 'draft' ? 'draft' : '';
   const tagId = parseTagId(req.query.tag_id);
@@ -263,7 +288,7 @@ router.get('/sales/export', requireLogin, (req, res) => {
     SELECT so.id AS order_id, so.order_date, so.warehouse_id, so.status,
            so.total_amount, so.paid_amount,
            ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount, ${refundedAmountSubquery()} AS cash_refunded_amount,
-           so.remarks, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name,
+           so.remarks, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name, ru.name AS responsible_name,
            (SELECT GROUP_CONCAT(name, '、') FROM (
              SELECT t.name FROM customer_tag_links l JOIN customer_tags t ON t.id = l.tag_id
              WHERE l.customer_id = so.customer_id ORDER BY t.id
@@ -273,6 +298,7 @@ router.get('/sales/export', requireLogin, (req, res) => {
     LEFT JOIN customers c ON c.id = so.customer_id
     LEFT JOIN warehouses w ON w.id = so.warehouse_id
     LEFT JOIN users u ON u.id = so.user_id
+    LEFT JOIN users ru ON ru.id = COALESCE(so.responsible_id, so.user_id)
     JOIN sales_order_items soi ON soi.sales_order_id = so.id
     JOIN products p ON p.id = soi.product_id
     WHERE 1=1
@@ -282,18 +308,18 @@ router.get('/sales/export', requireLogin, (req, res) => {
   if (start) { sql += ' AND so.order_date >= ?'; params.push(start); }
   if (end) { sql += ' AND so.order_date <= ?'; params.push(end); }
   if (customerId) { sql += ' AND so.customer_id = ?'; params.push(customerId); }
+  if (responsibleId) { sql += ' AND COALESCE(so.responsible_id, so.user_id) = ?'; params.push(responsibleId); }
   if (tagId) { sql += ' AND so.customer_id IN (SELECT customer_id FROM customer_tag_links WHERE tag_id = ?)'; params.push(tagId); }
   if (guestOnly) sql += ' AND so.customer_id IS NULL';
   if (pendingOnly) sql += " AND so.status = 'submitted'";
   if (orderStatus) { sql += ' AND so.status = ?'; params.push(orderStatus); }
   sql += ' ORDER BY so.id DESC';
-  let rows_raw = db.prepare(sql).all(...params).map(attachEffectivePayment);
-  if (unpaidOnly) rows_raw = rows_raw.filter(r => r.status === 'approved' && r.effective_status !== 'paid');
+  const rows_raw = filterSettlement(db.prepare(sql).all(...params).map(attachEffectivePayment), settlement);
 
   const statusText = { draft: '草稿', submitted: '待审核', approved: '已审核', rejected: '已拒绝' };
   const paymentText = { paid: '已结清', partial: '部分结算', unpaid: '未收款', refund_pending: '待退款' };
 
-  const headers = ['单号', '日期', '客户', '客户标签', '仓库', '商品', '数量', '单位', '单价', '小计', '是否赠品', '收款状态', '审核状态', '录入人', '备注'];
+  const headers = ['单号', '日期', '客户', '客户标签', '仓库', '商品', '数量', '单位', '单价', '小计', '是否赠品', '收款状态', '审核状态', '负责人', '录入人', '备注'];
   const rows = rows_raw.map(r => [
     r.order_id,
     r.order_date,
@@ -308,6 +334,7 @@ router.get('/sales/export', requireLogin, (req, res) => {
     r.is_gift ? '赠品' : '',
     r.status === 'approved' ? (paymentText[r.effective_status] || r.effective_status) : '待生效',
     statusText[r.status] || r.status,
+    r.responsible_name,
     r.user_name,
     r.remarks || ''
   ]);
@@ -357,6 +384,7 @@ router.get('/sales/new', requireLogin, (req, res) => {
   const warehouses = warehousesForUser(db, req.session.user);
   const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
   res.render('sale_form', {
+    responsibleOptions: responsibleUsers(db),
     customers, warehouses, products, error: null, order: null, existingItems: [], today: todayLocalDate(),
     formValues: selectedCustomer ? { customer_id: selectedCustomer.id } : null
   });
@@ -370,7 +398,7 @@ router.post('/sales/new', requireLogin, requireMutationKey, (req, res) => {
     const customers = customersForForm(db, req.session.user, null);
     const warehouses = warehousesForUser(db, req.session.user);
     const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
-    return res.render('sale_form', { customers, warehouses, products, error: msg, order: null, existingItems: [], formValues: req.body, draftItems: submittedItemsFromBody(req.body), today: todayLocalDate() });
+    return res.render('sale_form', { responsibleOptions: responsibleUsers(db), customers, warehouses, products, error: msg, order: null, existingItems: [], formValues: req.body, draftItems: submittedItemsFromBody(req.body), today: todayLocalDate() });
   };
 
   if (!isBlank(order_date) && !isValidDateString(order_date)) {
@@ -380,6 +408,9 @@ router.post('/sales/new', requireLogin, requireMutationKey, (req, res) => {
 
   const selectionError = customerSelectionError(db, req.body);
   if (selectionError) { res.status(400); return renderError(selectionError); }
+
+  const responsible = resolveResponsible(db, req.body.responsible_id, req.session.user.id);
+  if (responsible.error) { res.status(400); return renderError(responsible.error); }
 
   const items = buildItemsFromRequest(db, req.body);
   if (items.invalidDetailCount > 0) {
@@ -426,9 +457,9 @@ router.post('/sales/new', requireLogin, requireMutationKey, (req, res) => {
 
   return completeMutation(req, res, () => {
     const info = db.prepare(
-      `INSERT INTO sales_orders (customer_id, warehouse_id, user_id, order_date, total_amount, paid_amount, payment_status, status, note, remarks)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`
-    ).run(customer_id || null, warehouse_id, req.session.user.id, order_date || todayLocalDate(), total, paid, paymentStatus, status, note || '', remarks || '');
+      `INSERT INTO sales_orders (customer_id, warehouse_id, user_id, responsible_id, order_date, total_amount, paid_amount, payment_status, status, note, remarks)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+    ).run(customer_id || null, warehouse_id, req.session.user.id, responsible.id, order_date || todayLocalDate(), total, paid, paymentStatus, status, note || '', remarks || '');
     const soId = info.lastInsertRowid;
     const insertItem = db.prepare('INSERT INTO sales_order_items (sales_order_id, product_id, quantity, unit_label, base_quantity, unit_price, is_gift, cost_price_snapshot) VALUES (?,?,?,?,?,?,?,?)');
     for (const it of items) {
@@ -452,7 +483,7 @@ router.get('/sales/:id/edit', requireLogin, (req, res) => {
   const warehouses = warehousesForUser(db, req.session.user);
   const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
   const existingItems = db.prepare('SELECT * FROM sales_order_items WHERE sales_order_id = ?').all(order.id);
-  res.render('sale_form', { customers, warehouses, products, error: null, order, existingItems, today: todayLocalDate() });
+  res.render('sale_form', { responsibleOptions: responsibleUsers(db, order.responsible_id || order.user_id), customers, warehouses, products, error: null, order, existingItems, today: todayLocalDate() });
 });
 
 router.post('/sales/:id/edit', requireLogin, requireMutationKey, (req, res) => {
@@ -469,7 +500,7 @@ router.post('/sales/:id/edit', requireLogin, requireMutationKey, (req, res) => {
     const customers = customersForForm(db, req.session.user, order.customer_id);
     const warehouses = warehousesForUser(db, req.session.user);
     const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
-    return res.render('sale_form', { customers, warehouses, products, error: msg, order, existingItems: [], formValues: req.body, draftItems: submittedItemsFromBody(req.body), today: todayLocalDate() });
+    return res.render('sale_form', { responsibleOptions: responsibleUsers(db, order.responsible_id || order.user_id), customers, warehouses, products, error: msg, order, existingItems: [], formValues: req.body, draftItems: submittedItemsFromBody(req.body), today: todayLocalDate() });
   };
 
   if (!isBlank(order_date) && !isValidDateString(order_date)) {
@@ -479,6 +510,9 @@ router.post('/sales/:id/edit', requireLogin, requireMutationKey, (req, res) => {
 
   const selectionError = customerSelectionError(db, req.body);
   if (selectionError) { res.status(400); return renderError(selectionError); }
+
+  const responsible = resolveResponsible(db, req.body.responsible_id, order.responsible_id || order.user_id);
+  if (responsible.error) { res.status(400); return renderError(responsible.error); }
 
   const items = buildItemsFromRequest(db, req.body);
   if (items.invalidDetailCount > 0) {
@@ -524,8 +558,8 @@ router.post('/sales/:id/edit', requireLogin, requireMutationKey, (req, res) => {
 
   return completeMutation(req, res, () => {
     db.prepare(
-      `UPDATE sales_orders SET customer_id=?, warehouse_id=?, order_date=?, total_amount=?, paid_amount=?, payment_status=?, note=?, remarks=? WHERE id=?`
-    ).run(customer_id || null, warehouse_id, order_date || order.order_date, total, paid, paymentStatus, note || '', remarks || '', order.id);
+      `UPDATE sales_orders SET customer_id=?, warehouse_id=?, responsible_id=?, order_date=?, total_amount=?, paid_amount=?, payment_status=?, note=?, remarks=? WHERE id=?`
+    ).run(customer_id || null, warehouse_id, responsible.id, order_date || order.order_date, total, paid, paymentStatus, note || '', remarks || '', order.id);
     db.prepare('DELETE FROM sales_order_items WHERE sales_order_id = ?').run(order.id);
     const insertItem = db.prepare('INSERT INTO sales_order_items (sales_order_id, product_id, quantity, unit_label, base_quantity, unit_price, is_gift, cost_price_snapshot) VALUES (?,?,?,?,?,?,?,?)');
     for (const it of items) {
@@ -772,15 +806,34 @@ router.post('/sales/:id/record-payment', requireLogin, requireMutationKey, (req,
   });
 });
 
+// 负责人调整独立于财务、库存和审批；仍只允许原录入人或管理员操作。
+router.post('/sales/:id/responsible', requireLogin, requireMutationKey, (req, res) => {
+  const db = req.tenantDb;
+  return completeMutation(req, res, () => {
+    const order = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(req.params.id);
+    if (!order) return { status: 404, error: '单据不存在' };
+    if (!canEditOrWithdraw(order, req.session.user)) return { status: 403, error: '无权限调整此订单负责人' };
+    if (String(req.body.responsible_revision) !== String(order.revision)) {
+      return { status: 409, error: '订单已被其他页面修改，请核对当前负责人后重试。', errorRedirect: `/sales/${order.id}?responsible_error=conflict` };
+    }
+    const responsible = resolveResponsible(db, req.body.responsible_id, order.responsible_id || order.user_id);
+    if (responsible.error) return { status: 400, error: responsible.error, errorRedirect: `/sales/${order.id}?responsible_error=invalid` };
+    db.prepare('UPDATE sales_orders SET responsible_id = ? WHERE id = ?').run(responsible.id, order.id);
+    writeAuditLog(db, req.session.user, '调整销售单负责人', '销售单', order.id, `负责人调整为 ${responsible.name}`);
+    return { redirect: `/sales/${order.id}?responsible_updated=1` };
+  });
+});
+
 router.get('/sales/:id', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const order = db.prepare(`
-    SELECT so.*, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name,
+    SELECT so.*, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name, ru.name AS responsible_name,
            ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount, ${refundedAmountSubquery()} AS cash_refunded_amount
     FROM sales_orders so
     LEFT JOIN customers c ON c.id = so.customer_id
     LEFT JOIN warehouses w ON w.id = so.warehouse_id
     LEFT JOIN users u ON u.id = so.user_id
+    LEFT JOIN users ru ON ru.id = COALESCE(so.responsible_id, so.user_id)
     WHERE so.id = ?
   `).get(req.params.id);
   if (!order) return res.status(404).send('单据不存在');
@@ -798,7 +851,10 @@ router.get('/sales/:id', requireLogin, (req, res) => {
     SELECT id, order_date, total_amount, refund_status, status, cancelled_at, finalized_at
     FROM return_orders WHERE related_sales_order_id = ? ORDER BY id DESC
   `).all(req.params.id);
-  res.render('sale_detail', { order, items, relatedReturns, canManage: canEditOrWithdraw(order, req.session.user), created: req.query.created === order.status ? order.status : null });
+  res.render('sale_detail', { order, items, relatedReturns, responsibleOptions: responsibleUsers(db, order.responsible_id || order.user_id),
+    responsibleUpdated: req.query.responsible_updated === '1',
+    responsibleError: req.query.responsible_error === 'conflict' ? '订单已被其他页面修改，请核对当前负责人后重试。' : req.query.responsible_error === 'invalid' ? '所选负责人不存在或已停用，请重新选择。' : null,
+    canManage: canEditOrWithdraw(order, req.session.user), created: req.query.created === order.status ? order.status : null });
 });
 
 module.exports = router;

@@ -1,5 +1,5 @@
 (() => {
-  const fields = ['customer_id','customer_search','supplier_id','warehouse_id','from_warehouse_id','to_warehouse_id','order_date','paid_amount','refunded_amount','remarks','note','related_sales_order_id','draft_revision','_request_key','exception_reason'];
+  const fields = ['customer_id','customer_search','supplier_id','warehouse_id','from_warehouse_id','to_warehouse_id','responsible_id','order_date','paid_amount','refunded_amount','remarks','note','related_sales_order_id','draft_revision','_request_key','exception_reason'];
   const expiry = 7 * 86400000;
   const prefix = 'jxc-order-draft:v1:';
   function entries(scope) {
@@ -39,7 +39,7 @@
       const values = {};
       for (const name of fields) { const input = form.elements.namedItem(name); if (input && 'value' in input) values[name] = input.value; }
       const labels = {};
-      for (const name of ['customer_id','supplier_id','warehouse_id','from_warehouse_id','to_warehouse_id']) {
+      for (const name of ['customer_id','supplier_id','warehouse_id','from_warehouse_id','to_warehouse_id','responsible_id']) {
         const input = form.elements.namedItem(name);
         if (input?.selectedOptions?.[0]) labels[name] = input.selectedOptions[0].textContent;
       }
@@ -69,7 +69,7 @@
     function preview(entry, container) {
       const details = document.createElement('details'), summary = document.createElement('summary'); summary.textContent = '查看暂存内容'; details.appendChild(summary);
       for (const [name, label] of Object.entries(entry.labels || {})) {
-        const line = document.createElement('p'); line.textContent = ({customer_id:'客户',supplier_id:'供应商',warehouse_id:'仓库',from_warehouse_id:'调出仓库',to_warehouse_id:'调入仓库'})[name] + '：' + label; details.appendChild(line);
+        const line = document.createElement('p'); line.textContent = ({customer_id:'客户',supplier_id:'供应商',warehouse_id:'仓库',from_warehouse_id:'调出仓库',to_warehouse_id:'调入仓库',responsible_id:'负责人'})[name] + '：' + label; details.appendChild(line);
       }
       for (const name of ['customer_search','order_date','paid_amount','refunded_amount','remarks','note']) {
         if (!entry.values[name]) continue;
@@ -90,6 +90,10 @@
       }
       if (window.returnSourceSaleId && Number(entry.values.related_sales_order_id) !== window.returnSourceSaleId) {
         status.textContent = '这份退货暂存属于另一张原销售单，请从对应原单打开退货页面后恢复。'; return;
+      }
+      const responsible = form.elements.namedItem('responsible_id');
+      if (responsible && entry.values.responsible_id && !Array.from(responsible.options).some(option => option.value === entry.values.responsible_id)) {
+        status.textContent = '暂存中的负责人已不可选，请查看暂存内容，重新选择当前可用负责人。'; return;
       }
       restoring = true;
       for (const name of fields) {

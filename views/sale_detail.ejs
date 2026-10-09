@@ -2,6 +2,8 @@
 <h1>销售单 #<%= order.id %></h1>
 <div class="detail-print-actions"><a class="btn btn-secondary" href="/sales/<%= order.id %>/print">打印 / PDF</a></div>
 <% if (created) { %><div class="flow-notice" role="status"><strong><%= created === 'draft' ? '草稿已保存' : '已提交审核' %></strong><span><%= created === 'draft' ? '可以继续编辑，准备好后再提交审核。' : '审核通过后才会扣减库存。' %></span></div><% } %>
+<% if (responsibleUpdated) { %><div class="flow-notice" role="status"><strong>负责人已更新</strong><span>录入人仍保留，可在操作日志中查看调整记录。</span></div><% } %>
+<% if (responsibleError) { %><div class="error" role="alert"><%= responsibleError %></div><% } %>
 <div class="card">
   <div class="detail-hero">
     <div><span class="detail-eyebrow">销售单 #<%= order.id %> · <%= order.order_date %></span><strong><%= order.customer_name || '散客' %></strong></div>
@@ -9,11 +11,25 @@
   </div>
   <div class="detail-meta">
     <div><span>仓库</span><strong><%= order.warehouse_name %></strong></div>
+    <div><span>负责人</span><strong><%= order.responsible_name %></strong></div>
     <div><span>录入人</span><strong><%= order.user_name %></strong></div>
     <div><span>录入时间</span><strong><%= formatDateTime(order.created_at).slice(0, 16) %></strong></div>
     <div><span>备注</span><strong><%= order.remarks || '-' %></strong></div>
     <% if (order.note) { %><div><span>内部备注</span><strong><%= order.note %></strong></div><% } %>
   </div>
+  <% if (canManage) { %>
+  <details class="sales-responsible-edit" <%= responsibleError ? 'open' : '' %>>
+    <summary>调整负责人</summary>
+    <form method="POST" action="/sales/<%= order.id %>/responsible">
+      <input type="hidden" name="_request_key" value="<%= newRequestKey() %>">
+      <input type="hidden" name="responsible_revision" value="<%= order.revision %>">
+      <div class="form-row"><label for="detailResponsible">负责人</label>
+        <select name="responsible_id" id="detailResponsible" required><% responsibleOptions.forEach(function(person) { %><option value="<%= person.id %>" <%= person.id === (order.responsible_id || order.user_id) ? 'selected' : '' %>><%= person.name %>（<%= person.username %>）<%= person.active ? '' : ' · 已停用' %></option><% }) %></select>
+      </div>
+      <button class="btn btn-secondary" type="submit">保存负责人</button>
+    </form>
+  </details>
+  <% } %>
   <div class="detail-status-list">
     <div><span>结算状态</span>
     <% if (order.status !== 'approved') { %>

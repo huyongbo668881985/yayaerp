@@ -17,17 +17,22 @@
   <% } %>
 </div>
 
+<%
+  const selectedResponsible = responsibleOptions.find(person => person.id === responsibleId);
+  const selectedTag = tags.find(tag => tag.id === tagId);
+  const activeFilters = [];
+  if (settlement) activeFilters.push({ text: settlement === 'settled' ? '已结清' : '未结清', clear: { settlement: '', unpaid: '', page: null } });
+  if (responsibleId) activeFilters.push({ text: '负责人：' + (selectedResponsible ? selectedResponsible.name : '账号不可用'), clear: { responsible_id: null, page: null } });
+  if (customerId) activeFilters.push({ text: '客户：' + (selectedCustomer ? selectedCustomer.name : '客户不可用'), clear: { customer_id: null, page: null } });
+  if (start || end) activeFilters.push({ text: '日期：' + (start || '不限') + ' 至 ' + (end || '不限'), clear: { start: '', end: '', page: null } });
+  if (tagId) activeFilters.push({ text: '客户标签：' + (selectedTag ? selectedTag.name : '标签不存在'), clear: { tag_id: null, page: null } });
+  if (guestOnly) activeFilters.push({ text: '散客', clear: { guest: '', page: null } });
+  if (pendingOnly) activeFilters.push({ text: '待审核', clear: { pending: '', page: null } });
+  if (orderStatus) activeFilters.push({ text: '草稿', clear: { status: '', page: null } });
+%>
 <details class="card sales-filter-panel" id="salesFilterPanel" open>
-  <summary>筛选订单<%= start || end || customerId || unpaidOnly || pendingOnly || tagId || orderStatus ? ' · 已应用条件' : '' %></summary>
+  <summary>筛选订单<% if (activeFilters.length) { %><span class="sales-filter-count"><%= activeFilters.length %></span><% } %></summary>
   <form method="GET" action="/sales" class="sales-filter-form">
-    <div class="form-row" style="margin-bottom:0">
-      <label>开始日期</label>
-      <input type="date" name="start" value="<%= start %>">
-    </div>
-    <div class="form-row" style="margin-bottom:0">
-      <label>结束日期</label>
-      <input type="date" name="end" value="<%= end %>">
-    </div>
     <div class="form-row sales-customer-filter">
       <label for="salesCustomerSearch">客户</label>
       <div class="customer-picker" id="salesCustomerPicker">
@@ -52,47 +57,97 @@
         <input type="hidden" name="customer_id" id="salesCustomerId" value="<%= customerId || '' %>">
       </div>
     </div>
-    <div class="form-row sales-tag-filter">
-      <label for="salesTagFilter">客户标签</label>
-      <select id="salesTagFilter" name="tag_id"><option value="">全部标签</option><% tags.forEach(function(tag) { %><option value="<%= tag.id %>" <%= tagId === tag.id ? 'selected' : '' %>><%= tag.name %></option><% }) %></select>
+    <fieldset class="form-row sales-settlement-filter">
+      <legend>结清状态</legend>
+      <div class="sales-settlement-segments">
+        <% [['all', '全部'], ['outstanding', '未结清'], ['settled', '已结清']].forEach(function(option) { %>
+          <label><input type="radio" name="settlement" value="<%= option[0] %>" <%= (settlement || 'all') === option[0] ? 'checked' : '' %>><span><%= option[1] %></span></label>
+        <% }) %>
+      </div>
+      <select class="sales-settlement-select" id="salesSettlement" aria-label="结清状态" disabled>
+        <option value="all" <%= !settlement ? 'selected' : '' %>>全部</option>
+        <option value="outstanding" <%= settlement === 'outstanding' ? 'selected' : '' %>>未结清</option>
+        <option value="settled" <%= settlement === 'settled' ? 'selected' : '' %>>已结清</option>
+      </select>
+    </fieldset>
+    <div class="form-row sales-responsible-filter">
+      <label for="salesResponsible">负责人</label>
+      <% if (responsibleOptions.length > 8) { %><input type="search" id="salesResponsibleSearch" placeholder="搜索姓名或账号" aria-label="搜索负责人" class="sales-responsible-search"><% } %>
+      <select id="salesResponsible" name="responsible_id">
+        <option value="">全部负责人</option>
+        <% if (responsibleId && !selectedResponsible) { %><option value="<%= responsibleId %>" selected>账号不可用</option><% } %>
+        <% responsibleOptions.forEach(function(person) { %><option value="<%= person.id %>" <%= responsibleId === person.id ? 'selected' : '' %>><%= person.name %>（<%= person.username %>）<%= person.active ? '' : ' · 已停用' %></option><% }) %>
+      </select>
+      <span class="muted sales-responsible-search-empty" id="salesResponsibleSearchEmpty" hidden>没有匹配的负责人</span>
     </div>
-    <div class="form-row sales-unpaid-filter">
-      <input type="checkbox" name="unpaid" value="1" id="unpaidCheck" <%= unpaidOnly ? 'checked' : '' %> style="width:auto">
-      <label for="unpaidCheck" style="margin:0">只看未结清（欠款 / 待退款）</label>
-    </div>
+    <details class="sales-more-filters" <%= start || end || tagId ? 'open' : '' %>>
+      <summary>更多筛选<span>日期 / 客户标签</span></summary>
+      <div class="sales-more-filter-fields">
+        <div class="form-row"><label for="salesStart">开始日期</label><input id="salesStart" type="date" name="start" value="<%= start %>"></div>
+        <div class="form-row"><label for="salesEnd">结束日期</label><input id="salesEnd" type="date" name="end" value="<%= end %>"></div>
+        <div class="form-row sales-tag-filter"><label for="salesTagFilter">客户标签</label><select id="salesTagFilter" name="tag_id"><option value="">全部标签</option><% tags.forEach(function(tag) { %><option value="<%= tag.id %>" <%= tagId === tag.id ? 'selected' : '' %>><%= tag.name %></option><% }) %></select></div>
+      </div>
+    </details>
+    <p class="sales-filter-hint">结清状态按已审核订单计算；未结清包含欠款和待退款。</p>
     <% if (orderStatus) { %><input type="hidden" name="status" value="<%= orderStatus %>"><% } %>
     <% if (pendingOnly) { %><input type="hidden" name="pending" value="1"><% } %>
     <% if (guestOnly) { %><input type="hidden" name="guest" value="1"><% } %>
     <input type="hidden" name="sort" value="<%= sort %>"><input type="hidden" name="order" value="<%= order %>">
     <div class="sales-filter-actions">
-    <button type="submit" class="btn btn-secondary">筛选</button>
-    <a class="btn btn-secondary" href="/sales">清除</a>
-    <a class="btn" href="/sales/export<%= salesQueryString({ page: null }) %>">导出CSV</a>
+      <button type="submit" class="btn">应用筛选</button>
+      <a class="btn btn-secondary" href="/sales">重置</a>
+      <a class="btn btn-secondary sales-export" href="/sales/export<%= salesQueryString({ page: null }) %>">导出CSV</a>
     </div>
   </form>
 </details>
-<% if (tagId) { const selectedTag = tags.find(function(tag) { return tag.id === tagId; }); %>
-  <div class="sales-tag-context"><span>客户标签：<strong><%= selectedTag ? selectedTag.name : '标签不存在' %></strong></span><a href="/sales<%= salesQueryString({ tag_id: null, page: null }) %>">清除标签筛选</a></div>
+<% if (activeFilters.length) { %>
+<div class="sales-active-filters" aria-label="已应用筛选">
+  <% activeFilters.forEach(function(filter) { %><a aria-label="清除<%= filter.text %>筛选" href="/sales<%= salesQueryString(filter.clear) %>" class="sales-filter-chip"><%= filter.text %><span aria-hidden="true">×</span></a><% }) %>
+  <a class="sales-clear-filters" href="/sales">清空筛选</a>
+</div>
 <% } %>
+<div class="sales-results-summary">共 <strong><%= totalOrders %></strong> 单<% if (activeFilters.length) { %> · 符合当前筛选<% } %></div>
 <script>
   (function() {
     const panel = document.getElementById('salesFilterPanel');
-    const sync = function() { if (window.matchMedia('(min-width: 769px)').matches) panel.open = true; };
+    const mobile = window.matchMedia('(max-width: 768px)');
+    const select = document.getElementById('salesSettlement');
+    const radios = Array.from(document.querySelectorAll('input[name="settlement"]'));
+    select.addEventListener('change', function() { radios.find(radio => radio.value === select.value).checked = true; });
+    radios.forEach(function(radio) { radio.addEventListener('change', function() { select.value = radio.value; }); });
+    const sync = function() {
+      select.disabled = !mobile.matches;
+      if (!mobile.matches) panel.open = true;
+    };
+    sync();
+    const search = document.getElementById('salesResponsibleSearch');
+    if (search) {
+      const people = document.getElementById('salesResponsible');
+      const options = Array.from(people.options);
+      search.addEventListener('input', function() {
+        const keyword = search.value.trim().toLocaleLowerCase();
+        const selected = people.value;
+        const matches = options.filter(option => !option.value || option.value === selected || option.textContent.toLocaleLowerCase().includes(keyword));
+        people.replaceChildren(...matches);
+        people.value = selected;
+        document.getElementById('salesResponsibleSearchEmpty').hidden = options.some(option => option.value && option.textContent.toLocaleLowerCase().includes(keyword));
+      });
+    }
     if (window.matchMedia('(max-width: 768px)').matches) panel.open = false;
     window.addEventListener('resize', sync);
   })();
 </script>
 <div class="sales-mobile-sort" aria-label="销售订单排序">
   <span>排序：</span>
-  <a class="btn btn-secondary btn-sm <%= sort === 'date' ? 'is-selected' : '' %>" href="/sales<%= salesQueryString({ start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', unpaid: unpaidOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: 'date', order: sort === 'date' && order === 'desc' ? 'asc' : 'desc' }) %>">日期<%= sort === 'date' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a>
-  <a class="btn btn-secondary btn-sm <%= sort === 'amount' ? 'is-selected' : '' %>" href="/sales<%= salesQueryString({ start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', unpaid: unpaidOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: 'amount', order: sort === 'amount' && order === 'desc' ? 'asc' : 'desc' }) %>">金额<%= sort === 'amount' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a>
-  <a class="btn btn-secondary btn-sm <%= sort === 'debt' ? 'is-selected' : '' %>" href="/sales<%= salesQueryString({ start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', unpaid: unpaidOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: 'debt', order: sort === 'debt' && order === 'desc' ? 'asc' : 'desc' }) %>">欠款<%= sort === 'debt' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a>
+  <a class="btn btn-secondary btn-sm <%= sort === 'date' ? 'is-selected' : '' %>" href="/sales<%= salesQueryString({ start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: 'date', order: sort === 'date' && order === 'desc' ? 'asc' : 'desc' }) %>">日期<%= sort === 'date' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a>
+  <a class="btn btn-secondary btn-sm <%= sort === 'amount' ? 'is-selected' : '' %>" href="/sales<%= salesQueryString({ start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: 'amount', order: sort === 'amount' && order === 'desc' ? 'asc' : 'desc' }) %>">金额<%= sort === 'amount' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a>
+  <a class="btn btn-secondary btn-sm <%= sort === 'debt' ? 'is-selected' : '' %>" href="/sales<%= salesQueryString({ start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: 'debt', order: sort === 'debt' && order === 'desc' ? 'asc' : 'desc' }) %>">欠款<%= sort === 'debt' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a>
 </div>
-<div class="card desktop-table-wrap">
+<div class="card desktop-table-wrap sales-orders-table-wrap">
   <table>
     <tr>
-      <th>单号</th><th><a href="/sales<%= salesQueryString({ start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', unpaid: unpaidOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: 'date', order: sort === 'date' && order === 'desc' ? 'asc' : 'desc' }) %>" class="table-sort">日期<%= sort === 'date' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th><th>客户</th><th>仓库</th><th><a href="/sales<%= salesQueryString({ start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', unpaid: unpaidOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: 'amount', order: sort === 'amount' && order === 'desc' ? 'asc' : 'desc' }) %>" class="table-sort">金额<%= sort === 'amount' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th><th>已收款</th><th><a href="/sales<%= salesQueryString({ start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', unpaid: unpaidOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: 'debt', order: sort === 'debt' && order === 'desc' ? 'asc' : 'desc' }) %>" class="table-sort">欠款<%= sort === 'debt' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th>
-      <th>收款状态</th><th>审核状态</th><th>录入人</th><th>操作</th>
+      <th>单号</th><th><a href="/sales<%= salesQueryString({ start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: 'date', order: sort === 'date' && order === 'desc' ? 'asc' : 'desc' }) %>" class="table-sort">日期<%= sort === 'date' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th><th>客户</th><th>仓库</th><th><a href="/sales<%= salesQueryString({ start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: 'amount', order: sort === 'amount' && order === 'desc' ? 'asc' : 'desc' }) %>" class="table-sort">金额<%= sort === 'amount' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th><th>已收款</th><th><a href="/sales<%= salesQueryString({ start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: 'debt', order: sort === 'debt' && order === 'desc' ? 'asc' : 'desc' }) %>" class="table-sort">欠款<%= sort === 'debt' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th>
+      <th>收款状态</th><th>审核状态</th><th>负责人</th><th>操作</th>
     </tr>
     <% orders.forEach(function(o) { %>
       <tr>
@@ -128,7 +183,7 @@
           %>
           <span class="badge" style="background:<%= st.bg %>;color:<%= st.fg %>"><%= st.text %></span>
         </td>
-        <td><%= o.user_name %></td>
+        <td><%= o.responsible_name %></td>
         <td>
           <a href="/sales/<%= o.id %>" class="btn btn-sm btn-secondary">详情</a>
           <% if (o.status === 'draft' && (currentUser.role === 'admin' || o.user_id === currentUser.id)) { %>
@@ -145,6 +200,7 @@
   <div class="card sales-empty-state">
     <strong><%= selectedCustomer ? selectedCustomer.name + '还没有符合条件的销售订单' : '没有符合条件的订单' %></strong>
     <span><%= selectedCustomer ? '可以直接为这位客户新开一单。' : '试试调整筛选条件，或新建一张销售单。' %></span>
+    <% if (activeFilters.length) { %><a class="btn btn-secondary btn-sm" href="/sales">清空筛选</a><% } %>
     <a class="btn btn-sm" href="/sales/new<%= selectedCustomer ? '?customer_id=' + selectedCustomer.id : '' %>">+ 新开单</a>
   </div>
 <% } %>
@@ -154,10 +210,10 @@
   <span class="muted">共 <%= totalOrders %> 单，第 <%= page %> / <%= totalPages %> 页</span>
   <div style="display:flex; gap:8px">
     <% if (page > 1) { %>
-      <a class="btn btn-secondary btn-sm" href="/sales<%= salesQueryString({ page: page - 1, start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', unpaid: unpaidOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: sort, order: order }) %>">上一页</a>
+      <a class="btn btn-secondary btn-sm" href="/sales<%= salesQueryString({ page: page - 1, start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: sort, order: order }) %>">上一页</a>
     <% } %>
     <% if (page < totalPages) { %>
-      <a class="btn btn-secondary btn-sm" href="/sales<%= salesQueryString({ page: page + 1, start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', unpaid: unpaidOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: sort, order: order }) %>">下一页</a>
+      <a class="btn btn-secondary btn-sm" href="/sales<%= salesQueryString({ page: page + 1, start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: sort, order: order }) %>">下一页</a>
     <% } %>
   </div>
 </div>
@@ -189,6 +245,7 @@
         <span>销售单 #<%= o.id %> · <%= o.order_date %></span>
         <span><%= o.warehouse_name %></span>
       </div>
+      <div class="order-card-responsible">负责人：<%= o.responsible_name %></div>
       <div class="order-card-bottom">
         <span class="order-card-amount"><small>订单金额</small>¥<%= o.total_amount.toFixed(2) %></span>
         <span class="badge" style="background:<%= pt.bg %>;color:<%= pt.fg %>"><%= pt.text %></span>

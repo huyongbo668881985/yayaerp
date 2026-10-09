@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="csrf-token" content="<%= csrfToken %>">
   <title>鸭鸭进销存</title>
-  <link rel="stylesheet" href="/style.css?v=import-reconcile-print-1">
+  <link rel="stylesheet" href="/style.css?v=sales-responsibility-1">
   <meta name="order-draft-context" content="<%= JSON.stringify({scope: currentUser && currentTenant ? currentTenant.tenant_code + ':' + currentUser.id : '', completed: typeof draftCompletionKeys !== 'undefined' ? draftCompletionKeys : []}) %>">
   <script src="/orderForm.js?v=1" defer></script>
-  <script src="/orderDraft.js?v=1" defer></script>
+  <script src="/orderDraft.js?v=sales-responsibility-1" defer></script>
   <script src="/csrf.js" defer></script>
   <script src="/productFilter.js" defer></script>
 

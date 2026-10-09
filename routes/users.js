@@ -124,7 +124,7 @@ router.post('/users/:id/delete', requireAdmin, (req, res) => {
   const owner = db.prepare('SELECT audit_log_owner FROM users WHERE id=?').get(targetId);
   if (owner && owner.audit_log_owner) return res.status(400).send('不能删除操作日志所有者账号');
   const refCount =
-    db.prepare('SELECT COUNT(*) c FROM sales_orders WHERE user_id = ?').get(targetId).c +
+    db.prepare('SELECT COUNT(*) c FROM sales_orders WHERE user_id = ? OR responsible_id = ?').get(targetId, targetId).c +
     db.prepare('SELECT COUNT(*) c FROM purchase_orders WHERE user_id = ?').get(targetId).c +
     db.prepare('SELECT COUNT(*) c FROM transfer_orders WHERE user_id = ?').get(targetId).c +
     db.prepare('SELECT COUNT(*) c FROM return_orders WHERE user_id = ?').get(targetId).c +

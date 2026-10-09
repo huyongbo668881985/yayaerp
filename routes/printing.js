@@ -13,6 +13,7 @@ router.get('/:kind/:id/print',requireLogin,(req,res,next)=>{
   if(!order)return res.status(404).send('单据不存在');
   if(user.role!=='admin' && (order.user_id!==user.id || (req.params.kind==='transfers' && !areWarehousesTransferable(db,user,[order.from_warehouse_id,order.to_warehouse_id]))))return res.status(403).send('无权限打印此单据');
   const name=(table,id)=>id?db.prepare(`SELECT name FROM ${table} WHERE id=?`).get(id)?.name||'已删除':'—';
+  if(req.params.kind==='sales') order.responsible_name=name('users',order.responsible_id||order.user_id);
   const partner=order.customer_id?db.prepare('SELECT name,contact,phone,address FROM customers WHERE id=?').get(order.customer_id):order.supplier_id?db.prepare('SELECT name,contact,phone FROM suppliers WHERE id=?').get(order.supplier_id):{name:req.params.kind==='purchases'?'无供应商':'散客'};
   const items=db.prepare(`SELECT i.product_id,i.quantity,i.unit_label,i.base_quantity${req.params.kind==='transfers'?'':',i.unit_price'}${req.params.kind==='sales'?',i.is_gift':''},p.name product_name,p.sku,p.spec FROM ${def.items} i LEFT JOIN products p ON p.id=i.product_id WHERE i.${def.parent}=? ORDER BY i.id`).all(order.id);
   res.set('Cache-Control','no-store');

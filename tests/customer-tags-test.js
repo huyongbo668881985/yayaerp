@@ -193,7 +193,7 @@ async function runCustomerTagTests(ok) {
         const result = await request(`/sales?tag_id=${flowId}&start=2026-10-01&customer_id=1&unpaid=1&sort=amount&order=asc`);
         assert.equal(result.status, 200);
         const hrefs = [...result.text.matchAll(/href="(\/sales(?:\?|\/export\?)[^"]*)"[^>]*>([^<]*)/g)]
-          .filter(match => match[2] !== '清除标签筛选').map(match => match[1].replace(/&amp;/g, '&'));
+          .filter(match => !match[0].includes('sales-filter-chip')).map(match => match[1].replace(/&amp;/g, '&'));
         assert.ok(hrefs.some(href => href.includes('page=2')));
         for (const href of hrefs.filter(href => !href.includes('清除') && !href.includes('/sales/new'))) {
           const url = new URL(href, base);
