@@ -4,7 +4,7 @@ require('dotenv').config();
 const fs = require('fs');
 const { isValidDateString } = require('../lib/validators');
 const { getTenantDb } = require('../lib/tenantManager');
-function configure(db, entries) {
+function configure(db, entries, { hideEmpty = false } = {}) {
   if (!Array.isArray(entries)) throw new Error('配置必须是名单数组');
   for (const e of entries) {
     if (!Number.isSafeInteger(e.user_id) || e.user_id < 1 || !isValidDateString(e.start_date)
@@ -18,16 +18,18 @@ function configure(db, entries) {
     const insert=db.prepare('INSERT INTO report_salespeople(user_id,start_date,end_date) VALUES(?,?,?)');
     entries.forEach(e=>insert.run(e.user_id,e.start_date,e.end_date??null));
     db.prepare("INSERT OR REPLACE INTO report_metadata VALUES('roster_confirmed','true')").run();
+    db.prepare("INSERT OR REPLACE INTO report_metadata VALUES('hide_empty_salespeople',?)").run(String(hideEmpty));
   }).immediate();
 }
 if(require.main===module) {
   try {
-    const [code,file]=process.argv.slice(2);
+    const [code,file,flag]=process.argv.slice(2);
+    if (flag && flag!=='--hide-empty') throw new Error('仅支持 --hide-empty 展示选项');
     if (!code||!file) throw new Error('用法：node scripts/report-roster-configure.js 租户代码 名单.json');
     const entries=JSON.parse(fs.readFileSync(file,'utf8'));
     const access=getTenantDb(code);
     if(access.error) throw new Error('租户不可用：'+access.error);
-    configure(access.db,entries);
+    configure(access.db,entries,{hideEmpty:flag==='--hide-empty'});
     access.db.close();
     console.log('日报业务员名单已确认，共 '+entries.length+' 个任职区间');
   } catch(error) { console.error(error.message); process.exitCode=1; }

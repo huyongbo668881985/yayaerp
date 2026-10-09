@@ -66,6 +66,9 @@ assert.equal(report.salespeople[0].daily.actual_receipts,800);assert.equal(repor
 assert.equal(report.unassigned.daily.net_sales_amount,-50);assert.equal(report.unassigned.customers.total_at_end,1);
 for(const key of ['net_sales_amount','returns_amount','gross_profit_with_receivable','actual_receipts','cash_refunds','net_cash_received'])
  assert.equal(report.company.daily[key],report.salespeople.reduce((s,p)=>s+p.daily[key],report.unassigned.daily[key]));
+db.prepare("INSERT OR REPLACE INTO report_metadata VALUES('hide_empty_salespeople','true')").run();
+assert.deepEqual(dailyAnalysis(db,'2026-10-01',tenant,Date.parse('2026-10-02T05:00:00+08:00')).salespeople.map(p=>p.user_id),[2]);
+db.prepare("UPDATE report_metadata SET value='false' WHERE key='hide_empty_salespeople'").run();
 const later=dailyAnalysis(db,'2026-10-02',tenant,Date.parse('2026-10-03T05:00:00+08:00'));
 assert.equal(later.salespeople[1].customers.total_at_end,1);assert.equal(later.company.customers.total_at_end,2);
 assert.equal(later.company.debt.receivable_at_end,600);

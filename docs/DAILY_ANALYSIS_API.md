@@ -45,7 +45,7 @@ company、每位 salespeople、unassigned 都有同构指标；人员另有 user
 - 订单、关联退货、收退款及欠款统一按**取数时原销售单 responsible_id**，为空时回退 user_id。财务操作者不享有业绩归属。历史负责人调整会改变重跑归属；接口明确 `historical_attribution_complete=false`，没有声称保存了历史负责人快照。
 - 关联退货按 customer_ledger_accounts 保存的销售账户归属，避免使用后来修改的退货关联；独立退货为独立负账户，进入未分配。旧 `legacy_unverified` 关联无法核实，相关流水归未分配，日末应收/待退/欠款客户数返回 null。
 - 客户按截止时点 report_customer_history 中最后一条记录的 operator_id；迁移前的归属、删除历史无法恢复。客户属于非名单人员或未分配时进入未分配。
-- 原角色只有 admin/operator，operator 同时可能负责仓库、财务等岗位。因此新建明确的 report_salespeople 任职区间名单，必须人工确认；查询列出任职区间与统计月份 1 日至统计日重叠的人员（即使禁用账号或没有交易），不自动推断业务员。名单不含管理员。名单外订单业绩仍保留在未分配，不丢公司金额。
+- 原角色只有 admin/operator，operator 同时可能负责仓库、财务等岗位。因此新建明确的 report_salespeople 参与区间名单，必须人工确认；查询列出参与区间与统计月份 1 日至统计日重叠的人员（即使禁用账号或没有交易），不自动推断业务员。名单不含管理员。名单外订单业绩仍保留在未分配，不丢公司金额。
 - `meta.roster_complete` 表示运维是否确认完整名单；未配置时 salespeople=[]，数据都归未分配。确认空名单和未确认名单不同，消费者必须检查该标记。
 - 金额公司合计等于个人加未分配；欠款客户数公司跨人员再次去重，同客户在两个业务员的订单欠款不应把客户数直接相加。客户档案总数与新增数按唯一客户归属分组。
 
@@ -104,7 +104,7 @@ npm test
    ```json
    [{"user_id":2,"start_date":"2026-10-01","end_date":null},{"user_id":3,"start_date":"2026-10-01","end_date":null}]
    ```
-   执行 `node scripts/report-roster-configure.js yongfeng /安全路径/业务员名单.json`。脚本事务替换完整名单，校验角色/日期/重叠并设置 roster_confirmed；更换名单时保留旧任职区间，否则历史重跑名单会变化。任职开始日须来自真实记录，不能随意倒填。名单文件不含凭据。
+   执行 `node scripts/report-roster-configure.js yongfeng /安全路径/业务员名单.json`。脚本事务替换完整名单，校验角色/日期/重叠并设置 roster_confirmed；更换名单时保留旧参与区间，否则历史重跑名单会变化。参与区间是人工配置的报表覆盖范围，不代表入职时间；接口明确披露不具备历史岗位证明。名单文件不含凭据。可追加 `--hide-empty` 过滤所有销售/现金/客户/欠款指标均为零的人员；未知值 null 不隐藏。默认保留零值人员，meta.hide_empty_salespeople 返回实际配置。
 4. 使用既有只读 API Key，通过安全凭据库注入请求头；禁止写进 Git、文档、URL 或日志。先调用三个接口确认 tenant_code=yongfeng、租户名称正确，查看所有 meta 起点、完整性、未分配及 null 原因；核对至少一笔跨月收款与分单日末余额。以线上租户实际返回的日期记录可用起点，不能沿用示例日期。
 5. 在报表端（如 n8n）配置 Asia/Shanghai，每日 05:00 执行 GET /api/v1/reports/daily-analysis（省略 date 默认昨天，或显式计算北京时间昨天）。生成管理日报与 salespeople 排名，展示未分配、null 原因和名单状态；月回款目标 10,000 元由报表端配置，只有 actual_receipts 完整时才能称为准确收款完成额，net_cash_received 单独展示。401 停止重试并告警，429 退避，500 重试并告警；相同租户/日期重复执行在报表端幂等存储。
 6. 本次没有创建线上任务、修改线上凭据、执行线上迁移或部署。也没有改动旧快照任务；若保留原 debt-trend，应把它标注为执行时余额趋势，不作为日末余额。需要冻结负责人历史/银行真实到账时刻或补齐旧客户创建时间时，需另行采集可靠凭证，不能自动回填。
