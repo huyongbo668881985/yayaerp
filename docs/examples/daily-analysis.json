@@ -1,0 +1,294 @@
+{
+  "tenant_code": "yongfeng",
+  "tenant_name": "示例永丰",
+  "date": "2026-10-01",
+  "month_start": "2026-10-01",
+  "timezone": "Asia/Shanghai",
+  "fetched_at": "2026-10-01T21:00:00.000Z",
+  "cutoff_exclusive": "2026-10-02T00:00:00+08:00",
+  "company": {
+    "daily": {
+      "net_sales_amount": 350,
+      "returns_amount": 150,
+      "gross_profit_with_receivable": 140,
+      "gross_margin": 0.4,
+      "actual_receipts": 800,
+      "cash_refunds": 50,
+      "net_cash_received": 750,
+      "known_receipts": 800,
+      "known_cash_refunds": 50,
+      "completeness": {
+        "sales": true,
+        "profit": true,
+        "cash": true
+      },
+      "reasons": {
+        "sales": null,
+        "profit": null,
+        "cash": null
+      }
+    },
+    "month_to_date": {
+      "net_sales_amount": 350,
+      "returns_amount": 150,
+      "gross_profit_with_receivable": 140,
+      "gross_margin": 0.4,
+      "actual_receipts": 800,
+      "cash_refunds": 50,
+      "net_cash_received": 750,
+      "known_receipts": 800,
+      "known_cash_refunds": 50,
+      "completeness": {
+        "sales": true,
+        "profit": true,
+        "cash": true
+      },
+      "reasons": {
+        "sales": null,
+        "profit": null,
+        "cash": null
+      }
+    },
+    "customers": {
+      "new_daily": 2,
+      "new_month_to_date": 2,
+      "total_at_end": 3,
+      "complete": true,
+      "reason": null,
+      "month_reason": null
+    },
+    "debt": {
+      "receivable_at_end": 800,
+      "pending_refund_at_end": 100,
+      "debtor_customer_count": 1,
+      "month_new_orders_remaining": 0,
+      "month_new_receivable": 600,
+      "receivable_change_since_month_start": -300,
+      "complete": true,
+      "reason": null,
+      "month_reason": null
+    }
+  },
+  "salespeople": [
+    {
+      "user_id": 2,
+      "user_name": "销售甲",
+      "daily": {
+        "net_sales_amount": 400,
+        "returns_amount": 100,
+        "gross_profit_with_receivable": 160,
+        "gross_margin": 0.4,
+        "actual_receipts": 800,
+        "cash_refunds": 50,
+        "net_cash_received": 750,
+        "known_receipts": 800,
+        "known_cash_refunds": 50,
+        "completeness": {
+          "sales": true,
+          "profit": true,
+          "cash": true
+        },
+        "reasons": {
+          "sales": null,
+          "profit": null,
+          "cash": null
+        }
+      },
+      "month_to_date": {
+        "net_sales_amount": 400,
+        "returns_amount": 100,
+        "gross_profit_with_receivable": 160,
+        "gross_margin": 0.4,
+        "actual_receipts": 800,
+        "cash_refunds": 50,
+        "net_cash_received": 750,
+        "known_receipts": 800,
+        "known_cash_refunds": 50,
+        "completeness": {
+          "sales": true,
+          "profit": true,
+          "cash": true
+        },
+        "reasons": {
+          "sales": null,
+          "profit": null,
+          "cash": null
+        }
+      },
+      "customers": {
+        "new_daily": 1,
+        "new_month_to_date": 1,
+        "total_at_end": 2,
+        "complete": true,
+        "reason": null,
+        "month_reason": null
+      },
+      "debt": {
+        "receivable_at_end": 800,
+        "pending_refund_at_end": 50,
+        "debtor_customer_count": 1,
+        "month_new_orders_remaining": 0,
+        "month_new_receivable": 500,
+        "receivable_change_since_month_start": -300,
+        "complete": true,
+        "reason": null,
+        "month_reason": null
+      },
+      "rank": 1
+    },
+    {
+      "user_id": 3,
+      "user_name": "无交易销售",
+      "daily": {
+        "net_sales_amount": 0,
+        "returns_amount": 0,
+        "gross_profit_with_receivable": 0,
+        "gross_margin": null,
+        "actual_receipts": 0,
+        "cash_refunds": 0,
+        "net_cash_received": 0,
+        "known_receipts": 0,
+        "known_cash_refunds": 0,
+        "completeness": {
+          "sales": true,
+          "profit": true,
+          "cash": true
+        },
+        "reasons": {
+          "sales": null,
+          "profit": null,
+          "cash": null
+        }
+      },
+      "month_to_date": {
+        "net_sales_amount": 0,
+        "returns_amount": 0,
+        "gross_profit_with_receivable": 0,
+        "gross_margin": null,
+        "actual_receipts": 0,
+        "cash_refunds": 0,
+        "net_cash_received": 0,
+        "known_receipts": 0,
+        "known_cash_refunds": 0,
+        "completeness": {
+          "sales": true,
+          "profit": true,
+          "cash": true
+        },
+        "reasons": {
+          "sales": null,
+          "profit": null,
+          "cash": null
+        }
+      },
+      "customers": {
+        "new_daily": 0,
+        "new_month_to_date": 0,
+        "total_at_end": 0,
+        "complete": true,
+        "reason": null,
+        "month_reason": null
+      },
+      "debt": {
+        "receivable_at_end": 0,
+        "pending_refund_at_end": 0,
+        "debtor_customer_count": 0,
+        "month_new_orders_remaining": 0,
+        "month_new_receivable": 0,
+        "receivable_change_since_month_start": 0,
+        "complete": true,
+        "reason": null,
+        "month_reason": null
+      },
+      "rank": 2
+    }
+  ],
+  "unassigned": {
+    "user_id": null,
+    "user_name": "未分配",
+    "daily": {
+      "net_sales_amount": -50,
+      "returns_amount": 50,
+      "gross_profit_with_receivable": -20,
+      "gross_margin": 0.4,
+      "actual_receipts": 0,
+      "cash_refunds": 0,
+      "net_cash_received": 0,
+      "known_receipts": 0,
+      "known_cash_refunds": 0,
+      "completeness": {
+        "sales": true,
+        "profit": true,
+        "cash": true
+      },
+      "reasons": {
+        "sales": null,
+        "profit": null,
+        "cash": null
+      }
+    },
+    "month_to_date": {
+      "net_sales_amount": -50,
+      "returns_amount": 50,
+      "gross_profit_with_receivable": -20,
+      "gross_margin": 0.4,
+      "actual_receipts": 0,
+      "cash_refunds": 0,
+      "net_cash_received": 0,
+      "known_receipts": 0,
+      "known_cash_refunds": 0,
+      "completeness": {
+        "sales": true,
+        "profit": true,
+        "cash": true
+      },
+      "reasons": {
+        "sales": null,
+        "profit": null,
+        "cash": null
+      }
+    },
+    "customers": {
+      "new_daily": 1,
+      "new_month_to_date": 1,
+      "total_at_end": 1,
+      "complete": true,
+      "reason": null,
+      "month_reason": null
+    },
+    "debt": {
+      "receivable_at_end": 0,
+      "pending_refund_at_end": 50,
+      "debtor_customer_count": 0,
+      "month_new_orders_remaining": 0,
+      "month_new_receivable": 100,
+      "receivable_change_since_month_start": 0,
+      "complete": true,
+      "reason": null,
+      "month_reason": null
+    }
+  },
+  "meta": {
+    "timezone": "Asia/Shanghai",
+    "utc_offset": "+08:00",
+    "currency": "CNY",
+    "ledger_available_from": "2026-09-01",
+    "cash_available_from": "2026-09-02",
+    "customer_history_started_at": "2026-08-31T16:00:00Z",
+    "customer_history_available_from": "2026-09-02",
+    "profit_snapshot_available_from": "2026-09-02",
+    "customer_creation": "旧客户创建时间未知；仅迁移后新客户记录真实创建时间",
+    "attribution": "销售、退货、现金、欠款按取数时原销售单 responsible_id，空值回退 user_id；这是当前归属，不是历史归属。独立退货归未分配。客户按截止时点归属历史。",
+    "roster": "仅 report_salespeople 中与统计月份至统计日重叠的明确名单；不根据订单或 operator 角色推断。未配置/非名单负责人归未分配。",
+    "sales_basis": "单据日期归期；累计至截止日的审核/反审核流水重建入账金额；含应收毛利取入账时明细成本快照。后续补审核会改变重跑结果。",
+    "cash_basis": "仅收款/退款正向流水为已知现金；审核入账和反审核不是现金，升级结转不是现金。开单预收现金日期未知，可能影响期间时金额为 null，另提供已知现金金额。",
+    "debt_basis": "按 event_date 截止日逐账户累计销售-收款-退货+退款；正余额应收、负余额待退，绝不跨订单抵销。旧执行时快照不参与。",
+    "debtor_count_basis": "每组按客户 ID 去重，散客合为一组；公司跨组再次去重，个人客户数不能直接求和。",
+    "repayment_target": "月回款目标由报表端配置，接口不保存目标",
+    "roster_configured": true,
+    "roster_complete": true,
+    "roster_reason": null,
+    "historical_attribution_complete": false,
+    "sales_available_from": "2026-09-01"
+  }
+}

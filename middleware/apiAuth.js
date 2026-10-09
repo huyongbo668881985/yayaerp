@@ -88,6 +88,7 @@ function apiAuth(req, res, next) {
     keyPrefix: record.key_prefix
   };
   req.tenantDb = access.db;
+  req.apiTenant = { code: record.tenant_code, name: access.tenant.name };
   next();
 }
 

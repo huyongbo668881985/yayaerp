@@ -5,8 +5,9 @@
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
-    "test": "node tests/regression.js && node tests/commercial-fixes-test.js && node tests/drafts-audit-test.js && node tests/import-reconciliation-print-test.js && node tests/backup-safety-test.js && node tests/backup-env-test.js && node tests/return-workflow-test.js && node tests/sales-filters-test.js",
-    "test:p1": "node tests/p1-fixes-verify.js"
+    "test": "node tests/regression.js && node tests/commercial-fixes-test.js && node tests/drafts-audit-test.js && node tests/import-reconciliation-print-test.js && node tests/backup-safety-test.js && node tests/backup-env-test.js && node tests/return-workflow-test.js && node tests/sales-filters-test.js && node tests/daily-analysis-test.js && node tests/daily-analysis-http-test.js",
+    "test:p1": "node tests/p1-fixes-verify.js",
+    "test:daily-analysis": "node tests/daily-analysis-test.js && node tests/daily-analysis-http-test.js"
   },
   "engines": {
     "node": ">=20 <21"

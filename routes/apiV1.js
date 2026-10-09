@@ -25,6 +25,8 @@ const reportRoutes = require('./report');
 const salesRoutes = require('./sales');
 const inventoryRoutes = require('./inventory');
 
+const dailyReports = require('../lib/dailyAnalysis');
+const { isValidDateString } = require('../lib/validators');
 const router = express.Router();
 
 // 限流阈值走环境变量不写死：API_RATE_LIMIT_PER_MIN，默认每分钟 60 次（宽松起步值，
@@ -77,7 +79,19 @@ function r2(n) {
 function parseDateParam(value) {
   if (value === undefined || value === null || String(value).trim() === '') return '';
   const v = String(value).trim();
-  return DATE_RE.test(v) ? v : null;
+  return DATE_RE.test(v) && isValidDateString(v) ? v : null;
+}
+
+// 日报在同一个 SQLite 读事务中取数，避免跨查询读到不同提交版本。
+for (const [path, handler] of [
+  ['/reports/daily-analysis', req => dailyReports.dailyAnalysis(req.tenantDb, req.query.date, req.apiTenant)],
+  ['/customers', req => dailyReports.customers(req.tenantDb, req.query)],
+  ['/finance/transactions', req => dailyReports.transactions(req.tenantDb, req.query)]
+]) {
+  router.get(path, requireApiTier('read_only'), (req, res, next) => {
+    try { res.json(req.tenantDb.transaction(() => handler(req))()); }
+    catch (error) { if (error.status === 400) return badRequest(res, error.message); next(error); }
+  });
 }
 
 // ---- 报表：当日汇总 ----
@@ -246,7 +260,8 @@ router.get('/reports/leaderboard', requireApiTier('read_only'), (req, res) => {
 
 // ---- 欠款趋势：按日期范围查每日快照，含全公司汇总 + 分操作员 ----
 // 数据来源：lib/debtSnapshot.js 每天写入的 debt_snapshots 表（口径与报表页"应收账款"一致）。
-// 快照是"当天营业结束时的欠款水位"，一天一行；date 端点没跑到当天就没有当天数据（空档，
+// 旧快照实际记录执行时余额，snapshot_date 不是严格日末截止时点；历史日末请用 daily-analysis。
+// 一天一行；date 端点没跑到当天就没有当天数据（空档，
 // 不补算），调用方按返回的 date 序列画趋势即可。user_id=NULL 的行是全公司汇总，
 // 排序上 NULL 在前，天然排在每个日期的第一条。
 router.get('/reports/debt-trend', requireApiTier('read_only'), (req, res) => {
