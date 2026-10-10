@@ -18,8 +18,11 @@
     <div class="num" style="color:<%= pendingOrders > 0 ? '#f59e0b' : '#16a34a' %>"><%= pendingOrders %></div>
     <div class="label">待审核单据</div>
     <% if (user.role === 'admin') { %>
-      <a class="section-link pending-orders-link" href="/sales?pending=1">查看未审核订单明细 →</a>
-      <div class="pending-breakdown"><span>销售 <%= pendingSales %></span><a href="/returns?pending=1">退货 <%= pendingReturns %></a><a href="/transfers?pending=1">调拨 <%= pendingTransfers %></a></div>
+      <div class="pending-breakdown">
+        <a class="pending-category<%= pendingSales === 0 ? ' is-empty' : '' %>" href="/sales?pending=1" aria-label="查看待审核销售单，共 <%= pendingSales %> 张">销售 <%= pendingSales %></a>
+        <a class="pending-category<%= pendingReturns === 0 ? ' is-empty' : '' %>" href="/returns?pending=1" aria-label="查看待审核退货单，共 <%= pendingReturns %> 张">退货 <%= pendingReturns %></a>
+        <a class="pending-category<%= pendingTransfers === 0 ? ' is-empty' : '' %>" href="/transfers?pending=1" aria-label="查看待审核调拨单，共 <%= pendingTransfers %> 张">调拨 <%= pendingTransfers %></a>
+      </div>
     <% } %>
   </div>
 </div>
