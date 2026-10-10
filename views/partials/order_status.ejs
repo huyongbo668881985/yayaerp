@@ -1,0 +1,1 @@
+<% const statuses = { draft: ['草稿','neutral'], submitted: ['待审核','warning'], approved: ['已审核','info'], rejected: ['已拒绝','danger'] }; const badge = statuses[status] || ['未知状态','neutral']; %><span class="badge status-<%= badge[1] %>"><%= badge[0] %></span>

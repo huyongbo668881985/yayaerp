@@ -1,6 +1,7 @@
 const express = require('express');
 const { requireLogin, requireAdmin } = require('../middleware/auth');
 const { warehousesForUser } = require('../lib/warehouseAccess');
+const { writeAuditLog } = require('../lib/auditLog');
 const router = express.Router();
 
 router.get('/warehouses', requireLogin, (req, res) => {
@@ -14,7 +15,9 @@ router.get('/warehouses', requireLogin, (req, res) => {
   const operators = isAdmin
     ? db.prepare("SELECT id, name FROM users WHERE role = 'operator' AND active = 1 ORDER BY name").all()
     : [];
-  res.render('warehouses', { warehouses, operators, isAdmin });
+  const notice = req.session.warehouseNotice || null;
+  delete req.session.warehouseNotice;
+  res.render('warehouses', { warehouses, operators, isAdmin, notice });
 });
 
 router.post('/warehouses/new', requireAdmin, (req, res) => {
@@ -48,6 +51,32 @@ router.post('/warehouses/:id/operator', requireAdmin, (req, res) => {
   res.redirect('/warehouses');
 });
 
+// 事务内检查库存并切换状态；重复提交不会反转状态，也不会重复记日志。
+router.post('/warehouses/:id/status', requireAdmin, (req, res) => {
+  const db = req.tenantDb;
+  const warehouseId = Number(req.params.id);
+  const active = req.body.active;
+  if (!Number.isInteger(warehouseId) || !['0', '1'].includes(active)) {
+    return res.status(400).render('error', { message: '仓库或启用状态无效' });
+  }
+  const result = db.transaction(() => {
+    const warehouse = db.prepare('SELECT * FROM warehouses WHERE id = ?').get(warehouseId);
+    if (!warehouse) return { status: 404, message: '仓库不存在' };
+    const nextActive = Number(active);
+    if (warehouse.active === nextActive) return { message: `${warehouse.name}已${nextActive ? '启用' : '停用'}` };
+    if (!nextActive && db.prepare('SELECT 1 FROM inventory WHERE warehouse_id = ? AND quantity != 0 LIMIT 1').get(warehouseId)) {
+      return { status: 400, message: '该仓库仍有库存，不能停用，请先将库存调出或盘点清零后再停用' };
+    }
+    db.prepare('UPDATE warehouses SET active = ? WHERE id = ?').run(nextActive, warehouseId);
+    writeAuditLog(db, req.session.user, nextActive ? '启用仓库' : '停用仓库', '仓库', warehouseId,
+      `${warehouse.name}：${nextActive ? '恢复启用' : '停用，保留历史单据，不再参与开单和低库存提醒'}`);
+    return { message: `${warehouse.name}已${nextActive ? '恢复启用' : '停用，不再参与开单和低库存提醒'}` };
+  }).immediate();
+  if (result.status) return res.status(result.status).render('error', { message: result.message });
+  req.session.warehouseNotice = result.message;
+  res.redirect('/warehouses');
+});
+
 router.post('/warehouses/:id/delete', requireAdmin, (req, res) => {
   const db = req.tenantDb;
   const count = db.prepare('SELECT COUNT(*) c FROM inventory WHERE warehouse_id=? AND quantity>0').get(req.params.id).c;
@@ -71,7 +100,7 @@ router.post('/warehouses/:id/delete', requireAdmin, (req, res) => {
       returnCount > 0 ? `退货单 ${returnCount}` : '',
       txnCount > 0 ? `出入库流水 ${txnCount}` : ''
     ].filter(Boolean).join('、');
-    return res.status(400).send(`无法删除：该仓库被以下记录引用着（${detail}），删除会破坏历史单据。如果不再使用，可以把名称改成"（停用）xxx"标记一下。`);
+    return res.status(400).send(`无法删除：该仓库被以下记录引用着（${detail}），删除会破坏历史单据。如果不再使用，请在仓库管理中点击“停用”，保留历史记录。`);
   }
   db.prepare('DELETE FROM inventory WHERE warehouse_id = ?').run(req.params.id);
   db.prepare('DELETE FROM warehouses WHERE id = ?').run(req.params.id);

@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const { getTenantDb } = require('../lib/tenantManager');
 const { requireLogin } = require('../middleware/auth');
 const { createLoginLimiter } = require('../middleware/rateLimit');
+const { updateUserPassword, sessionUser } = require('../lib/accountSecurity');
 const router = express.Router();
 
 // 双维度限流（见 middleware/rateLimit.js 顶部说明）：
@@ -65,7 +66,7 @@ router.post('/login', loginLimiter, (req, res) => {
     }
     loginLimiter.reset(req); // 成功登录清零失败计数
     req.session.tenantCode = tenant.tenant_code;
-    req.session.user = { id: user.id, username: user.username, name: user.name, role: user.role };
+    req.session.user = sessionUser(user);
     res.redirect('/');
   });
 });
@@ -91,7 +92,8 @@ router.post('/change-password', requireLogin, (req, res) => {
     return res.render('change_password', { error: '新密码至少6位', currentUser: req.session.user });
   }
   const hash = bcrypt.hashSync(new_password, 10);
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, user.id);
+  updateUserPassword(db, user.id, hash);
+  req.session.user.authVersion = user.auth_version + 1;
   res.render('change_password', { error: null, currentUser: req.session.user, success: true });
 });
 

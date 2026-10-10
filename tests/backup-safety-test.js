@@ -30,6 +30,7 @@ tenant.exec('CREATE TABLE orders (id INTEGER PRIMARY KEY, amount REAL); INSERT I
   let first;
   await check('在线 WAL 快照完整回读，通过结构及外键检查；只允许同步加密文件', async () => {
     first = await runBackup();
+    const status = require('../lib/operationsStatus').readStatus(); assert.equal(status.backupResult,'success'); assert.ok(status.lastBackupSuccess); assert.ok(status.lastSnapshotVerification);
     assert.equal(collectFailures(first).length, 0); assert.equal(first.results.length, 2);
     const argv = fs.readFileSync(path.join(dir, 'argv.txt'), 'utf8');
     assert.ok(argv.includes('--include\n*.db.gz.enc\n--exclude\n*'));
@@ -61,7 +62,9 @@ tenant.exec('CREATE TABLE orders (id INTEGER PRIMARY KEY, amount REAL); INSERT I
   await check('租户库缺失及异地同步失败均告警，保留旧备份和已有成功快照', async () => {
     fs.writeFileSync(oldFile, 'old');
     platform.prepare('INSERT INTO tenants VALUES (?,?)').run('missing', path.join(dir, 'missing.db'));
+    const beforeStatus = require('../lib/operationsStatus').readStatus();
     const failed = await runBackup();
+    const failedStatus = require('../lib/operationsStatus').readStatus(); assert.equal(failedStatus.backupResult,'failed'); assert.equal(failedStatus.lastBackupSuccess,beforeStatus.lastBackupSuccess);
     assert.ok(collectFailures(failed).some(entry => entry.label === 'tenant-missing'));
     assert.equal(failed.cleanup.skipped, true); assert.ok(fs.existsSync(oldFile));
     assert.ok(first.results.every(entry => fs.existsSync(entry.file)));
@@ -99,6 +102,7 @@ tenant.exec('CREATE TABLE orders (id INTEGER PRIMARY KEY, amount REAL); INSERT I
     const outDir = path.join(dir, 'restored');
     const source = first.results.find(entry => entry.label === 'tenant-demo').file;
     execFileSync(process.execPath, ['scripts/backup-restore.js', source, outDir], { cwd: path.join(__dirname, '..'), env: process.env });
+    assert.ok(require('../lib/operationsStatus').readStatus().lastRestoreVerification);
     const outFile = path.join(outDir, fs.readdirSync(outDir).find(name => name.endsWith('.restore.db')));
     const restored = new Database(outFile, { readonly: true });
     assert.equal(restored.prepare('SELECT amount FROM orders WHERE id=1').get().amount, 100); restored.close();

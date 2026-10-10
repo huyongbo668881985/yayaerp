@@ -5,10 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="csrf-token" content="<%= csrfToken %>">
   <title>鸭鸭进销存</title>
-  <link rel="stylesheet" href="/style.css?v=sales-responsibility-1">
+  <link rel="stylesheet" href="/style.css?v=review-improvements-1">
   <meta name="order-draft-context" content="<%= JSON.stringify({scope: currentUser && currentTenant ? currentTenant.tenant_code + ':' + currentUser.id : '', completed: typeof draftCompletionKeys !== 'undefined' ? draftCompletionKeys : []}) %>">
-  <script src="/orderForm.js?v=1" defer></script>
-  <script src="/orderDraft.js?v=sales-responsibility-1" defer></script>
+  <script src="/orderForm.js?v=2" defer></script>
+  <script src="/orderDraft.js?v=review-improvements-1" defer></script>
+  <script src="/uiFeedback.js" defer></script>
+  <script src="/orderStock.js" defer></script>
   <script src="/csrf.js" defer></script>
   <script src="/productFilter.js" defer></script>
 
@@ -37,34 +39,35 @@
   </div>
   <button class="nav-toggle" id="navToggle" aria-label="打开菜单" aria-controls="mainNav" aria-expanded="false" onclick="const nav = document.getElementById('mainNav'); const open = nav.classList.toggle('open'); this.setAttribute('aria-expanded', String(open)); this.setAttribute('aria-label', open ? '关闭菜单' : '打开菜单')">☰</button>
   <nav id="mainNav">
-    <a class="nav-primary" href="/sales">销售订单</a>
-    <a class="nav-primary" href="/inventory">库存</a>
-    <a class="nav-primary" href="/customers">客户</a>
-    <a href="/transfers">调拨</a>
+    <a class="nav-primary <%= currentPath === '/sales' || currentPath.startsWith('/sales/') ? 'active' : '' %>" href="/sales">销售订单</a>
+    <a class="nav-primary <%= currentPath === '/inventory' || currentPath.startsWith('/inventory/') ? 'active' : '' %>" href="/inventory">库存</a>
+    <a class="nav-primary <%= currentPath === '/customers' || currentPath.startsWith('/customers/') ? 'active' : '' %>" href="/customers">客户</a>
+    <a class="<%= currentPath === '/transfers' || currentPath.startsWith('/transfers/') ? 'active' : '' %>" href="/transfers">调拨</a>
     <% if (currentUser.role === 'admin') { %>
-      <a href="/purchases">采购</a>
-      <a href="/reports">经营报表</a>
-      <a href="/reconciliation">对账</a>
-      <a href="/imports">导入</a>
+      <a class="<%= currentPath === '/purchases' || currentPath.startsWith('/purchases/') ? 'active' : '' %>" href="/purchases">采购</a>
+      <a class="<%= currentPath === '/reports' || currentPath.startsWith('/reports/') ? 'active' : '' %>" href="/reports">经营报表</a>
+      <a class="<%= currentPath === '/reconciliation' || currentPath.startsWith('/reconciliation/') ? 'active' : '' %>" href="/reconciliation">对账</a>
+      <a class="<%= currentPath === '/imports' || currentPath.startsWith('/imports/') ? 'active' : '' %>" href="/imports">导入</a>
     <% } %>
     <% if (currentUser.role === 'admin') { %>
-      <a href="/users">账号</a>
+      <a class="<%= currentPath === '/users' || currentPath.startsWith('/users/') ? 'active' : '' %>" href="/users">账号</a>
     <% } %>
-    <a href="/products">基础信息</a>
+    <a class="<%= currentPath === '/products' || currentPath.startsWith('/products/') ? 'active' : '' %>" href="/products">基础信息</a>
     <div class="nav-userbox">
       <span><%= currentUser.name %>（<%= currentUser.role === 'admin' ? '管理员' : '操作员' %>）</span>
-      <a href="/change-password">修改密码</a>
+      <a class="<%= currentPath === '/change-password' || currentPath.startsWith('/change-password/') ? 'active' : '' %>" href="/change-password">修改密码</a>
       <form method="POST" action="/logout"><button class="btn btn-secondary btn-sm" type="submit">退出</button></form>
     </div>
   </nav>
   <div class="userbox">
     <span><%= currentUser.name %> (<%= currentUser.role === 'admin' ? '管理员' : '操作员' %>)</span>
-    <a href="/change-password">修改密码</a>
+    <a class="<%= currentPath === '/change-password' || currentPath.startsWith('/change-password/') ? 'active' : '' %>" href="/change-password">修改密码</a>
     <form method="POST" action="/logout"><button class="btn btn-secondary btn-sm" type="submit">退出</button></form>
   </div>
 </div>
 <% } %>
 <div class="container">
+<% if (typeof flashSuccess !== 'undefined' && flashSuccess) { %><div class="notice-success" role="status"><%= flashSuccess %></div><% } %>
 <% if (currentUser && currentPath === '/') { %>
   <div class="mobile-quick-actions">
     <a href="/sales/new" class="btn">+ 销售</a>

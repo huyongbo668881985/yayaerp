@@ -28,7 +28,7 @@
   if (tagId) activeFilters.push({ text: '客户标签：' + (selectedTag ? selectedTag.name : '标签不存在'), clear: { tag_id: null, page: null } });
   if (guestOnly) activeFilters.push({ text: '散客', clear: { guest: '', page: null } });
   if (pendingOnly) activeFilters.push({ text: '待审核', clear: { pending: '', page: null } });
-  if (orderStatus) activeFilters.push({ text: '草稿', clear: { status: '', page: null } });
+  if (orderStatus) activeFilters.push({ text: orderStatus === 'approved' ? '已审核' : '草稿', clear: { status: '', page: null } });
 %>
 <details class="card sales-filter-panel" id="salesFilterPanel" open>
   <summary>筛选订单<% if (activeFilters.length) { %><span class="sales-filter-count"><%= activeFilters.length %></span><% } %></summary>
@@ -159,29 +159,10 @@
         <td>¥<%= (o.paid_amount || 0).toFixed(2) %></td>
         <td><% if (o.status === 'approved') { %>¥<%= o.effective_debt.toFixed(2) %><% if (o.pending_refund > 0) { %><span class="detail-owing">待退 ¥<%= o.pending_refund.toFixed(2) %></span><% } %><% if (o.returned_amount > 0) { %><span class="muted" style="font-size:11px">（退货¥<%= o.returned_amount.toFixed(2) %>，已退现金¥<%= o.cash_refunded_amount.toFixed(2) %>）</span><% } %><% } else { %><span class="muted">审核后生效</span><% } %></td>
         <td>
-          <% if (o.status !== 'approved') { %>
-            <span class="badge badge-muted">待生效</span>
-          <% } else if (o.effective_status === 'paid') { %>
-            <span class="badge" style="background:#dcfce7;color:#166534">已结清</span>
-          <% } else if (o.effective_status === 'refund_pending') { %>
-      <span class="badge" style="background:#fef3c7;color:#92400e">待退款</span>
-      <% } else if (o.effective_status === 'partial') { %>
-            <span class="badge" style="background:#fef3c7;color:#92400e">部分结算</span>
-          <% } else { %>
-            <span class="badge" style="background:#fee2e2;color:#991b1b">未收款</span>
-          <% } %>
+          <%- include('partials/payment_status', { order: o }) %>
         </td>
         <td>
-          <%
-            const statusMap = {
-              draft:     { text: '草稿',   bg: '#f3f4f6', fg: '#6b7280' },
-              submitted: { text: '待审核', bg: '#fef3c7', fg: '#92400e' },
-              approved:  { text: '已审核', bg: '#dbeafe', fg: '#1e40af' },
-              rejected:  { text: '已拒绝', bg: '#fee2e2', fg: '#991b1b' }
-            };
-            const st = statusMap[o.status] || { text: o.status, bg: '#f3f4f6', fg: '#6b7280' };
-          %>
-          <span class="badge" style="background:<%= st.bg %>;color:<%= st.fg %>"><%= st.text %></span>
+          <%- include('partials/order_status', { status: o.status }) %>
         </td>
         <td><%= o.responsible_name %></td>
         <td>
@@ -220,26 +201,11 @@
 <% } %>
 
 <div class="mobile-order-cards">
-  <% const statusMap2 = {
-       draft:     { text: '草稿',   bg: '#f3f4f6', fg: '#6b7280' },
-       submitted: { text: '待审核', bg: '#fef3c7', fg: '#92400e' },
-       approved:  { text: '已审核', bg: '#dbeafe', fg: '#1e40af' },
-       rejected:  { text: '已拒绝', bg: '#fee2e2', fg: '#991b1b' }
-     };
-     const paymentMap2 = {
-       refund_pending: { text: '待退款', bg: '#fef3c7', fg: '#92400e' },
-       paid:    { text: '已结清',   bg: '#dcfce7', fg: '#166534' },
-       partial: { text: '部分结算', bg: '#fef3c7', fg: '#92400e' },
-       unpaid:  { text: '未收款',   bg: '#fee2e2', fg: '#991b1b' }
-     };
-  %>
   <% orders.forEach(function(o) { %>
-    <% const st = statusMap2[o.status] || { text: o.status, bg: '#f3f4f6', fg: '#6b7280' }; %>
-    <% const pt = o.status === 'approved' ? (paymentMap2[o.effective_status] || { text: o.effective_status, bg: '#f3f4f6', fg: '#6b7280' }) : { text: '待生效', bg: '#f3f4f6', fg: '#6b7280' }; %>
     <a href="/sales/<%= o.id %>" class="order-card">
       <div class="order-card-top">
         <span class="order-card-id"><%= o.customer_name || '散客' %></span>
-        <span class="badge" style="background:<%= st.bg %>;color:<%= st.fg %>"><%= st.text %></span>
+        <%- include('partials/order_status', { status: o.status }) %>
       </div>
       <div class="order-card-mid">
         <span>销售单 #<%= o.id %> · <%= o.order_date %></span>
@@ -248,7 +214,7 @@
       <div class="order-card-responsible">负责人：<%= o.responsible_name %></div>
       <div class="order-card-bottom">
         <span class="order-card-amount"><small>订单金额</small>¥<%= o.total_amount.toFixed(2) %></span>
-        <span class="badge" style="background:<%= pt.bg %>;color:<%= pt.fg %>"><%= pt.text %></span>
+        <%- include('partials/payment_status', { order: o }) %>
       </div>
       <% if (o.status === 'approved' && o.pending_refund > 0) { %><div class="order-card-debt">待退现金 ¥<%= o.pending_refund.toFixed(2) %></div><% } %>
       <% if (o.status === 'approved' && o.effective_debt > 0) { %>
@@ -273,7 +239,7 @@
   const salesCustomerSearchCount = document.getElementById('salesCustomerSearchCount');
   const salesCustomerEmpty = document.getElementById('salesCustomerPickerEmpty');
   const clearSalesCustomer = document.getElementById('clearSalesCustomer');
-  const salesCustomerOptions = Array.from(salesCustomerPicker.querySelectorAll('.customer-picker-option'));
+  let salesCustomerOptions = Array.from(salesCustomerPicker.querySelectorAll('.customer-picker-option'));
   let activeSalesCustomerOption = -1;
 
   function selectedSalesCustomerOption() {
@@ -284,10 +250,29 @@
     return option ? option.querySelector('.customer-picker-name').textContent.trim() : '';
   }
 
-  function filterSalesCustomers() {
+  let salesCustomerRevision = 0;
+  async function filterSalesCustomers() {
     const selected = selectedSalesCustomerOption();
     const rawKeyword = salesCustomerSearch.value.trim().toLocaleLowerCase();
     const keyword = selected && rawKeyword === salesCustomerLabel(selected).toLocaleLowerCase() ? '' : rawKeyword;
+    const revision = ++salesCustomerRevision;
+    try {
+      const response = await fetch('/order-options/customers?' + new URLSearchParams({q: keyword, order_id: ''}), {cache: 'no-store'});
+      if (!response.ok) throw new Error();
+      const data = await response.json();
+      if (revision !== salesCustomerRevision || salesCustomerResults.hidden) return;
+      const preserved = salesCustomerOptions.filter(option => !option.dataset.customerId || option.dataset.customerId === salesCustomerId.value);
+      salesCustomerOptions.filter(option => !preserved.includes(option)).forEach(option => option.remove());
+      for (const customer of data.customers) {
+        if (preserved.some(option => option.dataset.customerId === String(customer.id))) continue;
+        const option = document.createElement('button'); option.type = 'button'; option.className = 'customer-picker-option'; option.setAttribute('role', 'option');
+        option.dataset.customerId = String(customer.id); option.dataset.search = [customer.name,customer.contact,customer.phone,customer.address].filter(Boolean).join(' ').toLocaleLowerCase();
+        const name = document.createElement('span'); name.className = 'customer-picker-name'; name.textContent = customer.name;
+        const meta = document.createElement('span'); meta.className = 'customer-picker-meta'; meta.textContent = [customer.contact,customer.phone,customer.address].filter(Boolean).join(' · ');
+        option.append(name,meta); salesCustomerEmpty.before(option); preserved.push(option);
+      }
+      salesCustomerOptions = preserved;
+    } catch (_) { salesCustomerSearchCount.textContent = '搜索暂不可用，请稍后重试'; return; }
     let matched = 0;
     salesCustomerOptions.forEach(function(option) {
       const visible = !keyword || option.dataset.search.includes(keyword);
@@ -295,7 +280,7 @@
       if (visible) matched++;
     });
     salesCustomerEmpty.hidden = matched > 0;
-    salesCustomerSearchCount.textContent = keyword ? `匹配 ${matched} 位客户` : `共 ${salesCustomerOptions.length - 1} 位客户`;
+    salesCustomerSearchCount.textContent = keyword ? `匹配 ${matched} 位客户` : `最近 ${salesCustomerOptions.length - 1} 位客户，输入文字搜索`;
     activeSalesCustomerOption = -1;
   }
 
@@ -357,9 +342,7 @@
       if (option) selectSalesCustomer(option);
     }
   });
-  salesCustomerOptions.forEach(function(option) {
-    option.addEventListener('click', function() { selectSalesCustomer(option); });
-  });
+  salesCustomerResults.addEventListener('click', function(event) { const option = event.target.closest('.customer-picker-option'); if (option) selectSalesCustomer(option); });
   clearSalesCustomer.addEventListener('click', function() {
     salesCustomerId.value = '';
     salesCustomerSearch.value = '';

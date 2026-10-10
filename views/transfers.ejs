@@ -1,5 +1,6 @@
 <%- include('partials/header') %>
 <h1>仓库调拨</h1>
+<% if (typeof pendingOnly !== 'undefined' && pendingOnly) { %><p class="muted">当前仅显示待审核单据 · <a href="/transfers">查看全部</a></p><% } %>
 <p class="muted">用于把货从一个仓库/门店挪到另一个（比如从总仓装车到车销车辆）。库存要审核通过后才会真正变动。</p>
 <div style="margin-bottom:12px"><a class="btn" href="/transfers/new">+ 新建调拨单</a></div>
 <div class="card desktop-table-wrap">

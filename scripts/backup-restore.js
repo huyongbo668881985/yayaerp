@@ -52,6 +52,7 @@ async function main() {
     await pipeline(fs.createReadStream(decGz), zlib.createGunzip(), fs.createWriteStream(candidate, { mode: 0o600 }));
     const tables = verifyDatabase(candidate);
     fs.linkSync(candidate, outDb); // 校验成功后发布；目标文件存在时仍拒绝覆盖
+    require('../lib/operationsStatus').recordStatus({lastRestoreVerification: new Date().toISOString()});
     console.log('[restore] SQLite 完整性及外键检查通过');
     console.log(`[restore] 包含数据表：${tables.join(', ')}`);
     console.log(`[restore] 完成，已还原到：${outDb}`);

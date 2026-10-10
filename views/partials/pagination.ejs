@@ -1,0 +1,7 @@
+<% if (typeof paging !== 'undefined') { %>
+<nav class="pagination" aria-label="分页">
+  <% if (paging.page > 1) { %><a class="btn btn-secondary btn-sm" href="<%= pageLink(paging.page - 1) %>">上一页</a><% } %>
+  <span>共 <%= paging.count %> 条 · 第 <%= paging.page %> / <%= paging.totalPages %> 页</span>
+  <% if (paging.page < paging.totalPages) { %><a class="btn btn-secondary btn-sm" href="<%= pageLink(paging.page + 1) %>">下一页</a><% } %>
+</nav>
+<% } %>

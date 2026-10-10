@@ -7,7 +7,7 @@ const { costSnapshotPerBaseUnit } = require('../lib/priceCalc');
 const { getSalePayment } = require('../lib/profitCalc');
 const { saleItems, prepareOriginalItems, refundState } = require('../lib/returnWorkflow');
 const { isBlank, isValidDateString, isValidNonNegativeAmount, roundToCents } = require('../lib/validators');
-const { warehousesForUser, isWarehouseInScope } = require('../lib/warehouseAccess');
+const { warehousesForUser, isWarehouseInScope, isWarehouseActive } = require('../lib/warehouseAccess');
 const { submittedItemsFromBody } = require('../lib/formDraft');
 const { writeAuditLog } = require('../lib/auditLog');
 const router = express.Router();
@@ -196,7 +196,7 @@ function hasInvalidPrice(items) {
   return items.some(it => it.invalidPrice || !Number.isFinite(it.price) || it.price < 0);
 }
 
-function queryOrders(db, user, start, end) {
+function queryOrders(db, user, start, end, pendingOnly = false) {
   let sql = `
     SELECT ro.*, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name
     FROM return_orders ro
@@ -209,6 +209,7 @@ function queryOrders(db, user, start, end) {
   if (user.role !== 'admin') { sql += ' AND ro.user_id = ?'; params.push(user.id); }
   if (start) { sql += ' AND ro.order_date >= ?'; params.push(start); }
   if (end) { sql += ' AND ro.order_date <= ?'; params.push(end); }
+  if (pendingOnly) sql += " AND ro.status = 'submitted'";
   sql += ' ORDER BY ro.id DESC';
   return db.prepare(sql).all(...params).map(order => ({ ...order, settlement_label: refundState(db, order) }));
 }
@@ -217,8 +218,9 @@ router.get('/returns', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const user = req.session.user;
   const { start, end } = req.query;
-  const orders = queryOrders(db, user, start, end);
-  res.render('returns', { orders, user, start: start || '', end: end || '' });
+  const pendingOnly = user.role === 'admin' && req.query.pending === '1';
+  const orders = queryOrders(db, user, start, end, pendingOnly);
+  res.render('returns', { orders, user, pendingOnly, start: start || '', end: end || '' });
 });
 
 router.get('/returns/export', requireLogin, (req, res) => {
@@ -242,6 +244,7 @@ router.get('/returns/export', requireLogin, (req, res) => {
   if (user.role !== 'admin') { sql += ' AND ro.user_id = ?'; params.push(user.id); }
   if (start) { sql += ' AND ro.order_date >= ?'; params.push(start); }
   if (end) { sql += ' AND ro.order_date <= ?'; params.push(end); }
+  if (user.role === 'admin' && req.query.pending === '1') sql += " AND ro.status = 'submitted'";
   sql += ' ORDER BY ro.id DESC';
   const rows = db.prepare(sql).all(...params);
 
@@ -336,6 +339,10 @@ router.post('/returns/new', requireLogin, requireMutationKey, (req, res) => {
   if (items.invalidDetailCount > 0) { res.status(400); return renderError('商品明细包含无效行（商品、数量必须填写且数量为正整数），请修正后再提交'); }
   if (!warehouse_id || items.length === 0) {
     return renderError('请选择退回的仓库并至少填写一行有效商品明细');
+  }
+  if (!isWarehouseActive(db, warehouse_id)) {
+    res.status(400);
+    return renderError('所选仓库不存在或已停用，请选择启用的仓库');
   }
   if (!isWarehouseInScope(db, req.session.user, warehouse_id)) {
     res.status(403);
@@ -445,6 +452,10 @@ router.post('/returns/:id/edit', requireLogin, requireMutationKey, (req, res) =>
   if (!warehouse_id || items.length === 0) {
     return renderError('请选择退回的仓库并至少填写一行有效商品明细');
   }
+  if (!isWarehouseActive(db, warehouse_id)) {
+    res.status(400);
+    return renderError('所选仓库不存在或已停用，请选择启用的仓库');
+  }
   if (!isWarehouseInScope(db, req.session.user, warehouse_id)) {
     res.status(403);
     return renderError('所选仓库不属于你的车辆，无权使用');
@@ -521,6 +532,7 @@ router.post('/returns/submit/:id', requireLogin, (req, res) => {
   return completeTransaction(req, res, () => {
     const order = db.prepare('SELECT * FROM return_orders WHERE id = ?').get(req.params.id);
     if (!order) return { status: 404, error: '单据不存在' };
+    if (!isWarehouseActive(db, order.warehouse_id)) return { status: 400, error: '单据涉及的仓库已停用，请先在仓库管理中恢复启用' };
     if (order.finalized_at) return { status: 400, error: '该退货曾经入账，不能重新提交；请另开新单' };
     if (order.status !== 'draft') return { status: 400, error: '只有草稿状态可以提交审核' };
     if (!canEditOrWithdraw(order, req.session.user)) return { status: 403, error: '无权限' };
@@ -549,6 +561,7 @@ router.post('/returns/approve/:id', requireLogin, (req, res) => {
     if (req.session.user.role !== 'admin') return { status: 403, error: '无权限' };
     const order = db.prepare('SELECT * FROM return_orders WHERE id = ?').get(req.params.id);
     if (!order) return { status: 404, error: '单据不存在' };
+    if (!isWarehouseActive(db, order.warehouse_id)) return { status: 400, error: '单据涉及的仓库已停用，请先在仓库管理中恢复启用' };
     if (order.status !== 'submitted') return { status: 400, error: '只有待审核状态可以审核通过' };
     if (order.finalized_at) return { status: 400, error: '该退货曾经入账，不能重复审核；请重新开单' };
     if (req.body.goods_received !== '1') return { status: 400, error: '请先核实实际收到的可售商品、数量和退回仓库，再勾选收货确认' };
@@ -621,10 +634,12 @@ router.post('/returns/reject/:id', requireLogin, (req, res) => {
 
 // 已拒绝但从未入账的单据可重新提交；已入账退货绝不退回可修改状态。
 router.post('/returns/unapprove/:id', requireLogin, (req, res) => {
+  const db = req.tenantDb;
   return completeTransaction(req, res, () => {
     if (req.session.user.role !== 'admin') return { status: 403, error: '无权限' };
     const order = req.tenantDb.prepare('SELECT * FROM return_orders WHERE id=?').get(req.params.id);
     if (!order) return { status: 404, error: '单据不存在' };
+    if (!isWarehouseActive(db, order.warehouse_id)) return { status: 400, error: '单据涉及的仓库已停用，请先在仓库管理中恢复启用' };
     if (order.finalized_at || order.cancelled_at || order.status === 'approved') return { status: 400, error: '已入账退货不可反审核修改；未退款且库存足够时，请填写原因留痕撤销后重开' };
     if (order.status !== 'rejected') return { status: 400, error: '只有未入账的已拒绝退货可以重新提交' };
     req.tenantDb.prepare("UPDATE return_orders SET status='submitted' WHERE id=?").run(order.id);
@@ -638,6 +653,7 @@ router.post('/returns/:id/cancel', requireLogin, requireMutationKey, (req, res) 
     if (req.session.user.role !== 'admin') return { status: 403, error: '只有管理员能撤销退货' };
     const order = db.prepare('SELECT * FROM return_orders WHERE id=?').get(req.params.id);
     if (!order) return { status: 404, error: '单据不存在' };
+    if (!isWarehouseActive(db, order.warehouse_id)) return { status: 400, error: '单据涉及的仓库已停用，请先在仓库管理中恢复启用' };
     if (order.status !== 'approved' || order.cancelled_at) return { status: 400, error: '只有已审核退货可以留痕撤销，不能重复撤销' };
     if (order.refunded_amount > 0) return { status: 400, error: '这张退货已退过现金，不能撤销；请管理员先核实实际钱款，不能通过改旧单消除退款记录' };
     const reason = String(req.body.cancel_reason || '').trim();

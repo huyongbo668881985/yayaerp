@@ -10,8 +10,9 @@
 <div class="login-wrap">
   <div class="card login-card">
     <h1>⚠️ 操作未能完成</h1>
-    <p><%= message %></p>
-    <a href="<%= typeof returnTo !== 'undefined' ? returnTo : 'javascript:history.back()' %>" class="btn" style="display:inline-block;margin-top:10px"><%= typeof returnLabel !== 'undefined' ? returnLabel : '返回上一页' %></a>
+    <p role="alert"><%= message %></p>
+    <% if (typeof requestId !== 'undefined') { %><p class="muted">问题编号：<%= requestId %></p><% } %>
+    <a href="<%= typeof returnTo !== 'undefined' ? returnTo : '/' %>" class="btn" style="display:inline-block;margin-top:10px"><%= typeof returnLabel !== 'undefined' ? returnLabel : '返回继续操作' %></a>
   </div>
 </div>
 </body>

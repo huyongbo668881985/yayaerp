@@ -16,6 +16,7 @@ const {
   listAuditLogs
 } = require('../lib/platformDb');
 const apiKeys = require('../lib/apiKeys');
+const { updateUserPassword } = require('../lib/accountSecurity');
 const { openTenantDbByPath, getTenantUserCount } = require('../lib/tenantManager');
 const { bootstrapTenant } = require('../lib/schema');
 const { isTenantExpired } = require('../lib/platformDb');
@@ -73,7 +74,7 @@ router.post('/platform-admin/login', platformLoginLimiter, (req, res) => {
     platformLoginLimiter.reset(req);
     const mustChangePassword = !!admin.must_change_password;
     req.session.platformAdmin = {
-      id: admin.id, username: admin.username, name: admin.name, mustChangePassword
+      id: admin.id, username: admin.username, name: admin.name, mustChangePassword, authVersion: admin.auth_version
     };
     // 默认口令（superadmin/super123）登录：不放行后台，先强制改密
     res.redirect(mustChangePassword ? '/platform-admin/change-password' : '/platform-admin');
@@ -116,6 +117,7 @@ router.post('/platform-admin/change-password', requireSuperAdmin, (req, res) => 
   // 数据库里的标记由 updatePlatformAdminPassword 一起清掉，这里同步清会话里的副本，
   // 否则本次会话还要被守卫拦到重新登录为止
   req.session.platformAdmin.mustChangePassword = false;
+  req.session.platformAdmin.authVersion = admin.auth_version + 1;
   res.render('platform_change_password', { error: null, success: true, forced });
 });
 
@@ -139,7 +141,7 @@ router.get('/platform-admin', requireSuperAdmin, (req, res) => {
     isExpired: isTenantExpired(t),
     userCount: getTenantUserCount(t.db_path)
   }));
-  res.render('platform_dashboard', { tenants, error: null });
+  res.render('platform_dashboard', { tenants, error: null, operations: require('../lib/operationsStatus').displayStatus() });
 });
 
 // 审计日志只读页：按时间倒序列出最近 500 条，不做筛选/分页
@@ -293,7 +295,7 @@ router.post('/platform-admin/tenants/:id/users/:userId/reset-password', requireS
     }
     resetUser = user;
     const hash = bcrypt.hashSync(new_password, 10);
-    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, user.id);
+    updateUserPassword(db, user.id, hash);
     db.close();
   } catch (e) {
     console.error('超管重置租户账号密码失败:', e);

@@ -3,7 +3,7 @@ const { requireMutationKey, completeMutation, completeTransaction } = require('.
 const { requireLogin } = require('../middleware/auth');
 const { todayLocalDate } = require('../utils/dates');
 const { isBlank, isValidDateString } = require('../lib/validators');
-const { warehousesForTransfer, areWarehousesTransferable } = require('../lib/warehouseAccess');
+const { warehousesForTransfer, areWarehousesTransferable, isWarehouseActive } = require('../lib/warehouseAccess');
 const { submittedItemsFromBody } = require('../lib/formDraft');
 const router = express.Router();
 
@@ -67,9 +67,11 @@ router.get('/transfers', requireLogin, (req, res) => {
     sql += ' WHERE t.user_id = ? AND (wf.operator_id = ? OR wf.operator_id IS NULL) AND (wt.operator_id = ? OR wt.operator_id IS NULL)';
     params.push(user.id, user.id, user.id);
   }
+  const pendingOnly = user.role === 'admin' && req.query.pending === '1';
+  if (pendingOnly) sql += " WHERE t.status = 'submitted'";
   sql += ' ORDER BY t.id DESC';
   const orders = db.prepare(sql).all(...params);
-  res.render('transfers', { orders, user });
+  res.render('transfers', { orders, user, pendingOnly });
 });
 
 router.get('/transfers/new', requireLogin, (req, res) => {
@@ -96,6 +98,10 @@ router.post('/transfers/new', requireLogin, requireMutationKey, (req, res) => {
 
   if (!from_warehouse_id || !to_warehouse_id) return renderError('请选择调出仓库和调入仓库');
   if (from_warehouse_id === to_warehouse_id) return renderError('调出仓库和调入仓库不能是同一个');
+  if (![from_warehouse_id, to_warehouse_id].every(id => isWarehouseActive(db, id))) {
+    res.status(400);
+    return renderError('所选仓库不存在或已停用，请选择启用的仓库');
+  }
   if (!areWarehousesTransferable(db, req.session.user, [from_warehouse_id, to_warehouse_id])) {
     res.status(403);
     return renderError('调拨只能选择自己的车辆或未分配的总库，无权使用其他操作员车辆');
@@ -158,6 +164,10 @@ router.post('/transfers/:id/edit', requireLogin, requireMutationKey, (req, res) 
 
   if (!from_warehouse_id || !to_warehouse_id) return renderError('请选择调出仓库和调入仓库');
   if (from_warehouse_id === to_warehouse_id) return renderError('调出仓库和调入仓库不能是同一个');
+  if (![from_warehouse_id, to_warehouse_id].every(id => isWarehouseActive(db, id))) {
+    res.status(400);
+    return renderError('所选仓库不存在或已停用，请选择启用的仓库');
+  }
   if (!areWarehousesTransferable(db, req.session.user, [from_warehouse_id, to_warehouse_id])) {
     res.status(403);
     return renderError('调拨只能选择自己的车辆或未分配的总库，无权使用其他操作员车辆');
@@ -186,6 +196,7 @@ router.post('/transfers/submit/:id', requireLogin, (req, res) => {
   return completeTransaction(req, res, () => {
     const order = db.prepare('SELECT * FROM transfer_orders WHERE id = ?').get(req.params.id);
     if (!order) return { status: 404, error: '单据不存在' };
+    if (![order.from_warehouse_id, order.to_warehouse_id].every(id => isWarehouseActive(db, id))) return { status: 400, error: '单据涉及的仓库已停用，请先在仓库管理中恢复启用' };
     if (order.status !== 'draft') return { status: 400, error: '只有草稿状态可以提交审核' };
     if (!canAccessTransfer(db, order, req.session.user)) return { status: 403, error: '无权限' };
     db.prepare("UPDATE transfer_orders SET status = 'submitted' WHERE id = ?").run(order.id);
@@ -213,6 +224,7 @@ router.post('/transfers/approve/:id', requireLogin, (req, res) => {
     if (req.session.user.role !== 'admin') return { status: 403, error: '无权限' };
     const order = db.prepare('SELECT * FROM transfer_orders WHERE id = ?').get(req.params.id);
     if (!order) return { status: 404, error: '单据不存在' };
+    if (![order.from_warehouse_id, order.to_warehouse_id].every(id => isWarehouseActive(db, id))) return { status: 400, error: '单据涉及的仓库已停用，请先在仓库管理中恢复启用' };
     if (order.status !== 'submitted') return { status: 400, error: '只有待审核状态可以审核通过' };
 
     const items = db.prepare('SELECT * FROM transfer_order_items WHERE transfer_order_id = ?').all(order.id);
@@ -278,6 +290,7 @@ router.post('/transfers/unapprove/:id', requireLogin, (req, res) => {
     if (req.session.user.role !== 'admin') return { status: 403, error: '无权限' };
     const order = db.prepare('SELECT * FROM transfer_orders WHERE id = ?').get(req.params.id);
     if (!order) return { status: 404, error: '单据不存在' };
+    if (![order.from_warehouse_id, order.to_warehouse_id].every(id => isWarehouseActive(db, id))) return { status: 400, error: '单据涉及的仓库已停用，请先在仓库管理中恢复启用' };
     if (order.status !== 'approved' && order.status !== 'rejected') {
       return { status: 400, error: '只有已审核或已拒绝状态可以反审核' };
     }

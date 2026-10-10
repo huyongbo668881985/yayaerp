@@ -25,7 +25,7 @@
     results.hidden = true;
     search.setAttribute('aria-controls', results.id);
     let active = -1, matches = [];
-    const close = () => { results.hidden = true; search.setAttribute('aria-expanded', 'false'); search.removeAttribute('aria-activedescendant'); active = -1; };
+    const close = () => { searchRevision++; results.hidden = true; search.setAttribute('aria-expanded', 'false'); search.removeAttribute('aria-activedescendant'); active = -1; };
     const selectedText = () => select.value ? select.options[select.selectedIndex].textContent : '';
     function syncSelection() {
       search.value = selectedText();
@@ -40,9 +40,26 @@
       row.dispatchEvent(new Event('input', { bubbles: true }));
       quantity.focus(); quantity.select();
     }
-    function show() {
+    let searchRevision = 0;
+    async function show() {
       const query = search.value.trim().toLocaleLowerCase();
       const keyword = select.value && search.value === selectedText() ? '' : query;
+      if (select.closest('form').id === 'saleForm') {
+        matches = []; active = -1;
+        const revision = ++searchRevision;
+        try {
+          const response = await fetch('/order-options/products?' + new URLSearchParams({q: keyword}), {cache:'no-store'});
+          if (!response.ok) throw new Error();
+          const data = await response.json();
+          if (revision !== searchRevision || document.activeElement !== search) return;
+          Array.from(select.options).filter(option => option.value && option.value !== select.value).forEach(option => option.remove());
+          for (const product of data.products) {
+            if (Array.from(select.options).some(option => option.value === String(product.id))) continue;
+            const option = document.createElement('option'); option.value = product.id; option.textContent = product.name + (product.spec ? ' ('+product.spec+')' : '');
+            Object.assign(option.dataset, {name:product.name,sku:product.sku||'',search:[product.name,product.sku,product.spec].filter(Boolean).join(' '),price:product.sale_price,pricePack:product.sale_price_pack??'',unit:product.unit,packUnit:product.pack_unit||'',packSize:product.pack_size}); select.appendChild(option);
+          }
+        } catch (_) { results.textContent='搜索暂不可用，请稍后重试'; results.hidden=false; return; }
+      }
       const all = Array.from(select.options).filter(option => option.value && (option.dataset.search || option.textContent).toLocaleLowerCase().includes(keyword));
       matches = all.slice(0, 20); active = -1;
       search.removeAttribute('aria-activedescendant');
@@ -56,7 +73,7 @@
         button.addEventListener('click', () => choose(option));
         results.appendChild(button);
       });
-      if (!matches.length || all.length > 20) {
+      if (!matches.length || all.length >= 20) {
         const message = document.createElement('p');
         message.textContent = matches.length ? '显示前 20 项，请继续输入缩小范围' : '没有匹配的商品';
         results.appendChild(message);

@@ -11,7 +11,7 @@
       <select id="inventoryWarehouse" name="warehouse_id">
         <option value="">-- <%= isAdmin ? '全部仓库' : '我的车辆仓库' %> --</option>
         <% warehouses.forEach(function(w) { %>
-          <option value="<%= w.id %>" <%= String(warehouseId) === String(w.id) ? 'selected' : '' %>><%= w.name %></option>
+          <option value="<%= w.id %>" <%= String(warehouseId) === String(w.id) ? 'selected' : '' %>><%= w.name %><%= w.active ? '' : '（已停用）' %></option>
         <% }) %>
       </select>
     </div>
@@ -28,10 +28,10 @@
       <tr>
         <td><%= r.name %></td>
         <td><%= r.spec || '-' %></td>
-        <td><%= r.warehouse_name %></td>
+        <td><%= r.warehouse_name %><%= r.warehouse_active ? '' : '（已停用）' %></td>
         <td>
           <% const qtyText = r.quantity + ' ' + r.unit + (r.pack_unit ? ' (' + Math.floor(r.quantity / r.pack_size) + r.pack_unit + (r.quantity % r.pack_size ? '余' + (r.quantity % r.pack_size) + r.unit : '') + ')' : ''); %>
-          <% if (r.low_stock_threshold > 0 && r.quantity <= r.low_stock_threshold) { %>
+          <% if (r.warehouse_active && r.low_stock_threshold > 0 && r.quantity <= r.low_stock_threshold) { %>
             <span class="badge badge-low"><%= qtyText %></span>
           <% } else { %>
             <%= qtyText %>
@@ -45,7 +45,7 @@
 <div class="mobile-order-cards">
   <% rows.forEach(function(r) { %>
     <% const qtyText = r.quantity + ' ' + r.unit + (r.pack_unit ? ' (' + Math.floor(r.quantity / r.pack_size) + r.pack_unit + (r.quantity % r.pack_size ? '余' + (r.quantity % r.pack_size) + r.unit : '') + ')' : ''); %>
-    <% const isLow = r.low_stock_threshold > 0 && r.quantity <= r.low_stock_threshold; %>
+    <% const isLow = r.warehouse_active && r.low_stock_threshold > 0 && r.quantity <= r.low_stock_threshold; %>
     <div class="order-card">
       <div class="order-card-top">
         <span class="order-card-id"><%= r.name %></span>
@@ -53,7 +53,7 @@
       </div>
       <div class="order-card-mid">
         <span><%= r.spec || '常规规格' %><% if (r.sku) { %> · <%= r.sku %><% } %></span>
-        <span><%= r.warehouse_name %></span>
+        <span><%= r.warehouse_name %><%= r.warehouse_active ? '' : '（已停用）' %></span>
       </div>
       <div class="order-card-bottom">
         <span class="order-card-amount <%= isLow ? 'is-low' : '' %>"><small>可用库存</small><%= qtyText %></span>

@@ -4,6 +4,8 @@
   <a href="/warehouses">仓库</a>
 </div>
 <h1>商品档案</h1>
+<% if (typeof success !== 'undefined' && success) { %><div class="notice-success" role="status">商品档案已更新</div><% } %>
+<form method="GET" action="/products" class="filter-bar"><label>搜索商品 <input type="search" name="q" placeholder="名称、SKU 或规格" value="<%= typeof query !== 'undefined' ? query : '' %>"></label><button class="btn btn-secondary" type="submit">查询</button></form>
 <p class="muted">箱价为整箱下单时使用的精确单价；瓶价仅为拆零参考价，可能有小数误差。库存预警阈值以基本单位计数。</p>
 <% if (isAdmin) { %>
   <div style="margin-bottom:12px"><a class="btn" href="/products/new">+ 新增商品</a> <a class="btn btn-secondary" href="/imports">批量导入</a></div>
@@ -81,4 +83,5 @@
   <% }) %>
   <% if (products.length === 0) { %><p class="muted">暂无商品</p><% } %>
 </div>
+<%- include('partials/pagination') %>
 <%- include('partials/footer') %>

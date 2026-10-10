@@ -4,6 +4,8 @@
   <a href="/warehouses" class="active">仓库</a>
 </div>
 <h1>仓库管理</h1>
+<% if (notice) { %><p class="success" role="status"><%= notice %></p><% } %>
+<p class="muted">停用仓库保留历史单据，不再参与开单和低库存提醒；库存清零后才能停用，之后可恢复启用。</p>
 
 <% if (isAdmin) { %>
 <div class="card">
@@ -25,11 +27,12 @@
 
 <div class="card desktop-table-wrap">
   <table>
-    <tr><th>名称</th><th>地址</th><% if (isAdmin) { %><th>归属操作员</th><th>操作</th><% } %></tr>
+    <tr><th>名称</th><th>地址</th><th>状态</th><% if (isAdmin) { %><th>归属操作员</th><th>操作</th><% } %></tr>
     <% warehouses.forEach(function(w) { %>
       <tr>
         <td><%= w.name %></td>
         <td><%= w.address || '-' %></td>
+        <td><span class="badge <%= w.active ? 'badge-operator' : 'badge-muted' %>"><%= w.active ? '启用中' : '已停用' %></span></td>
         <% if (isAdmin) { %>
           <td>
             <form method="POST" action="/warehouses/<%= w.id %>/operator" style="display:flex; gap:6px; align-items:center">
@@ -37,10 +40,14 @@
                 <option value="">未分配（仅管理员）</option>
                 <% operators.forEach(function(operator) { %><option value="<%= operator.id %>" <%= w.operator_id === operator.id ? 'selected' : '' %>><%= operator.name %></option><% }) %>
               </select>
-              <button type="submit" class="btn btn-secondary btn-sm">保存</button>
+              <button type="submit" class="btn btn-secondary btn-sm" style="flex-shrink:0; white-space:nowrap">保存</button>
             </form>
           </td>
           <td>
+            <form method="POST" action="/warehouses/<%= w.id %>/status" style="display:inline-block; margin:4px 8px 4px 0" onsubmit="return confirm('<%= w.active ? '确认停用该仓库？停用后不再参与开单和低库存提醒，历史单据保留。' : '确认恢复启用该仓库？' %>')">
+              <input type="hidden" name="active" value="<%= w.active ? '0' : '1' %>">
+              <button type="submit" class="btn btn-secondary btn-sm"><%= w.active ? '停用' : '恢复启用' %></button>
+            </form>
             <form method="POST" action="/warehouses/<%= w.id %>/delete" style="display:inline" onsubmit="return confirm('确认删除？若该仓库仍有库存将无法删除')">
               <button type="submit" style="background:none;border:none;color:#e5484d;cursor:pointer;padding:0">删除</button>
             </form>
@@ -56,6 +63,7 @@
     <div class="order-card">
       <div class="order-card-top">
         <span class="order-card-id"><%= w.name %></span>
+        <span class="badge <%= w.active ? 'badge-operator' : 'badge-muted' %>"><%= w.active ? '启用中' : '已停用' %></span>
       </div>
       <% if (w.address) { %><div class="muted" style="margin-bottom:<%= isAdmin ? '8px' : '0' %>"><%= w.address %></div><% } %>
       <% if (isAdmin) { %>
@@ -66,8 +74,12 @@
               <option value="">未分配（仅管理员）</option>
               <% operators.forEach(function(operator) { %><option value="<%= operator.id %>" <%= w.operator_id === operator.id ? 'selected' : '' %>><%= operator.name %></option><% }) %>
             </select>
-            <button type="submit" class="btn btn-secondary btn-sm">保存</button>
+            <button type="submit" class="btn btn-secondary btn-sm" style="flex-shrink:0; white-space:nowrap">保存</button>
           </div>
+        </form>
+        <form method="POST" action="/warehouses/<%= w.id %>/status" style="margin:8px 0" onsubmit="return confirm('<%= w.active ? '确认停用该仓库？停用后不再参与开单和低库存提醒，历史单据保留。' : '确认恢复启用该仓库？' %>')">
+          <input type="hidden" name="active" value="<%= w.active ? '0' : '1' %>">
+          <button type="submit" class="btn btn-secondary btn-sm" style="width:100%"><%= w.active ? '停用' : '恢复启用' %></button>
         </form>
         <form method="POST" action="/warehouses/<%= w.id %>/delete" onsubmit="return confirm('确认删除？若该仓库仍有库存将无法删除')">
           <button type="submit" class="btn btn-sm btn-danger" style="width:100%">删除</button>

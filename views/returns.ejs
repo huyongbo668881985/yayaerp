@@ -4,10 +4,12 @@
   <a href="/returns" class="active">退货</a>
 </div>
 <h1>退货管理</h1>
+<% if (typeof pendingOnly !== 'undefined' && pendingOnly) { %><p class="muted">当前仅显示待审核单据 · <a href="/returns">查看全部</a></p><% } %>
 <div style="margin-bottom:12px"><a class="btn" href="/returns/new">+ 新建退货单</a></div>
 
 <div class="card">
   <form method="GET" action="/returns" style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap">
+    <% if (typeof pendingOnly !== 'undefined' && pendingOnly) { %><input type="hidden" name="pending" value="1"><% } %>
     <div class="form-row" style="margin-bottom:0">
       <label>开始日期</label>
       <input type="date" name="start" value="<%= start %>">
@@ -18,7 +20,7 @@
     </div>
     <button type="submit" class="btn btn-secondary">筛选</button>
     <a class="btn btn-secondary" href="/returns">清除</a>
-    <a class="btn" href="/returns/export?start=<%= start %>&end=<%= end %>">导出CSV</a>
+    <a class="btn" href="/returns/export?pending=<%= typeof pendingOnly !== 'undefined' && pendingOnly ? 1 : '' %>&start=<%= start %>&end=<%= end %>">导出CSV</a>
   </form>
 </div>
 

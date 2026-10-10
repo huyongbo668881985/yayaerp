@@ -27,6 +27,12 @@ const DATA_DIR = process.env.JXC_DATA_DIR || path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const app = express();
+app.use((req, res, next) => {
+  req.requestId = randomUUID(); res.set('X-Request-ID', req.requestId); res.locals.requestId = req.requestId;
+  res.on('finish', () => {
+    if (res.statusCode >= 400) console.warn(JSON.stringify({event:'request_failed',request_id:req.requestId,method:req.method,path:req.path,status:res.statusCode}));
+  }); next();
+});
 
 app.use(helmet({
   contentSecurityPolicy: {
@@ -73,6 +79,13 @@ app.use('/welcome', express.static(path.join(__dirname, 'public-site')));
 // Key 只能在平台超管后台 /platform-admin/api-keys 生成/吊销，租户设置页不暴露入口。
 app.use('/api/v1', require('./routes/apiV1'));
 
+// 探针不创建会话，也不依赖租户登录状态。
+app.get('/healthz', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try { require('./lib/platformDb').platformDb.prepare('SELECT 1').get(); res.json({status:'ok'}); }
+  catch (_) { res.status(503).json({status:'unavailable'}); }
+});
+
 app.use(session({
   store: new SqliteSessionStore(path.join(DATA_DIR, 'sessions.db')),
   secret: SESSION_SECRET,
@@ -87,6 +100,7 @@ app.use(session({
   }
 }));
 
+app.use(require('./middleware/webErrors'));
 app.use(issueCsrfToken);
 app.get('/api/csrf-token', (req, res) => res.json({ token: req.session.csrfToken }));
 
@@ -103,7 +117,9 @@ app.use((req, res, next) => {
   res.locals.currentUser = req.session.user || null;
   res.locals.currentTenant = req.tenant || null;
   res.locals.currentPath = req.path;
-  req.requestId = randomUUID();
+  if (req.method === 'GET' && /^\/(sales|products|customers|inventory|reports|users|transfers|returns|purchases|warehouses|reconciliation|imports)(?:$|\/\d+(?:\/edit)?$)/.test(req.path)) req.session.lastPage = req.originalUrl;
+  res.locals.flashSuccess = req.session.flashSuccess || null;
+  if (req.method === 'GET' && !req.path.startsWith('/order-options/') && !req.path.startsWith('/api/') && !req.path.startsWith('/drafts/')) delete req.session.flashSuccess;
   res.locals.draftCompletionKeys = req.session.completedDraftKeys || [];
   delete req.session.completedDraftKeys;
   next();
@@ -139,7 +155,7 @@ app.use((req, res) => {
 // 全局错误兜底：任何路由里抛出的异常（比如数据库外键约束报错）最终都会落到这里，
 // 不能让原始报错堆栈（含服务器文件路径）直接展示给用户。
 app.use((err, req, res, next) => {
-  console.error(err);
+  console.error(JSON.stringify({event:'request_error',request_id:req.requestId,method:req.method,path:req.path,code:err.code || 'UNEXPECTED_ERROR',error_type:err.name,stack:err.stack?.split('\n').slice(1,5).join('\n')}));
   if (err.code === 'LEDGER_AMOUNT_INVALID') return res.status(400).render('global_error', { message: err.message });
 
   // better-sqlite3 抛的是扩展错误码（如 SQLITE_CONSTRAINT_FOREIGNKEY / _CHECK / _UNIQUE），用前缀匹配

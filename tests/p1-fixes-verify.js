@@ -6,7 +6,7 @@
 //   P1-1 调拨单表单不再把商品 cost_price 内联给前端
 //   P1-2 销售单反审核：同仓库/同商品的已审核退货会造成库存虚增 -> 拦住；
 //        商品不重叠、日期更早的历史退货 -> 不能误伤（放过）
-//   P1-3 默认超管 superadmin/super123 首次登录强制改密，改完才放行后台
+//   P1-3 配置初始密码的超管 superadmin 首次登录强制改密，改完才放行后台
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -29,7 +29,8 @@ Module._load = function (request) {
 
 const TENANT = 'p1verify';
 const TENANT_ADMIN_PW = 'admin123456';
-const SUPER_OLD_PW = 'super123';
+const SUPER_OLD_PW = 'InitialSuper_2026';
+process.env.PLATFORM_ADMIN_INITIAL_PASSWORD = SUPER_OLD_PW;
 const SUPER_NEW_PW = 'SuperNewPass_2026';
 
 let BASE = '';
@@ -84,7 +85,7 @@ class Client {
   }
 
   get(p) { return this.raw(p); }
-  post(p, o = {}) { return this.raw(p, { body: form(o) }); }
+  post(p, o = {}) { return this.raw(p, { body: form({_request_key: crypto.randomUUID(), ...o}) }); }
 }
 
 async function startServer() {
@@ -155,14 +156,14 @@ async function main() {
   section('P1-2 销售单反审核不再造成库存虚增');
   const mkSale = async (pid, qty) => {
     await T.post('/sales/new', {
-      warehouse_id: WID, order_date: today, save_draft: '1',
+      warehouse_id: WID, order_date: today, save_draft: '1', exception_reason: '核对历史退货凭证',
       items_json: JSON.stringify([{ id: pid, quantity: qty, price: 100, unit_choice: 'base' }])
     });
     return tdb.prepare('SELECT id FROM sales_orders ORDER BY id DESC').get().id;
   };
   const mkReturn = async (pid, qty, extra = {}) => {
     await T.post('/returns/new', Object.assign({
-      warehouse_id: WID, order_date: today, save_draft: '1',
+      warehouse_id: WID, order_date: today, save_draft: '1', exception_reason: '核对历史退货凭证',
       items_json: JSON.stringify([{ id: pid, quantity: qty, price: 100, unit_choice: 'base' }])
     }, extra));
     return tdb.prepare('SELECT id FROM return_orders ORDER BY id DESC').get().id;
@@ -245,7 +246,7 @@ async function main() {
   r = await P2.post('/platform-admin/login', { username: 'superadmin', password: SUPER_NEW_PW });
   ok(r.status === 302 && r.loc === '/platform-admin', `新会话用新密码登录直接进后台（loc=${r.loc}）`);
   r = await P2.post('/platform-admin/login', { username: 'superadmin', password: SUPER_OLD_PW });
-  ok(r.status === 200 && r.text.includes('用户名或密码错误'), '旧默认口令已失效');
+  ok(r.status === 200 && r.text.includes('用户名或密码错误'), '旧初始口令已失效');
 
   console.log(`\n===== 自检结果：PASS ${PASS} / FAIL ${FAIL} =====`);
   return FAIL;

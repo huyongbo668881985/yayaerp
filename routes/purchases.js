@@ -3,6 +3,7 @@ const { requireMutationKey, completeMutation, completeTransaction } = require('.
 const { requireAdmin } = require('../middleware/auth');
 const { todayLocalDate } = require('../utils/dates');
 const { isBlank, isValidDateString, isValidNonNegativeAmount, roundToCents } = require('../lib/validators');
+const { isWarehouseActive } = require('../lib/warehouseAccess');
 const router = express.Router();
 
 // 设计说明（2026-09-06 定版）：采购入库没有审核流，录单即加库存。
@@ -27,7 +28,7 @@ router.get('/purchases', requireAdmin, (req, res) => {
 router.get('/purchases/new', requireAdmin, (req, res) => {
   const db = req.tenantDb;
   const suppliers = db.prepare('SELECT * FROM suppliers ORDER BY name').all();
-  const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
+  const warehouses = db.prepare('SELECT * FROM warehouses WHERE active = 1 ORDER BY name').all();
   const products = db.prepare('SELECT * FROM products ORDER BY name').all();
   res.render('purchase_form', { suppliers, warehouses, products, error: null, today: todayLocalDate() });
 });
@@ -43,7 +44,7 @@ router.post('/purchases/new', requireAdmin, requireMutationKey, (req, res) => {
 
   const renderError = message => {
     const suppliers = db.prepare('SELECT * FROM suppliers ORDER BY name').all();
-    const warehouses = db.prepare('SELECT * FROM warehouses ORDER BY name').all();
+    const warehouses = db.prepare('SELECT * FROM warehouses WHERE active = 1 ORDER BY name').all();
     const products = db.prepare('SELECT * FROM products ORDER BY name').all();
     const draftItems = product_id.map((id, index) => ({ id, quantity: quantity[index] || '', price: unit_price[index] ?? '', unit_choice: unit_choice[index] || 'base' }));
     return res.status(400).render('purchase_form', { suppliers, warehouses, products, error: message, formValues: req.body, draftItems, today: todayLocalDate() });
@@ -52,6 +53,8 @@ router.post('/purchases/new', requireAdmin, requireMutationKey, (req, res) => {
   if (!isBlank(order_date) && !isValidDateString(order_date)) {
     return renderError('单据日期无效，请使用 YYYY-MM-DD 格式的真实日期');
   }
+
+  if (!isWarehouseActive(db, warehouse_id)) return renderError('所选仓库不存在或已停用，请选择启用的仓库');
 
   const getProduct = db.prepare('SELECT * FROM products WHERE id = ?');
   const items = [];

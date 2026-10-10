@@ -32,29 +32,10 @@
   <% } %>
   <div class="detail-status-list">
     <div><span>结算状态</span>
-    <% if (order.status !== 'approved') { %>
-      <span class="badge badge-muted">待生效</span>
-    <% } else if (order.effective_status === 'paid') { %>
-      <span class="badge" style="background:#dcfce7;color:#166534">已结清</span>
-    <% } else if (order.effective_status === 'refund_pending') { %>
-      <span class="badge" style="background:#fef3c7;color:#92400e">待退款</span>
-      <% } else if (order.effective_status === 'partial') { %>
-      <span class="badge" style="background:#fef3c7;color:#92400e">部分结算</span>
-    <% } else { %>
-      <span class="badge" style="background:#fee2e2;color:#991b1b">未收款</span>
-    <% } %>
+    <%- include('partials/payment_status', { order: order }) %>
     </div>
     <div><span>审核状态</span>
-    <%
-      const statusMap = {
-        draft:     { text: '草稿',   bg: '#f3f4f6', fg: '#6b7280' },
-        submitted: { text: '待审核', bg: '#fef3c7', fg: '#92400e' },
-        approved:  { text: '已审核', bg: '#dbeafe', fg: '#1e40af' },
-        rejected:  { text: '已拒绝', bg: '#fee2e2', fg: '#991b1b' }
-      };
-      const st = statusMap[order.status] || { text: order.status, bg: '#f3f4f6', fg: '#6b7280' };
-    %>
-    <span class="badge" style="background:<%= st.bg %>;color:<%= st.fg %>"><%= st.text %></span>
+    <%- include('partials/order_status', { status: order.status }) %>
     </div>
   </div>
     <% if (order.status === 'draft' || order.status === 'submitted') { %>

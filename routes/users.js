@@ -5,6 +5,7 @@ const { writeAuditLog } = require('../lib/auditLog');
 const { isValidDateString } = require('../lib/validators');
 const { sendCsv } = require('../utils/csv');
 const { formatDateTime } = require('../utils/dates');
+const { updateUserPassword } = require('../lib/accountSecurity');
 const router = express.Router();
 
 const USER_FIELDS = 'id, username, name, role, active, audit_log_owner, created_at';
@@ -144,11 +145,17 @@ router.post('/users/:id/reset-password', requireAdmin, (req, res) => {
   const db = req.tenantDb;
   const { new_password } = req.body;
   if (!new_password || new_password.length < 6) return res.status(400).send('新密码至少6位');
-  const target = db.prepare('SELECT id FROM users WHERE id = ?').get(Number(req.params.id));
+  const target = db.prepare('SELECT id, audit_log_owner FROM users WHERE id = ?').get(Number(req.params.id));
   if (!target) return res.status(404).send('账号不存在');
+  if (target.audit_log_owner && target.id !== req.session.user.id) {
+    return res.status(403).render('global_error', { message: '日志所有者的密码只能由本人修改，忘记密码请联系平台管理员。', returnTo: '/users' });
+  }
   const hash = bcrypt.hashSync(new_password, 10);
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, target.id);
-  writeAuditLog(db, req.session.user, '重置密码', '账号', target.id, '重置账号密码');
+  db.transaction(() => {
+    updateUserPassword(db, target.id, hash);
+    writeAuditLog(db, req.session.user, '重置密码', '账号', target.id, '重置账号密码并撤销旧登录');
+  }).immediate();
+  if (target.id === req.session.user.id) req.session.user.authVersion += 1;
   res.redirect('/users');
 });
 

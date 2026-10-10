@@ -21,6 +21,7 @@
 </div>
 <div class="container">
   <h1>租户列表</h1>
+  <% if (typeof operations !== 'undefined') { %><div class="card" role="status"><h2>备份与恢复检查</h2><p><%= operations.backupLabel %></p><p class="muted">异地备份成功：<%= operations.lastBackupSuccess ? formatDateTime(operations.lastBackupSuccess) : '暂无记录' %> · 快照完整性检查：<%= operations.lastSnapshotVerification ? formatDateTime(operations.lastSnapshotVerification) : '暂无记录' %></p><p class="muted">恢复验证：<%= operations.lastRestoreVerification ? formatDateTime(operations.lastRestoreVerification) : '尚未执行恢复验证' %></p></div><% } %>
   <div style="margin-bottom:14px">
     <a href="/platform-admin/tenants/new" class="btn">+ 开通新租户</a>
   </div>

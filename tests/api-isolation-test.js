@@ -19,6 +19,10 @@ process.chdir(__dirname + '/..');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const os = require('os');
+const TEST_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'jxc-api-isolation-'));
+process.env.JXC_DATA_DIR = TEST_DIR;
+process.on('exit', () => fs.rmSync(TEST_DIR, {recursive:true,force:true}));
 
 // app.js 要求 SESSION_SECRET 存在才肯启动；测试不关心具体值，缺了就现场生成
 if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32) {
@@ -195,7 +199,7 @@ function purgeTenant(code, platformDb, getTenantByCode) {
         VALUES (1, 1, 1, ?, ?, ?, 'partial', ?, '', '')`).run(today, total, paid, status);
       db.prepare(`INSERT INTO sales_order_items
         (sales_order_id, product_id, quantity, unit_label, base_quantity, unit_price, is_gift, cost_price_snapshot)
-        VALUES (?, 1, 1, '瓶', 1, ?, 0, ?)`).run(sale.lastInsertRowid, total, cost);
+        VALUES (?, 1, ?, '瓶', ?, ?, 0, ?)`).run(sale.lastInsertRowid, Math.max(1,total/100), Math.max(1,total/100), total/Math.max(1,total/100), cost/Math.max(1,total/100));
       return Number(sale.lastInsertRowid);
     };
     const addReturn = (relatedSaleId, total, refunded, cost, status = 'approved') => {
@@ -206,7 +210,7 @@ function purgeTenant(code, platformDb, getTenantByCode) {
         .run(relatedSaleId, today, total, refunded, refundStatus, status);
       db.prepare(`INSERT INTO return_order_items
         (return_order_id, product_id, quantity, unit_label, base_quantity, unit_price, cost_price_snapshot)
-        VALUES (?, 1, 1, '瓶', 1, ?, ?)`).run(ret.lastInsertRowid, total, cost);
+        VALUES (?, 1, ?, '瓶', ?, ?, ?)`).run(ret.lastInsertRowid, relatedSaleId ? total/100 : 1, relatedSaleId ? total/100 : 1, relatedSaleId ? 100 : total, relatedSaleId ? cost/(total/100) : cost);
     };
 
     addSale(100, 100, 40);

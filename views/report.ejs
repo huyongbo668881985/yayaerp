@@ -30,9 +30,9 @@
   <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
     <span class="muted">毛利口径：</span>
     <a class="btn <%= includeReceivable ? 'btn-secondary' : '' %> btn-sm"
-       href="/reports?start=<%= start %>&end=<%= end %>&mode=without_receivable">不含应收账款（只算已收完款的）</a>
+       href="/reports?start=<%= start %>&end=<%= end %>&mode=without_receivable">不含应收（仅已结清）</a>
     <a class="btn <%= includeReceivable ? '' : 'btn-secondary' %> btn-sm"
-       href="/reports?start=<%= start %>&end=<%= end %>&mode=with_receivable">含应收账款（不管收没收到钱）</a>
+       href="/reports?start=<%= start %>&end=<%= end %>&mode=with_receivable">含应收（全部已审核）</a>
   </div>
 </div>
 
@@ -51,11 +51,11 @@
   </div>
   <div class="stat-card">
     <div class="num">¥<%= (includeReceivable ? summary.profitWithReceivable : summary.profitWithoutReceivable).toFixed(2) %></div>
-    <div class="label">毛利（<%= includeReceivable ? '含应收账款' : '不含应收账款' %>，已扣退货）</div>
+    <div class="label">毛利（<%= includeReceivable ? '含应收账款' : '仅已结清' %>，已扣退货）</div>
   </div>
   <div class="stat-card">
     <div class="num">¥<%= summary.receivableProfit.toFixed(2) %></div>
-    <div class="label">应收订单毛利（欠款收回后能落的利润）</div>
+    <div class="label">未结清订单毛利（按当前成本快照）</div>
   </div>
 </div>
 

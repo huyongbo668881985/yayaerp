@@ -39,6 +39,8 @@
           <% warehouses.forEach(function(w) { %><option value="<%= w.id %>" <%= String(form.warehouse_id || '') === String(w.id) ? 'selected' : '' %>><%= w.name %></option><% }) %>
         </select>
       </div>
+    </div>
+    <details class="order-extra"><summary>日期与负责人（可调整）</summary><div class="grid-3">
       <div class="form-row">
         <label>日期</label>
         <input type="date" name="order_date" value="<%= form.order_date || today %>">
@@ -51,9 +53,10 @@
         </select>
         <span class="muted responsible-field-hint">默认由录入人负责，可按实际分工调整。</span>
       </div>
-    </div>
+    </div></details>
 
     <h2 class="form-section-heading">商品明细</h2>
+    <div id="recentProducts" class="recent-products" aria-label="最近使用的商品"></div>
     <div id="items"></div>
     <button type="button" class="btn btn-secondary btn-sm" onclick="addRow()">＋ 添加商品</button>
     <p style="margin-top:10px;font-size:16px"><strong>商品合计：¥<span id="itemsTotal">0.00</span></strong> <span class="muted">（赠品不计入）</span></p>
@@ -87,6 +90,14 @@
 <script>
   const PRODUCTS = <%- JSON.stringify(products).replace(/</g, '\\u003c') %>;
 
+  window.prepareSaleProducts = async function(ids) {
+    const response = await fetch('/order-options/products?' + new URLSearchParams({ids: ids.join(',')}), {cache:'no-store'});
+    if (!response.ok) throw new Error('商品加载失败');
+    const data = await response.json();
+    for (const product of data.products) if (!PRODUCTS.some(item => item.id === product.id)) PRODUCTS.push(product);
+    return data.products;
+  };
+
   // 客户选择器：搜索、结果与选中值是同一个组件，避免移动端原生 select 无法受外部搜索框控制。
   // 最终只向服务端提交 customer_id，既有客户归属权限校验不变。
   const customerSearch = document.getElementById('customerSearch');
@@ -96,7 +107,7 @@
   const customerSearchCount = document.getElementById('customerSearchCount');
   const customerEmpty = document.getElementById('customerPickerEmpty');
   const clearCustomer = document.getElementById('clearCustomer');
-  const customerOptions = Array.from(customerPicker.querySelectorAll('.customer-picker-option'));
+  let customerOptions = Array.from(customerPicker.querySelectorAll('.customer-picker-option'));
   let activeCustomerOption = -1;
 
   function selectedCustomerOption() {
@@ -134,11 +145,30 @@
     document.getElementById('saleForm').dispatchEvent(new Event('order-form-change'));
   }
 
-  function filterCustomers() {
+  let customerSearchRevision = 0;
+  async function filterCustomers() {
     const selected = selectedCustomerOption();
     const rawKeyword = customerSearch.value.trim().toLocaleLowerCase();
     // 已选客户重新点开时展示完整列表；输入新文字后再开始过滤。
     const keyword = selected && rawKeyword === customerLabel(selected).toLocaleLowerCase() ? '' : rawKeyword;
+    const revision = ++customerSearchRevision;
+    try {
+      const response = await fetch('/order-options/customers?' + new URLSearchParams({q: keyword, order_id: '<%= order ? order.id : "" %>'}), {cache: 'no-store'});
+      if (!response.ok) throw new Error();
+      const data = await response.json();
+      if (revision !== customerSearchRevision || customerResults.hidden) return;
+      const preserved = customerOptions.filter(option => !option.dataset.customerId || option.dataset.customerId === customerId.value);
+      customerOptions.filter(option => !preserved.includes(option)).forEach(option => option.remove());
+      for (const customer of data.customers) {
+        if (preserved.some(option => option.dataset.customerId === String(customer.id))) continue;
+        const option = document.createElement('button'); option.type = 'button'; option.className = 'customer-picker-option'; option.setAttribute('role', 'option');
+        option.dataset.customerId = String(customer.id); option.dataset.search = [customer.name,customer.contact,customer.phone,customer.address].filter(Boolean).join(' ').toLocaleLowerCase();
+        const name = document.createElement('span'); name.className = 'customer-picker-name'; name.textContent = customer.name;
+        const meta = document.createElement('span'); meta.className = 'customer-picker-meta'; meta.textContent = [customer.contact,customer.phone,customer.address].filter(Boolean).join(' · ');
+        option.append(name,meta); customerEmpty.before(option); preserved.push(option);
+      }
+      customerOptions = preserved;
+    } catch (_) { customerSearchCount.textContent = '搜索暂不可用，请稍后重试'; return; }
     let matched = 0;
     customerOptions.forEach(function(option) {
       const visible = !keyword || option.dataset.search.includes(keyword);
@@ -146,7 +176,7 @@
       if (visible) matched++;
     });
     customerEmpty.hidden = matched > 0;
-    customerSearchCount.textContent = keyword ? `匹配 ${matched} 位客户` : `共 ${customerOptions.length - 1} 位客户`;
+    customerSearchCount.textContent = keyword ? `匹配 ${matched} 位客户` : `最近 ${customerOptions.length - 1} 位客户，输入文字搜索`;
     activeCustomerOption = -1;
   }
   customerSearch.addEventListener('focus', function() {
@@ -185,9 +215,7 @@
       if (option) selectCustomer(option);
     }
   });
-  customerOptions.forEach(function(option) {
-    option.addEventListener('click', function() { selectCustomer(option); });
-  });
+  customerResults.addEventListener('click', function(event) { const option = event.target.closest('.customer-picker-option'); if (option) selectCustomer(option); });
   clearCustomer.addEventListener('click', function() {
     customerId.value = '';
     customerSearch.value = '';

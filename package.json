@@ -5,12 +5,12 @@
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
-    "test": "node tests/regression.js && node tests/commercial-fixes-test.js && node tests/drafts-audit-test.js && node tests/import-reconciliation-print-test.js && node tests/backup-safety-test.js && node tests/backup-env-test.js && node tests/return-workflow-test.js && node tests/sales-filters-test.js && node tests/daily-analysis-test.js && node tests/daily-analysis-http-test.js",
+    "test": "node tests/regression.js && node tests/commercial-fixes-test.js && node tests/drafts-audit-test.js && node tests/import-reconciliation-print-test.js && node tests/backup-safety-test.js && node tests/backup-env-test.js && node tests/return-workflow-test.js && node tests/warehouse-status-test.js && node tests/sales-filters-test.js && node tests/daily-analysis-test.js && node tests/daily-analysis-http-test.js && node tests/payment-refund-test.js && node tests/customer-tags-test.js && node tests/p1-fixes-verify.js && node tests/api-isolation-test.js && node tests/review-fixes-test.js",
     "test:p1": "node tests/p1-fixes-verify.js",
     "test:daily-analysis": "node tests/daily-analysis-test.js && node tests/daily-analysis-http-test.js"
   },
   "engines": {
-    "node": ">=20 <21"
+    "node": ">=24 <25"
   },
   "dependencies": {
     "@alicloud/dypnsapi20170525": "^2.0.0",
@@ -34,6 +34,7 @@
     "exceljs": {
       "uuid": "11.1.1"
     },
-    "brace-expansion@>=2.0.0 <3": "2.1.7"
+    "brace-expansion@>=2.0.0 <3": "2.1.7",
+    "proxy-addr": "2.0.8"
   }
 }

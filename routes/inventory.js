@@ -10,7 +10,7 @@ const router = express.Router();
 function queryInventorySnapshot(db, warehouseId, user = null, search = '', lowOnly = false) {
   let sql = `
     SELECT p.id AS product_id, p.sku, p.name, p.spec, p.unit, p.pack_unit, p.pack_size, p.low_stock_threshold,
-           w.id AS warehouse_id, w.name AS warehouse_name, inv.quantity
+           w.id AS warehouse_id, w.name AS warehouse_name, w.active AS warehouse_active, inv.quantity
     FROM inventory inv
     JOIN products p ON p.id = inv.product_id
     JOIN warehouses w ON w.id = inv.warehouse_id
@@ -29,7 +29,7 @@ function queryInventorySnapshot(db, warehouseId, user = null, search = '', lowOn
     conditions.push('(instr(lower(p.name), lower(?)) > 0 OR instr(lower(coalesce(p.sku, \'\')), lower(?)) > 0)');
     params.push(search, search);
   }
-  if (lowOnly) conditions.push('p.low_stock_threshold > 0 AND inv.quantity <= p.low_stock_threshold');
+  if (lowOnly) conditions.push('w.active = 1 AND p.low_stock_threshold > 0 AND inv.quantity <= p.low_stock_threshold');
   if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
   sql += ' ORDER BY p.name, w.name';
   return db.prepare(sql).all(...params);
@@ -41,7 +41,7 @@ router.get('/inventory', requireLogin, (req, res) => {
   const requestedWarehouseId = req.query.warehouse_id || '';
   const warehouseId = requestedWarehouseId && isWarehouseInScope(db, user, requestedWarehouseId)
     ? requestedWarehouseId : '';
-  const warehouses = warehousesForUser(db, user);
+  const warehouses = warehousesForUser(db, user, true);
   const search = String(req.query.q || '').trim().slice(0, 100);
   const lowOnly = req.query.low === '1';
   const rows = queryInventorySnapshot(db, warehouseId || null, user, search, lowOnly);
@@ -107,7 +107,7 @@ router.get('/stock-log/export', requireLogin, (req, res) => {
 // 系统自己算差额（可正可负），写一条 adjust 流水留痕，不允许静默改数。
 router.get('/inventory/adjust', requireAdmin, (req, res) => {
   const db = req.tenantDb;
-  const warehouses = db.prepare('SELECT id, name FROM warehouses ORDER BY name').all();
+  const warehouses = db.prepare('SELECT id, name FROM warehouses WHERE active = 1 ORDER BY name').all();
   const products = db.prepare('SELECT id, name, unit, pack_unit, pack_size FROM products ORDER BY name').all();
   // 商品 × 仓库的当前库存映射，给表单 JS 做"当前库存"联动显示
   const invRows = db.prepare('SELECT product_id, warehouse_id, quantity FROM inventory').all();
@@ -129,7 +129,7 @@ router.post('/inventory/adjust', requireAdmin, (req, res) => {
   const reason = String(req.body.reason || '').trim();
 
   const renderError = (msg) => {
-    const warehouses = db.prepare('SELECT id, name FROM warehouses ORDER BY name').all();
+    const warehouses = db.prepare('SELECT id, name FROM warehouses WHERE active = 1 ORDER BY name').all();
     const products = db.prepare('SELECT id, name, unit, pack_unit, pack_size FROM products ORDER BY name').all();
     const invRows = db.prepare('SELECT product_id, warehouse_id, quantity FROM inventory').all();
     const invMap = {};
@@ -142,8 +142,8 @@ router.post('/inventory/adjust', requireAdmin, (req, res) => {
   };
 
   const product = db.prepare('SELECT id, name, unit FROM products WHERE id = ?').get(productId);
-  const warehouse = db.prepare('SELECT id, name FROM warehouses WHERE id = ?').get(warehouseId);
-  if (!product || !warehouse) return renderError('请选择商品和仓库');
+  const warehouse = db.prepare('SELECT id, name FROM warehouses WHERE id = ? AND active = 1').get(warehouseId);
+  if (!product || !warehouse) return renderError('请选择有效商品和启用的仓库');
   if (!Number.isInteger(newQty) || newQty < 0) return renderError('调整后数量必须是大于等于 0 的整数');
   // 原因必填：调整是对账目的强干预，流水里必须能回答"当时为什么改"
   if (!reason) return renderError('请填写调整原因（例如：月度盘点、破损清理），该原因会记入出入库流水');

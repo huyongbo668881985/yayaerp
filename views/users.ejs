@@ -47,11 +47,13 @@
         </td>
         <td><%= formatDateTime(u.created_at) %></td>
         <td>
-          <form method="POST" action="/users/<%= u.id %>/reset-password" style="display:inline-flex; gap:4px" onsubmit="return confirm('确认重置该账号密码？')">
+          <% if (!u.audit_log_owner || u.id === currentUser.id) { %>
+          <form method="POST" action="/users/<%= u.id %>/reset-password" style="display:inline-flex; gap:4px" onsubmit="return confirm('确认重置该账号密码并撤销其旧登录？')">
             <input type="password" name="new_password" placeholder="新密码" minlength="6" required style="width:110px">
             <button type="submit" class="btn btn-secondary btn-sm">重置密码</button>
           </form>
-          <% if (u.id !== currentUser.id) { %>
+          <% } else { %><span class="muted">由日志所有者本人修改密码</span><% } %>
+          <% if (u.id !== currentUser.id && !u.audit_log_owner) { %>
             <form method="POST" action="/users/<%= u.id %>/toggle-active" style="display:inline" onsubmit="return confirm('<%= u.active ? '确认禁用该账号？禁用后该账号会立刻无法继续操作（包括正在登录中的会话）。' : '确认恢复该账号？' %>')">
               <button type="submit" class="btn btn-secondary btn-sm" style="margin-left:8px"><%= u.active ? '禁用' : '启用' %></button>
             </form>
@@ -83,11 +85,11 @@
         <% } %>
       </div>
       <% if (u.audit_log_owner) { %><p class="muted" style="margin-top:8px">日志所有者（首位管理员，不能禁用或删除）</p><% } %>
-      <form method="POST" action="/users/<%= u.id %>/reset-password" style="display:flex; gap:8px; margin-top:8px" onsubmit="return confirm('确认重置该账号密码？')">
+      <form method="POST" action="/users/<%= u.id %>/reset-password" style="display:flex; gap:8px; margin-top:8px" onsubmit="return confirm('确认重置该账号密码并撤销其旧登录？')">
         <input type="password" name="new_password" placeholder="新密码" minlength="6" required style="flex:1">
         <button type="submit" class="btn btn-secondary btn-sm">重置</button>
       </form>
-      <% if (u.id !== currentUser.id) { %>
+      <% if (u.id !== currentUser.id && !u.audit_log_owner) { %>
         <div style="display:flex; gap:8px; margin-top:8px">
           <form method="POST" action="/users/<%= u.id %>/toggle-active" style="flex:1" onsubmit="return confirm('<%= u.active ? '确认禁用该账号？禁用后该账号会立刻无法继续操作（包括正在登录中的会话）。' : '确认恢复该账号？' %>')">
             <button type="submit" class="btn btn-secondary btn-sm" style="width:100%"><%= u.active ? '禁用' : '启用' %></button>

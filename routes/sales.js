@@ -3,15 +3,18 @@ const { requireMutationKey, completeMutation, completeTransaction } = require('.
 const { requireLogin } = require('../middleware/auth');
 const { sendCsv } = require('../utils/csv');
 const { todayLocalDate } = require('../utils/dates');
-const { costSnapshotPerBaseUnit } = require('../lib/priceCalc');
+const { buildItemsFromRequest } = require('../lib/saleItems');
+const { queryOrders } = require('../lib/salesQuery');
 const { returnedAmountSubquery, refundedAmountSubquery, attachEffectivePayment, getSalePayment } = require('../lib/profitCalc');
 const { isBlank, isValidDateString, isValidNonNegativeAmount, roundToCents } = require('../lib/validators');
-const { warehousesForUser, isWarehouseInScope } = require('../lib/warehouseAccess');
+const { warehousesForUser, isWarehouseInScope, isWarehouseActive } = require('../lib/warehouseAccess');
 const { writeAuditLog } = require('../lib/auditLog');
 const { submittedItemsFromBody } = require('../lib/formDraft');
 const { parseTagId, getCustomerTags } = require('../lib/customerTags');
 const { responsibleUsers, resolveResponsible } = require('../lib/salesResponsibility');
+const { productsForForm } = require('../lib/catalog');
 const router = express.Router();
+router.use(require('./orderOptions'));
 
 // 关联到某张销售单、且已审核的退货金额。
 // 口径定义收敛在 lib/profitCalc.js（唯一实现点），这里按本地 SQL 别名（销售单一律用 so）取一份，
@@ -29,65 +32,6 @@ const RETURNED_AMOUNT_SUBQUERY = returnedAmountSubquery('so');
 
 function canEditOrWithdraw(order, sessionUser) {
   return sessionUser.role === 'admin' || order.user_id === sessionUser.id;
-}
-
-function buildItemsFromRequest(db, body) {
-  const { items_json } = body;
-  let product_id, quantity, unit_price, unit_choice, is_gift;
-  if (items_json) {
-    // 前端把明细序列化成 JSON 提交；解析失败（极端情况下字段被篡改/截断）时按"没有明细"处理，
-    // 让上层走"至少填写一行有效明细"的正常报错，而不是抛 SyntaxError 变成 500 兑底页。
-    let parsed;
-    try {
-      parsed = JSON.parse(items_json);
-    } catch (e) {
-      parsed = [];
-    }
-    if (!Array.isArray(parsed)) parsed = [];
-    product_id = parsed.map(i => i.id);
-    quantity = parsed.map(i => i.quantity);
-    unit_price = parsed.map(i => i.price);
-    unit_choice = parsed.map(i => i.unit_choice || 'base');
-    is_gift = parsed.map(i => (i.is_gift ? '1' : '0'));
-  } else {
-    product_id = body.product_id;
-    quantity = body.quantity;
-    unit_price = body.unit_price;
-    unit_choice = body.unit_choice;
-    is_gift = body.is_gift;
-  }
-  if (!Array.isArray(product_id)) product_id = [product_id];
-  if (!Array.isArray(quantity)) quantity = [quantity];
-  if (!Array.isArray(unit_price)) unit_price = [unit_price];
-  if (!Array.isArray(unit_choice)) unit_choice = [unit_choice];
-  if (!Array.isArray(is_gift)) is_gift = [is_gift];
-
-  const getProduct = db.prepare('SELECT * FROM products WHERE id = ?');
-  const items = [];
-  let invalidDetailCount = 0;
-  for (let i = 0; i < product_id.length; i++) {
-    const pid = Number(product_id[i]);
-    const qty = Number(quantity[i]);
-    let price = Number(unit_price[i]);
-    const gift = is_gift[i] === '1' || is_gift[i] === true;
-    // 数量必须是正整数：瓶/箱都不存在"半瓶"的录入场景，小数会让库存和金额统计出碎片（四处单据同规则）
-    if (!pid || !(qty > 0) || !Number.isInteger(qty)) { invalidDetailCount++; continue; }
-    const product = getProduct.get(pid);
-    if (!product) { invalidDetailCount++; continue; }
-    const invalidPrice = !gift && !isValidNonNegativeAmount(unit_price[i]);
-    if (gift) price = 0;
-    else if (Number.isFinite(price)) price = roundToCents(price);
-    const usePack = unit_choice[i] === 'pack' && product.pack_unit;
-    const unitLabel = usePack ? product.pack_unit : product.unit;
-    const baseQty = usePack ? qty * product.pack_size : qty;
-    // 成本快照：记下开单那一刻的成本价，之后改商品成本价不影响这张单的历史毛利。
-    // 按箱录入且配了箱成本价时用 箱成本价÷箱规（共用 lib/priceCalc.js，与 returns.js 同一份实现），
-    // 否则按箱开单会踩回"瓶价由箱价反算"的舍入误差，毛利系统性偏低。
-    const costSnapshot = costSnapshotPerBaseUnit(product, unit_choice[i]);
-    items.push({ pid, qty, price, invalidPrice, unitLabel, baseQty, costSnapshot, productName: product.name, gift });
-  }
-  items.invalidDetailCount = invalidDetailCount;
-  return items;
 }
 
 // 客户文字和编号一起校验，旧页面或异常客户端不能用新名称配旧编号。
@@ -125,34 +69,6 @@ function filterSettlement(rows, settlement) {
     (settlement === 'settled' ? row.effective_status === 'paid' : row.effective_status !== 'paid'));
 }
 
-function queryOrders(db, user, start, end, customerId, guestOnly, settlement, pendingOnly, tagId = null, orderStatus = '', responsibleId = null) {
-  let sql = `
-    SELECT so.*, c.name AS customer_name, w.name AS warehouse_name, u.name AS user_name, ru.name AS responsible_name,
-           ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount, ${refundedAmountSubquery()} AS cash_refunded_amount
-    FROM sales_orders so
-    LEFT JOIN customers c ON c.id = so.customer_id
-    LEFT JOIN warehouses w ON w.id = so.warehouse_id
-    LEFT JOIN users u ON u.id = so.user_id
-    LEFT JOIN users ru ON ru.id = COALESCE(so.responsible_id, so.user_id)
-    WHERE 1=1
-  `;
-  const params = [];
-  if (user.role !== 'admin') {
-    sql += ' AND so.user_id = ?';
-    params.push(user.id);
-  }
-  if (start) { sql += ' AND so.order_date >= ?'; params.push(start); }
-  if (end) { sql += ' AND so.order_date <= ?'; params.push(end); }
-  if (customerId) { sql += ' AND so.customer_id = ?'; params.push(customerId); }
-  if (responsibleId) { sql += ' AND COALESCE(so.responsible_id, so.user_id) = ?'; params.push(responsibleId); }
-  if (tagId) { sql += ' AND so.customer_id IN (SELECT customer_id FROM customer_tag_links WHERE tag_id = ?)'; params.push(tagId); }
-  if (guestOnly) sql += ' AND so.customer_id IS NULL';
-  if (pendingOnly) sql += " AND so.status = 'submitted'";
-  if (orderStatus) { sql += ' AND so.status = ?'; params.push(orderStatus); }
-  sql += ' ORDER BY so.id DESC';
-  return filterSettlement(db.prepare(sql).all(...params).map(attachEffectivePayment), settlement);
-}
-
 function parseSort(query, allowed, defaultSort, defaultOrder = 'desc') {
   const sort = allowed.includes(query.sort) ? query.sort : defaultSort;
   const order = query.order === 'asc' ? 'asc' : defaultOrder;
@@ -182,8 +98,7 @@ function salesQueryString(params) {
 // 销售单列表 - 管理员看全部，操作员看自己的；支持日期、客户、结清状态与负责人筛选。
 // 管理员可使用 ?pending=1 集中查看所有待审核销售单，避免遗漏审核；操作员即使手动拼接该参数也不会生效。
 // 分页：每页 50 条。结清状态按关联退货与现金退款后的有效余额过滤，
-// 所以先全量查询+过滤，再内存切片分页，保证筛选和分页的组合结果正确。
-// （SQLite 本地查询几千行很快，真正的开销是渲染 HTML，只渲染当页即可。）
+// 筛选、计数、排序和 LIMIT/OFFSET 均在数据库执行，避免加载所有订单。
 const SALES_PAGE_SIZE = 50;
 
 router.get('/sales', requireLogin, (req, res) => {
@@ -199,27 +114,15 @@ router.get('/sales', requireLogin, (req, res) => {
     WHERE ${user.role === 'admin' ? 'active = 1 OR EXISTS (SELECT 1 FROM sales_orders WHERE COALESCE(responsible_id, user_id) = users.id)' : 'id = ? OR EXISTS (SELECT 1 FROM sales_orders WHERE user_id = ? AND COALESCE(responsible_id, user_id) = users.id)'}
     ORDER BY active DESC, name, id`).all(...(user.role === 'admin' ? [] : [user.id, user.id]));
   const pendingOnly = user.role === 'admin' && req.query.pending === '1';
-  const orderStatus = req.query.status === 'draft' ? 'draft' : '';
+  const orderStatus = ['draft','approved'].includes(req.query.status) ? req.query.status : '';
   const { sort, order } = parseSort(req.query, ['date', 'amount', 'debt'], 'date');
-  const customers = customersForForm(db, user, null);
+  const customers = customersForForm(db, user, isCustomerInScope(db, user, customerId, null) ? customerId : null);
   const tagId = parseTagId(req.query.tag_id);
   const tags = getCustomerTags(db);
 
-  const allOrders = queryOrders(db, user, start, end, customerId, guestOnly, settlement, pendingOnly, tagId, orderStatus, responsibleId);
+  const { orders, totalOrders, totalPages, page } = queryOrders(db, user, start, end, customerId, guestOnly, settlement, pendingOnly, tagId, orderStatus, responsibleId,
+    { size: SALES_PAGE_SIZE, page: req.query.page, sort, order });
   const draftCount = db.prepare("SELECT COUNT(*) n FROM sales_orders WHERE status='draft'" + (user.role === 'admin' ? '' : ' AND user_id=?')).get(...(user.role === 'admin' ? [] : [user.id])).n;
-  sortRows(allOrders, sort, order, (row, field) => ({
-    date: row.order_date,
-    amount: row.total_amount,
-    debt: row.status === 'approved' ? row.effective_debt : 0
-  })[field]);
-  const totalOrders = allOrders.length;
-  const totalPages = Math.max(1, Math.ceil(totalOrders / SALES_PAGE_SIZE));
-
-  let page = parseInt(req.query.page, 10);
-  if (!Number.isInteger(page) || page < 1) page = 1;
-  if (page > totalPages) page = totalPages;
-
-  const orders = allOrders.slice((page - 1) * SALES_PAGE_SIZE, page * SALES_PAGE_SIZE);
   res.render('sales', {
     orders, user, customers, customerId, guestOnly, start: start || '', end: end || '', settlement, responsibleId, responsibleOptions, pendingOnly,
     sort, order, page, totalPages, totalOrders, orderStatus, draftCount,
@@ -281,7 +184,7 @@ router.get('/sales/export', requireLogin, (req, res) => {
   const settlement = settlementFilter(req.query);
   const responsibleId = responsibleFilter(req.query);
   const pendingOnly = user.role === 'admin' && req.query.pending === '1';
-  const orderStatus = req.query.status === 'draft' ? 'draft' : '';
+  const orderStatus = ['draft','approved'].includes(req.query.status) ? req.query.status : '';
   const tagId = parseTagId(req.query.tag_id);
 
   let sql = `
@@ -354,10 +257,10 @@ function hasInvalidPrice(items) {
 // 不然下拉里找不到它，表单提交时会被误清空。
 function customersForForm(db, user, currentCustomerId) {
   if (user.role === 'admin') {
-    return db.prepare('SELECT * FROM customers ORDER BY id DESC').all();
+    return db.prepare('SELECT * FROM customers WHERE id=? OR id IN (SELECT id FROM customers ORDER BY id DESC LIMIT 50) ORDER BY id DESC').all(currentCustomerId || -1);
   }
-  return db.prepare('SELECT * FROM customers WHERE operator_id = ? OR id = ? ORDER BY id DESC')
-    .all(user.id, currentCustomerId || -1);
+  return db.prepare('SELECT * FROM customers WHERE (operator_id = ? OR id = ?) AND (id = ? OR id IN (SELECT id FROM customers WHERE operator_id=? ORDER BY id DESC LIMIT 50)) ORDER BY id DESC')
+    .all(user.id, currentCustomerId || -1, currentCustomerId || -1, user.id);
 }
 
 // 落库前服务端复检 customer_id 是否在当前用户可见范围内（与表单下拉 customersForForm 同一口径）：
@@ -376,13 +279,13 @@ function isCustomerInScope(db, sessionUser, customerId, currentCustomerId) {
 
 router.get('/sales/new', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  const customers = customersForForm(db, req.session.user, null);
   const requestedCustomerId = Number(req.query.customer_id);
+  const customers = customersForForm(db, req.session.user, isCustomerInScope(db, req.session.user, requestedCustomerId, null) ? requestedCustomerId : null);
   const selectedCustomer = Number.isInteger(requestedCustomerId) && requestedCustomerId > 0
     ? customers.find(customer => customer.id === requestedCustomerId)
     : null;
   const warehouses = warehousesForUser(db, req.session.user);
-  const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
+  const products = productsForForm(db, req.method === 'POST' ? req.body : (req.params.id ? db.prepare('SELECT product_id FROM sales_order_items WHERE sales_order_id=?').all(req.params.id) : []));
   res.render('sale_form', {
     responsibleOptions: responsibleUsers(db),
     customers, warehouses, products, error: null, order: null, existingItems: [], today: todayLocalDate(),
@@ -395,9 +298,9 @@ router.post('/sales/new', requireLogin, requireMutationKey, (req, res) => {
   const { customer_id, warehouse_id, order_date, note, paid_amount, remarks } = req.body;
 
   const renderError = (msg) => {
-    const customers = customersForForm(db, req.session.user, null);
+    const customers = customersForForm(db, req.session.user, isCustomerInScope(db, req.session.user, req.body.customer_id, null) ? req.body.customer_id : null);
     const warehouses = warehousesForUser(db, req.session.user);
-    const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
+    const products = productsForForm(db, req.method === 'POST' ? req.body : (req.params.id ? db.prepare('SELECT product_id FROM sales_order_items WHERE sales_order_id=?').all(req.params.id) : []));
     return res.render('sale_form', { responsibleOptions: responsibleUsers(db), customers, warehouses, products, error: msg, order: null, existingItems: [], formValues: req.body, draftItems: submittedItemsFromBody(req.body), today: todayLocalDate() });
   };
 
@@ -419,6 +322,10 @@ router.post('/sales/new', requireLogin, requireMutationKey, (req, res) => {
   }
   if (!warehouse_id || items.length === 0) {
     return renderError('请选择仓库并至少填写一行有效商品明细');
+  }
+  if (!isWarehouseActive(db, warehouse_id)) {
+    res.status(400);
+    return renderError('所选仓库不存在或已停用，请选择启用的仓库');
   }
   if (!isWarehouseInScope(db, req.session.user, warehouse_id)) {
     res.status(403);
@@ -481,7 +388,7 @@ router.get('/sales/:id/edit', requireLogin, (req, res) => {
 
   const customers = customersForForm(db, req.session.user, order.customer_id);
   const warehouses = warehousesForUser(db, req.session.user);
-  const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
+  const products = productsForForm(db, req.method === 'POST' ? req.body : (req.params.id ? db.prepare('SELECT product_id FROM sales_order_items WHERE sales_order_id=?').all(req.params.id) : []));
   const existingItems = db.prepare('SELECT * FROM sales_order_items WHERE sales_order_id = ?').all(order.id);
   res.render('sale_form', { responsibleOptions: responsibleUsers(db, order.responsible_id || order.user_id), customers, warehouses, products, error: null, order, existingItems, today: todayLocalDate() });
 });
@@ -499,7 +406,7 @@ router.post('/sales/:id/edit', requireLogin, requireMutationKey, (req, res) => {
   const renderError = (msg) => {
     const customers = customersForForm(db, req.session.user, order.customer_id);
     const warehouses = warehousesForUser(db, req.session.user);
-    const products = db.prepare('SELECT id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack FROM products ORDER BY name').all();
+    const products = productsForForm(db, req.method === 'POST' ? req.body : (req.params.id ? db.prepare('SELECT product_id FROM sales_order_items WHERE sales_order_id=?').all(req.params.id) : []));
     return res.render('sale_form', { responsibleOptions: responsibleUsers(db, order.responsible_id || order.user_id), customers, warehouses, products, error: msg, order, existingItems: [], formValues: req.body, draftItems: submittedItemsFromBody(req.body), today: todayLocalDate() });
   };
 
@@ -521,6 +428,10 @@ router.post('/sales/:id/edit', requireLogin, requireMutationKey, (req, res) => {
   }
   if (!warehouse_id || items.length === 0) {
     return renderError('请选择仓库并至少填写一行有效商品明细');
+  }
+  if (!isWarehouseActive(db, warehouse_id)) {
+    res.status(400);
+    return renderError('所选仓库不存在或已停用，请选择启用的仓库');
   }
   if (!isWarehouseInScope(db, req.session.user, warehouse_id)) {
     res.status(403);
@@ -599,6 +510,7 @@ router.post('/sales/submit/:id', requireLogin, (req, res) => {
   return completeTransaction(req, res, () => {
     const order = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(req.params.id);
     if (!order) return { status: 404, error: '单据不存在' };
+    if (!isWarehouseActive(db, order.warehouse_id)) return { status: 400, error: '单据涉及的仓库已停用，请先在仓库管理中恢复启用' };
     if (order.status !== 'draft') return { status: 400, error: '只有草稿状态可以提交审核' };
     if (!canEditOrWithdraw(order, req.session.user)) return { status: 403, error: '无权限' };
     db.prepare("UPDATE sales_orders SET status = 'submitted' WHERE id = ?").run(order.id);
@@ -628,6 +540,7 @@ router.post('/sales/approve/:id', requireLogin, (req, res) => {
     if (req.session.user.role !== 'admin') return { status: 403, error: '无权限' };
     const order = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(req.params.id);
     if (!order) return { status: 404, error: '单据不存在' };
+    if (!isWarehouseActive(db, order.warehouse_id)) return { status: 400, error: '单据涉及的仓库已停用，请先在仓库管理中恢复启用' };
     if (order.status !== 'submitted') return { status: 400, error: '只有待审核状态可以审核通过' };
 
     const items = db.prepare('SELECT * FROM sales_order_items WHERE sales_order_id = ?').all(order.id);
@@ -686,6 +599,7 @@ router.post('/sales/unapprove/:id', requireLogin, (req, res) => {
     if (req.session.user.role !== 'admin') return { status: 403, error: '无权限' };
     const order = db.prepare('SELECT * FROM sales_orders WHERE id = ?').get(req.params.id);
     if (!order) return { status: 404, error: '单据不存在' };
+    if (!isWarehouseActive(db, order.warehouse_id)) return { status: 400, error: '单据涉及的仓库已停用，请先在仓库管理中恢复启用' };
     if (order.status !== 'approved' && order.status !== 'rejected') {
       return { status: 400, error: '只有已审核或已拒绝状态可以反审核' };
     }

@@ -81,7 +81,10 @@ router.get('/', requireLogin, (req, res) => {
   const pendingCount = (table) =>
     db.prepare(`SELECT COUNT(*) c FROM ${table} WHERE status = 'submitted' ${operatorFilter ? 'AND user_id = ?' : ''}`)
       .get(...pendingParams).c;
-  const pendingOrders = pendingCount('sales_orders') + pendingCount('return_orders') + pendingCount('transfer_orders');
+  const pendingSales = pendingCount('sales_orders');
+  const pendingReturns = pendingCount('return_orders');
+  const pendingTransfers = pendingCount('transfer_orders');
+  const pendingOrders = pendingSales + pendingReturns + pendingTransfers;
 
   // 毛利：仅管理员可见。口径与经营报表"不含应收"完全一致（SQL 唯一实现在 lib/profitCalc.js，
   // 避免仪表盘/报表再次分叉）：
@@ -106,7 +109,7 @@ router.get('/', requireLogin, (req, res) => {
     FROM inventory inv
     JOIN products p ON p.id = inv.product_id
     JOIN warehouses w ON w.id = inv.warehouse_id
-    WHERE p.low_stock_threshold > 0 AND inv.quantity <= p.low_stock_threshold
+    WHERE w.active = 1 AND p.low_stock_threshold > 0 AND inv.quantity <= p.low_stock_threshold
       ${operatorFilter ? 'AND w.operator_id = ?' : ''}
     ORDER BY inv.quantity ASC
     LIMIT 20
@@ -131,7 +134,7 @@ router.get('/', requireLogin, (req, res) => {
 
   res.render('dashboard', {
     todaySales, monthlySales, totalDebt, pendingOrders, todayProfit, monthlyProfit,
-    lowStock, recentSales, user
+    lowStock, recentSales, user, today, pendingSales, pendingReturns, pendingTransfers
   });
 });
 

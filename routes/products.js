@@ -1,12 +1,17 @@
 const express = require('express');
 const { requireLogin, requireAdmin } = require('../middleware/auth');
 const { isBlank, isValidNonNegativeAmount, roundToCents } = require('../lib/validators');
+const { pagination } = require('../lib/catalog');
 const router = express.Router();
 
 router.get('/products', requireLogin, (req, res) => {
   const db = req.tenantDb;
-  const products = db.prepare('SELECT * FROM products ORDER BY id DESC').all();
-  res.render('products', { products, isAdmin: req.session.user.role === 'admin' });
+  const query = String(req.query.q || '').trim().slice(0, 100);
+  const params = Array(3).fill('%' + query + '%');
+  const where = ' WHERE name LIKE ? OR sku LIKE ? OR spec LIKE ?';
+  const paging = pagination(db.prepare('SELECT COUNT(*) n FROM products' + where).get(...params).n, req.query.page);
+  const products = db.prepare('SELECT * FROM products' + where + ' ORDER BY id DESC LIMIT ? OFFSET ?').all(...params,paging.size,paging.offset);
+  res.render('products', { products, query, paging, pageLink: page => '/products?' + new URLSearchParams({q:query,page}), success: req.query.saved === '1', isAdmin: req.session.user.role === 'admin' });
 });
 
 router.get('/products/new', requireAdmin, (req, res) => {
@@ -74,9 +79,9 @@ router.post('/products/new', requireAdmin, (req, res) => {
     const warehouses = db.prepare('SELECT id FROM warehouses').all();
     const insertInv = db.prepare('INSERT OR IGNORE INTO inventory (product_id, warehouse_id, quantity) VALUES (?,?,0)');
     for (const w of warehouses) insertInv.run(info.lastInsertRowid, w.id);
-    res.redirect('/products');
+    res.redirect('/products?saved=1');
   } catch (e) {
-    res.render('product_form', { product: req.body, error: 'SKU 已存在或数据有误：' + e.message });
+    res.render('product_form', { product: req.body, error: 'SKU 已存在或数据有误，请核对后重试。' });
   }
 });
 
@@ -89,13 +94,16 @@ router.get('/products/:id/edit', requireAdmin, (req, res) => {
 
 router.post('/products/:id/edit', requireAdmin, (req, res) => {
   const db = req.tenantDb;
+  const existing = db.prepare('SELECT id FROM products WHERE id = ?').get(req.params.id);
+  if (!existing) return res.status(404).render('global_error', { message: '商品不存在', returnTo: '/products' });
+  const formProduct = { ...req.body, id: existing.id };
   const { sku, name, spec, unit, pack_unit, pack_size, cost_price, sale_price, cost_price_pack, sale_price_pack, low_stock_threshold } = req.body;
   // 与"新建商品"保持一致：名称必填、换算比例正整数、SKU 撞车等约束错误渲染表单提示，而不是抛到全局 500 错误页
-  if (!name) return res.render('product_form', { product: req.body, error: '商品名称必填' });
+  if (!name) return res.render('product_form', { product: formProduct, error: '商品名称必填' });
   const pack = parsePackSize(pack_size);
-  if (pack.error) return res.render('product_form', { product: req.body, error: pack.error });
+  if (pack.error) return res.render('product_form', { product: formProduct, error: pack.error });
   const numbers = parseProductNumbers(req.body);
-  if (numbers.error) return res.status(400).render('product_form', { product: req.body, error: numbers.error });
+  if (numbers.error) return res.status(400).render('product_form', { product: formProduct, error: numbers.error });
   try {
     db.prepare(
       `UPDATE products SET sku=?, name=?, spec=?, unit=?, pack_unit=?, pack_size=?, cost_price=?, sale_price=?, cost_price_pack=?, sale_price_pack=?, low_stock_threshold=? WHERE id=?`
@@ -107,9 +115,9 @@ router.post('/products/:id/edit', requireAdmin, (req, res) => {
       numbers.values.low_stock_threshold,
       req.params.id
     );
-    res.redirect('/products');
+    res.redirect('/products?saved=1');
   } catch (e) {
-    res.render('product_form', { product: req.body, error: 'SKU 已存在或数据有误：' + e.message });
+    res.status(400).render('product_form', { product: formProduct, error: 'SKU 已存在或数据有误，请核对后重试。' });
   }
 });
 
@@ -128,7 +136,7 @@ router.post('/products/:id/delete', requireAdmin, (req, res) => {
   }
   db.prepare('DELETE FROM inventory WHERE product_id = ?').run(req.params.id);
   db.prepare('DELETE FROM products WHERE id = ?').run(req.params.id);
-  res.redirect('/products');
+  res.redirect('/products?saved=1');
 });
 
 module.exports = router;

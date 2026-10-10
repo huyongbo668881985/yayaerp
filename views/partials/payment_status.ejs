@@ -1,0 +1,1 @@
+<% const payments = { paid: ['已结清','success'], partial: ['部分结算','warning'], unpaid: ['未收款','danger'], refund_pending: ['待退款','warning'] }; const payment = order.status !== 'approved' ? ['审核后生效','neutral'] : (payments[order.effective_status] || ['未收款','danger']); %><span class="badge status-<%= payment[1] %>"><%= payment[0] %></span>

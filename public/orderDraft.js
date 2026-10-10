@@ -28,7 +28,7 @@
     const products = Array.from(form.querySelector('[name="product_id"]')?.options || []);
     const initialRevision = form.elements.namedItem('draft_revision')?.value;
     const panel = document.createElement('section'); panel.className = 'draft-panel'; panel.setAttribute('aria-label','本机暂存');
-    const status = document.createElement('p'); status.setAttribute('role','status'); status.textContent = storageOK ? '填写内容自动暂存在本机，保留 7 天；共用设备请及时清除。' : '本机存储不可用，请使用“存草稿”保存到服务器。';
+    const status = document.createElement('p'); status.setAttribute('role','status'); status.textContent = storageOK ? '本机自动暂存 7 天 · 共用设备请及时清除' : '本机存储不可用，请使用“存草稿”保存到服务器。';
     const list = document.createElement('div'); list.className = 'draft-recovery-list';
     const clear = document.createElement('button'); clear.type = 'button'; clear.className = 'btn btn-secondary btn-sm'; clear.textContent = '清除当前本机暂存'; clear.hidden = true;
     panel.append(status,list,clear); form.before(panel);
@@ -78,9 +78,17 @@
       entry.rows.forEach(row => { const line = document.createElement('p'); line.textContent = `${row.search || '商品 #'+row.id} · 数量 ${row.quantity || '未填'} ${row.unit_label || (row.unit_choice === 'pack' ? '整包单位' : '基本单位')}${row.unit_size > 1 ? '（每份 '+row.unit_size+' 个基本单位）' : ''}${entry.route.startsWith('/transfers/') ? '' : ' · 单价 '+(row.price || '未填')}${row.is_gift ? ' · 赠品' : ''}`; details.appendChild(line); });
       container.appendChild(details);
     }
-    function restore(entry) {
+    async function restore(entry) {
       if (initialRevision != null && entry.values.draft_revision !== initialRevision) {
         status.textContent = '服务器草稿已更新，这份旧暂存仅供核对。请查看暂存内容，再在当前草稿中重新填写需要保留的部分。'; return;
+      }
+      if (form.id === 'saleForm' && window.prepareSaleProducts) {
+        try {
+          const loaded = await window.prepareSaleProducts(entry.rows.map(item => item.id).filter(Boolean));
+          for (const product of loaded) if (!products.some(option => option.value === String(product.id))) {
+            const option = document.createElement('option'); option.value = product.id; option.dataset.packSize = product.pack_size; products.push(option);
+          }
+        } catch (_) { status.textContent = '无法核对暂存商品，请稍后重试'; return; }
       }
       if (entry.rows.some(item => item.id && !products.some(option => option.value === item.id))) {
         status.textContent = '暂存中的商品已不可选，请查看暂存内容，重新选择当前可用商品。'; return;
@@ -144,7 +152,7 @@
               localStorage.removeItem(entry.key); card.replaceChildren();
               const message = document.createElement('p'); message.textContent = '这份内容已经保存成功，无需再次提交。';
               const link = document.createElement('a'); link.textContent = '查看已保存单据'; link.href = result.redirect; card.append(message,link);
-            } else restore(entry);
+            } else await restore(entry);
           } catch (_) { status.textContent = '暂时无法确认是否已保存，请联网后再恢复。暂存内容仍保留，可展开查看。'; }
           finally { recover.disabled = false; }
         });
