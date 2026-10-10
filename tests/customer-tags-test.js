@@ -162,6 +162,22 @@ async function runCustomerTagTests(ok) {
       assert.deepEqual((await request(`/customers?tag=${flowId}`, { user: 2, json: true })).data.customers.map(c => c.id), [1]);
       assert.equal((await request(`/customers?tag=${flowId}&q=他人`, { user: 2, json: true })).data.customers.length, 0);
     });
+    await check('管理员按归属人员筛选可叠加标签关键词，操作员不能借参数越权', async () => {
+      const result = (await request(`/customers?operator_id=2&tag=${flowId}&q=客户`, { json: true })).data;
+      assert.deepEqual(result.customers.map(c => c.id), [1]);
+      assert.equal(result.operatorId, 2);
+      assert.equal(result.displayedCustomerCount, 1);
+      assert.equal(result.totalCustomerCount, 4);
+      assert.deepEqual((await request('/customers?operator_id=unassigned', { json: true })).data.customers.map(c => c.id), [3]);
+      assert.equal((await request('/customers?operator_id=999999', { json: true })).data.customers.length, 0);
+      const operator = (await request('/customers?operator_id=3', { user: 2, json: true })).data;
+      assert.equal(operator.operatorId, null);
+      assert.ok(operator.customers.every(c => c.operator_id === 2));
+      assert.ok(!(await request('/customers', { user: 2 })).text.includes('id="customerOperatorFilter"'));
+      const html = (await request('/customers?operator_id=2')).text;
+      assert.ok(html.includes('id="customerOperatorFilter"'));
+      assert.ok(html.includes('value="2" selected'));
+    });
     await check('标签筛选订单不重复、散客被排除且操作员只看自己的订单', async () => {
       const orders = (await request(`/sales?tag_id=${flowId}`, { json: true })).data.orders;
       assert.deepEqual(orders.map(order => order.id), [1, 2, 3]);

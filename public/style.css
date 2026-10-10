@@ -605,6 +605,8 @@ form > .form-section-heading:first-of-type { border-top: 0; padding-top: 0; marg
   .customer-search-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 8px; }
   .customer-search-form > .form-row:first-child { grid-column: 1 / -1; }
   .customer-search-form > .customer-tag-filter { grid-column: 1; }
+  .customer-search-form:has(.customer-operator-filter) > .customer-tag-filter { grid-column: 1 / -1; }
+  .customer-search-form > .customer-operator-filter { grid-column: 1; }
   .customer-search-form > .btn[type=submit] { grid-column: 2; min-width: 70px; }
   .customer-search-form > a { grid-column: 1 / -1; text-align: center; }
   .customer-heading-buttons { gap: 6px; }

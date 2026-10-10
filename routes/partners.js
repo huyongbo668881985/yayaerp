@@ -53,6 +53,9 @@ router.get('/customers', requireLogin, (req, res) => {
   const user = req.session.user;
   const query = typeof req.query.q === 'string' ? req.query.q.trim() : '';
   const tagId = parseTagId(req.query.tag);
+  const operatorId = user.role === 'admin'
+    ? (req.query.operator_id === 'unassigned' ? 'unassigned' : parseTagId(req.query.operator_id))
+    : null;
   const baseSql = `
     SELECT c.*, u.name AS operator_name
     FROM customers c
@@ -67,17 +70,20 @@ router.get('/customers', requireLogin, (req, res) => {
   const tagClause = tagId
     ? `${scopeClause || searchClause ? ' AND' : ' WHERE'} c.id IN (SELECT customer_id FROM customer_tag_links WHERE tag_id = ?)`
     : '';
-  const filterParams = [...scopeParams, ...searchParams, ...(tagId ? [tagId] : [])];
-  const paging = pagination(db.prepare('SELECT COUNT(*) n FROM customers c' + scopeClause + searchClause + tagClause).get(...filterParams).n, req.query.page);
-  const customers = db.prepare(baseSql + scopeClause + searchClause + tagClause + ' ORDER BY c.id DESC LIMIT ? OFFSET ?')
+  const operatorClause = operatorId
+    ? `${scopeClause || searchClause || tagClause ? ' AND' : ' WHERE'} c.operator_id ${operatorId === 'unassigned' ? 'IS NULL' : '= ?'}`
+    : '';
+  const filterParams = [...scopeParams, ...searchParams, ...(tagId ? [tagId] : []), ...(operatorId && operatorId !== 'unassigned' ? [operatorId] : [])];
+  const paging = pagination(db.prepare('SELECT COUNT(*) n FROM customers c' + scopeClause + searchClause + tagClause + operatorClause).get(...filterParams).n, req.query.page);
+  const customers = db.prepare(baseSql + scopeClause + searchClause + tagClause + operatorClause + ' ORDER BY c.id DESC LIMIT ? OFFSET ?')
     .all(...filterParams, paging.size, paging.offset);
   attachCustomerTags(db, customers);
   const totalCustomerCount = db.prepare(`SELECT COUNT(*) AS count FROM customers c${scopeClause}`)
     .get(...scopeParams).count;
   const users = db.prepare('SELECT id, name, role FROM users ORDER BY name').all();
   res.render('customers', {
-    customers, users, paging, pageLink: page => '/customers?' + new URLSearchParams({q:query,tag:tagId || '',page}), isAdmin: user.role === 'admin', query,
-    totalCustomerCount, displayedCustomerCount: customers.length,
+    customers, users, paging, pageLink: page => '/customers?' + new URLSearchParams({q:query,tag:tagId || '',operator_id:operatorId || '',page}), isAdmin: user.role === 'admin', query, operatorId,
+    totalCustomerCount, displayedCustomerCount: paging.count,
     tags: getCustomerTags(db), tagId, tagColors: TAG_COLORS, maxTags: MAX_TAGS,
     tagError: typeof req.query.tag_error === 'string' ? req.query.tag_error : null,
     tagSuccess: typeof req.query.tag_success === 'string' ? req.query.tag_success : null,

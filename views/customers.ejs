@@ -10,10 +10,20 @@
       <label for="customerTagFilter">客户标签</label>
       <select id="customerTagFilter" name="tag"><option value="">全部标签</option><% tags.forEach(function(tag) { %><option value="<%= tag.id %>" <%= tagId === tag.id ? 'selected' : '' %>><%= tag.name %></option><% }) %></select>
     </div>
+    <% if (isAdmin) { %>
+    <div class="form-row customer-operator-filter">
+      <label for="customerOperatorFilter">归属业务员</label>
+      <select id="customerOperatorFilter" name="operator_id">
+        <option value="">全部人员</option>
+        <option value="unassigned" <%= operatorId === 'unassigned' ? 'selected' : '' %>>未指定业务员</option>
+        <% users.forEach(function(u) { %><option value="<%= u.id %>" <%= operatorId === u.id ? 'selected' : '' %>><%= u.name %>（<%= u.role === 'admin' ? '管理员' : '操作员' %>）</option><% }) %>
+      </select>
+    </div>
+    <% } %>
     <button type="submit" class="btn btn-secondary">查询</button>
-    <% if (query || tagId) { %><a class="btn btn-secondary" href="/customers">清除</a><% } %>
+    <% if (query || tagId || operatorId) { %><a class="btn btn-secondary" href="/customers">清除</a><% } %>
   </form>
-  <p class="muted customer-count"><%= query || tagId ? '查询结果 ' + displayedCustomerCount + ' 位' : '客户数量 ' + totalCustomerCount + ' 位' %><% if (query || tagId) { %>（共 <%= totalCustomerCount %> 位客户）<% } %></p>
+  <p class="muted customer-count"><%= query || tagId || operatorId ? '查询结果 ' + displayedCustomerCount + ' 位' : '客户数量 ' + totalCustomerCount + ' 位' %><% if (query || tagId || operatorId) { %>（共 <%= totalCustomerCount %> 位客户）<% } %></p>
 </div>
 <details class="card customer-new-panel" id="customerNewPanel" open>
   <summary>新增客户 <span>展开填写</span></summary>
