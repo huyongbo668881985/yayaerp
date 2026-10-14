@@ -49,6 +49,12 @@ function getSummary(db, start, end) {
     WHERE so.status = 'approved' AND ${EFFECTIVE_DEBT_EXPR} > 0.001 ${saleFilter.clause}
   `).get(...saleFilter.params);
 
+  // 实收金额：区间内已审核销售单的已收款，减去关联退货已实际退回的现金（净现金流入）
+  const received = db.prepare(`
+    SELECT COALESCE(SUM(so.paid_amount - ${refundedAmountSubquery('so')}), 0) amount
+    FROM sales_orders so WHERE so.status = 'approved' ${saleFilter.clause}
+  `).get(...saleFilter.params);
+
   // 毛利计算统一走 lib/profitCalc.js（成本快照、只算已审核、含/不含应收判定都在那实现），
   // 与首页仪表盘共用同一套 SQL，杜绝两边口径再次分叉。
   const salesProfitPaid = salesProfit(db, { onlyPaid: true, filter: saleFilter });
@@ -61,7 +67,7 @@ function getSummary(db, start, end) {
   const profitWithReceivable = salesProfitAll - returnProfitAll;
   const receivableProfit = profitWithReceivable - profitWithoutReceivable;
 
-  return { sales, returnsAmount: returnsRaw.amount, receivable, profitWithoutReceivable, profitWithReceivable, receivableProfit };
+  return { sales, returnsAmount: returnsRaw.amount, receivable, received: received.amount, profitWithoutReceivable, profitWithReceivable, receivableProfit };
 }
 
 // 销售单明细：includeReceivable=false 时只列"有效欠款已结清"的单子（对应"不含应收"口径），

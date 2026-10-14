@@ -42,12 +42,16 @@
     <div class="label">销售额（已扣退货）· <%= summary.sales.count %> 单销售，<%= summary.sales.returnCount %> 单退货</div>
   </div>
   <div class="stat-card">
-    <div class="num" style="color:#e5484d">¥<%= summary.returnsAmount.toFixed(2) %></div>
-    <div class="label">退货金额（已冲减进销售额和毛利）</div>
+    <div class="num" style="color:#16a34a">¥<%= summary.received.toFixed(2) %></div>
+    <div class="label">实收金额（已收款，已扣现金退款）</div>
   </div>
   <div class="stat-card">
     <div class="num" style="color:<%= summary.receivable.amount > 0 ? '#e5484d' : '#16a34a' %>">¥<%= summary.receivable.amount.toFixed(2) %></div>
     <div class="label">应收金额（未结清）· <%= summary.receivable.count %> 单</div>
+  </div>
+  <div class="stat-card">
+    <div class="num" style="color:#e5484d">¥<%= summary.returnsAmount.toFixed(2) %></div>
+    <div class="label">退货金额（已冲减进销售额和毛利）</div>
   </div>
   <div class="stat-card">
     <div class="num">¥<%= (includeReceivable ? summary.profitWithReceivable : summary.profitWithoutReceivable).toFixed(2) %></div>
@@ -181,6 +185,7 @@
     · 销售额 = 区间内已审核销售单金额 − 区间内已审核退货单金额，各自按自己的单据日期归属到区间。<br>
     · 结算余额 = 销售单金额 − 已收现金 − 已审核关联退货 + 已退现金。正数为欠款，负数为待退款，零余额才算已结清。<br>
     · 应收金额只累计正余额；「不含应收」毛利只计已结清销售单，现金收齐或退货抵扣均可结清。<br>
+    · 实收金额 = 区间内已审核销售单的已收现金 − 其关联退货已实际退回的现金，不随「含/不含应收」切换。<br>
     · 退货按退货日期冲减毛利；「不含应收」口径下，已退现金或关联销售单已结清的退货参与冲减。<br>
     · 销售成本使用开单快照；关联退货按原销售单该商品的每基本单位加权成本冲回，独立退货使用自身成本快照。
   </p>
