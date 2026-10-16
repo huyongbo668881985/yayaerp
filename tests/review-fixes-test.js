@@ -102,5 +102,34 @@ async function check(label, work) { await work(); passed++; console.log('  PASS 
     await first.request('/platform-admin/change-password',{old_password:'InitialAdmin_2026',new_password:'ChangedPlatform_2026'});
     assert.equal((await first.request('/platform-admin')).status,200);assert.equal((await second.request('/platform-admin')).location,'/platform-admin/login');
   });
+  await check('退货开单页不向浏览器下发商品成本价或原明细成本快照',async()=>{
+    db.prepare('UPDATE products SET cost_price=77.77,cost_price_pack=888.88 WHERE id=1').run();
+    db.prepare('UPDATE sales_order_items SET cost_price_snapshot=66.66 WHERE sales_order_id=1').run();
+    const worker2=new Client();assert.equal((await worker2.login('worker','ChangedWorker_2026')).status,302);
+    for (const [who,url] of [[owner,'/returns/new'],[owner,'/returns/new?sale_id=1'],[worker2,'/returns/new']]) {
+      const page=await who.request(url);assert.equal(page.status,200);
+      for (const leak of ['cost_price','77.77','888.88','66.66']) assert.ok(!page.text.includes(leak),url+' 泄露 '+leak);
+    }
+    assert.ok((await owner.request('/returns/new?sale_id=1')).text.includes('ORIGINALS'));
+  });
+  await check('管理员协助录入并指派负责人后，该操作员可查看打印及关联退货，且绝不泄露成本价',async()=>{
+    db.prepare('UPDATE sales_orders SET responsible_id=3 WHERE id=1').run();
+    const w=new Client();await w.login('worker','ChangedWorker_2026');
+    for (const url of ['/sales','/sales/1','/sales/1/print','/sales/export','/returns/sales-options?q=1','/returns/new?sale_id=1']) {
+      const res=await w.request(url);assert.equal(res.status,200,url);
+      for (const leak of ['cost_price','77.77','888.88','66.66']) assert.ok(!res.text.includes(leak),url+' 泄露 '+leak);
+    }
+    assert.ok((await w.request('/sales')).text.includes('href="/sales/1"'));
+    assert.equal((await w.request('/sales/2')).status,403);assert.equal((await w.request('/sales/2/print')).status,403);
+  });
+  await check('调拨反审核按商品汇总校验调入仓库存',async()=>{
+    const transfer=db.prepare("INSERT INTO transfer_orders(from_warehouse_id,to_warehouse_id,user_id,order_date,status) VALUES (1,2,1,'2026-10-10','approved')").run().lastInsertRowid;
+    const item=db.prepare("INSERT INTO transfer_order_items(transfer_order_id,product_id,quantity,unit_label,base_quantity) VALUES (?,1,8,'瓶',8)");item.run(transfer);item.run(transfer);
+    db.prepare('INSERT OR REPLACE INTO inventory(product_id,warehouse_id,quantity) VALUES (1,2,10)').run();
+    const result=await owner.request('/transfers/unapprove/'+transfer,{});
+    assert.equal(result.status,400);assert.ok(result.text.includes('合计 16'));
+    assert.equal(db.prepare('SELECT status FROM transfer_orders WHERE id=?').get(transfer).status,'approved');
+    assert.equal(db.prepare('SELECT quantity FROM inventory WHERE product_id=1 AND warehouse_id=2').get().quantity,10);
+  });
   console.log(`整改回归测试通过：${passed} 项`);db.close();platformDb.close();fs.rmSync(dir,{recursive:true,force:true});process.exit(0);
 })().catch(error=>{console.error(error);fs.rmSync(dir,{recursive:true,force:true});process.exit(1);});

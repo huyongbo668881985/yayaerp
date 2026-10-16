@@ -87,9 +87,11 @@ async function check(label, work) { await work(); passed++; console.log('  PASS 
       assert.ok(result.responsibleOptions.some(person=>person.id===4 && !person.active));
       assert.equal((await list('?responsible_id=1.5')).responsibleId,null);
     });
-    await check('负责人查询不扩大操作员权限，租户独立，空结果为零', async () => {
+    await check('操作员可查看自己录入或负责的订单，不可见无关订单，租户独立，空结果为零', async () => {
       assert.deepEqual((await list('?responsible_id=3',{user:2})).orders.map(row=>row.id),[own,1]);
-      assert.ok(!(await list('?responsible_id=2',{user:2})).orders.some(row=>row.id===other));
+      assert.ok((await list('?responsible_id=2',{user:2})).orders.some(row=>row.id===other));
+      assert.equal((await list('?responsible_id=4',{user:2})).totalOrders,0);
+      assert.equal((await request('/sales/'+inactive,{user:2})).status,403);
       assert.equal((await list('?responsible_id=3',{tenant:1})).totalOrders,0);
       assert.equal((await list('?responsible_id=999')).totalOrders,0);
     });

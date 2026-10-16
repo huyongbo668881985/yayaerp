@@ -28,11 +28,14 @@ router.post('/warehouses/new', requireAdmin, (req, res) => {
   if (operatorId && !db.prepare("SELECT 1 FROM users WHERE id = ? AND role = 'operator' AND active = 1").get(operatorId)) {
     return res.status(400).send('所选操作员不存在或已禁用');
   }
-  const info = db.prepare('INSERT INTO warehouses (name, address, operator_id) VALUES (?,?,?)').run(name, address || '', operatorId);
-  // 为所有已存在的商品建立此仓库的库存行
-  const products = db.prepare('SELECT id FROM products').all();
-  const insertInv = db.prepare('INSERT OR IGNORE INTO inventory (product_id, warehouse_id, quantity) VALUES (?,?,0)');
-  for (const p of products) insertInv.run(p.id, info.lastInsertRowid);
+  db.transaction(() => {
+    const info = db.prepare('INSERT INTO warehouses (name, address, operator_id) VALUES (?,?,?)').run(name, address || '', operatorId);
+    // 为所有已存在的商品建立此仓库的库存行
+    const products = db.prepare('SELECT id FROM products').all();
+    const insertInv = db.prepare('INSERT OR IGNORE INTO inventory (product_id, warehouse_id, quantity) VALUES (?,?,0)');
+    for (const p of products) insertInv.run(p.id, info.lastInsertRowid);
+    writeAuditLog(db, req.session.user, '新建仓库', '仓库', info.lastInsertRowid, `新建仓库【${name}】`);
+  }).immediate();
   res.redirect('/warehouses');
 });
 
@@ -41,13 +44,35 @@ router.post('/warehouses/:id/operator', requireAdmin, (req, res) => {
   const db = req.tenantDb;
   const warehouseId = Number(req.params.id);
   const operatorId = req.body.operator_id ? Number(req.body.operator_id) : null;
-  if (!Number.isInteger(warehouseId) || !db.prepare('SELECT 1 FROM warehouses WHERE id = ?').get(warehouseId)) {
-    return res.status(404).send('仓库不存在');
+  if (!Number.isInteger(warehouseId)) return res.status(404).send('仓库不存在');
+  const warehouse = db.prepare(`SELECT w.*, u.name AS old_operator_name
+    FROM warehouses w LEFT JOIN users u ON u.id = w.operator_id
+    WHERE w.id = ?`).get(warehouseId);
+  if (!warehouse) return res.status(404).send('仓库不存在');
+
+  let newOperator = null;
+  if (operatorId) {
+    if (!Number.isInteger(operatorId)) return res.status(400).send('所选操作员不存在或已禁用');
+    newOperator = db.prepare("SELECT id, name FROM users WHERE id = ? AND role = 'operator' AND active = 1").get(operatorId);
+    if (!newOperator) return res.status(400).send('所选操作员不存在或已禁用');
   }
-  if (operatorId && (!Number.isInteger(operatorId) || !db.prepare("SELECT 1 FROM users WHERE id = ? AND role = 'operator' AND active = 1").get(operatorId))) {
-    return res.status(400).send('所选操作员不存在或已禁用');
+
+  if (warehouse.operator_id !== operatorId) {
+    db.transaction(() => {
+      db.prepare('UPDATE warehouses SET operator_id = ? WHERE id = ?').run(operatorId, warehouseId);
+      const oldName = warehouse.old_operator_name || '未分配';
+      const newName = newOperator ? newOperator.name : '未分配';
+      writeAuditLog(db, req.session.user, '变更仓库归属', '仓库', warehouseId,
+        `${warehouse.name}：责任操作员 ${oldName} → ${newName}`, {
+          warehouse_name: warehouse.name,
+          from_operator_id: warehouse.operator_id,
+          from_operator_name: oldName,
+          to_operator_id: operatorId,
+          to_operator_name: newName
+        }
+      );
+    }).immediate();
   }
-  db.prepare('UPDATE warehouses SET operator_id = ? WHERE id = ?').run(operatorId, warehouseId);
   res.redirect('/warehouses');
 });
 
@@ -102,8 +127,12 @@ router.post('/warehouses/:id/delete', requireAdmin, (req, res) => {
     ].filter(Boolean).join('、');
     return res.status(400).send(`无法删除：该仓库被以下记录引用着（${detail}），删除会破坏历史单据。如果不再使用，请在仓库管理中点击“停用”，保留历史记录。`);
   }
-  db.prepare('DELETE FROM inventory WHERE warehouse_id = ?').run(req.params.id);
-  db.prepare('DELETE FROM warehouses WHERE id = ?').run(req.params.id);
+  const warehouse = db.prepare('SELECT name FROM warehouses WHERE id = ?').get(req.params.id);
+  db.transaction(() => {
+    db.prepare('DELETE FROM inventory WHERE warehouse_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM warehouses WHERE id = ?').run(req.params.id);
+    writeAuditLog(db, req.session.user, '删除仓库', '仓库', Number(req.params.id), `删除仓库【${warehouse ? warehouse.name : req.params.id}】`);
+  }).immediate();
   res.redirect('/warehouses');
 });
 

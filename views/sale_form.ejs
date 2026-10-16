@@ -64,8 +64,14 @@
     <h2 class="form-section-heading">金额与备注</h2>
     <div class="grid-3">
       <div class="form-row">
-        <label>收款金额</label>
-        <input type="number" name="paid_amount" placeholder="本次收款金额" step="0.01" min="0" value="<%= form.paid_amount != null ? form.paid_amount : 0 %>">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px">
+          <label style="margin-bottom:0">收款金额</label>
+          <div style="display:flex; gap:6px">
+            <button type="button" class="btn btn-sm btn-secondary" id="fillFullPaidBtn" style="padding:2px 8px; font-size:12px; line-height:1.4">全额收齐</button>
+            <button type="button" class="btn btn-sm btn-secondary" id="clearPaidBtn" style="padding:2px 8px; font-size:12px; line-height:1.4">清零</button>
+          </div>
+        </div>
+        <input type="number" id="paidAmountInput" name="paid_amount" placeholder="本次收款金额" step="0.01" min="0" value="<%= form.paid_amount != null ? form.paid_amount : 0 %>">
       </div>
       <div class="form-row">
         <label>备注</label>
@@ -372,6 +378,7 @@
     priceInput.value = suggested || '';
   }
 
+  let currentOrderTotal = 0;
   function recalcTotal() {
     const rows = document.querySelectorAll('#items .item-row');
     let total = 0;
@@ -385,12 +392,33 @@
       row.querySelector('.sale-line-total strong').textContent = Number.isFinite(lineTotal) ? '¥' + lineTotal.toFixed(2) : '—';
       total += lineTotal;
     });
+    currentOrderTotal = Number.isFinite(total) ? Math.round(total * 100) / 100 : 0;
     const el = document.getElementById('itemsTotal');
     if (el) el.textContent = Number.isFinite(total) ? total.toFixed(2) : '—';
     document.getElementById('stickyItemsTotal').textContent = Number.isFinite(total) ? total.toFixed(2) : '—';
   }
   document.getElementById('items').addEventListener('input', recalcTotal);
   document.getElementById('items').addEventListener('change', recalcTotal);
+
+  const paidInput = document.getElementById('paidAmountInput');
+  const fillFullPaidBtn = document.getElementById('fillFullPaidBtn');
+  const clearPaidBtn = document.getElementById('clearPaidBtn');
+
+  if (fillFullPaidBtn && paidInput) {
+    fillFullPaidBtn.addEventListener('click', function() {
+      paidInput.value = currentOrderTotal.toFixed(2);
+      paidInput.dispatchEvent(new Event('input', { bubbles: true }));
+      paidInput.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  if (clearPaidBtn && paidInput) {
+    clearPaidBtn.addEventListener('click', function() {
+      paidInput.value = '0';
+      paidInput.dispatchEvent(new Event('input', { bubbles: true }));
+      paidInput.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
 
   if (EXISTING_ITEMS.length > 0) {
     EXISTING_ITEMS.forEach(function(it) { addRow(it); });

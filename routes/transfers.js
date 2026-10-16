@@ -5,6 +5,7 @@ const { todayLocalDate } = require('../utils/dates');
 const { isBlank, isValidDateString } = require('../lib/validators');
 const { warehousesForTransfer, areWarehousesTransferable, isWarehouseActive } = require('../lib/warehouseAccess');
 const { submittedItemsFromBody } = require('../lib/formDraft');
+const { writeAuditLog } = require('../lib/auditLog');
 const router = express.Router();
 
 // 调拨单表单只需要这几列。这里必须显式列列名，不能用 SELECT *：
@@ -190,6 +191,21 @@ router.post('/transfers/:id/edit', requireLogin, requireMutationKey, (req, res) 
   });
 });
 
+router.post('/transfers/:id/delete', requireLogin, (req, res) => {
+  const db = req.tenantDb;
+  return completeTransaction(req, res, () => {
+    const order = db.prepare('SELECT * FROM transfer_orders WHERE id = ?').get(req.params.id);
+    if (!order) return { status: 404, error: '单据不存在' };
+    if (order.status !== 'draft') return { status: 400, error: '只有未提交的草稿调拨单可以删除' };
+    if (!canAccessTransfer(db, order, req.session.user)) return { status: 403, error: '无权限删除调拨单' };
+
+    db.prepare('DELETE FROM transfer_order_items WHERE transfer_order_id = ?').run(order.id);
+    db.prepare('DELETE FROM transfer_orders WHERE id = ?').run(order.id);
+    writeAuditLog(db, req.session.user, '删除调拨单', '调拨单', order.id, `删除草稿调拨单 #${order.id}`);
+    return { redirect: '/transfers' };
+  });
+});
+
 // 提交审核：draft -> submitted
 router.post('/transfers/submit/:id', requireLogin, (req, res) => {
   const db = req.tenantDb;
@@ -301,14 +317,18 @@ router.post('/transfers/unapprove/:id', requireLogin, (req, res) => {
       ? db.prepare('SELECT * FROM transfer_order_items WHERE transfer_order_id = ?').all(order.id)
       : [];
     if (order.status === 'approved') {
+      // 与审核一致：同一商品拆成多行时必须先汇总再比库存，否则逐行都通过，
+      // 事务里第二行才扣成负数，被 CHECK 约束拦下后只剩泛化报错。
+      const returning = new Map();
+      for (const it of items) returning.set(it.product_id, (returning.get(it.product_id) || 0) + it.base_quantity);
       const getInv = db.prepare('SELECT quantity FROM inventory WHERE product_id=? AND warehouse_id=?');
-      for (const it of items) {
-        const inv = getInv.get(it.product_id, order.to_warehouse_id);
+      for (const [pid, totalQty] of returning) {
+        const inv = getInv.get(pid, order.to_warehouse_id);
         const have = inv ? inv.quantity : 0;
-        if (have < it.base_quantity) {
-          const p = db.prepare('SELECT name FROM products WHERE id=?').get(it.product_id);
+        if (have < totalQty) {
+          const p = db.prepare('SELECT name FROM products WHERE id=?').get(pid);
           return { status: 400, error:
-            `反审核失败：${p ? p.name : '商品'} 在调入仓库当前库存 ${have}，不足以退回 ${it.base_quantity}` +
+            `反审核失败：${p ? p.name : '商品'} 在调入仓库当前库存 ${have}，不足以退回合计 ${totalQty}` +
             `（说明这批货已经被销售或再次调走了一部分），请先处理相关的销售/调拨单再反审核这张调拨单。`
            };
         }

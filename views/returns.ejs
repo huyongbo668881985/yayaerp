@@ -26,7 +26,7 @@
 
 <div class="card desktop-table-wrap">
   <table>
-    <tr><th>单号</th><th>日期</th><th>客户</th><th>退回仓库</th><th>金额</th><th>结算情况</th><th>审核状态</th><th>录入人</th></tr>
+    <tr><th>单号</th><th>日期</th><th>客户</th><th>退回仓库</th><th>金额</th><th>结算情况</th><th>审核状态</th><th>录入人</th><th>操作</th></tr>
     <% orders.forEach(function(o) { %>
       <tr>
         <td><a href="/returns/<%= o.id %>">#<%= o.id %></a></td>
@@ -50,6 +50,14 @@
           <span class="badge" style="background:<%= st.bg %>;color:<%= st.fg %>"><%= st.text %></span>
         </td>
         <td><%= o.user_name %></td>
+        <td>
+          <a href="/returns/<%= o.id %>" class="btn btn-sm btn-secondary">详情</a>
+          <% if (o.status === 'draft' && (currentUser.role === 'admin' || o.user_id === currentUser.id)) { %>
+            <form action="/returns/<%= o.id %>/delete" method="POST" style="display:inline" onsubmit="return confirm('确认删除这张未提交的草稿退货单？删除后无法恢复。')">
+              <button type="submit" class="btn btn-sm btn-danger">删除</button>
+            </form>
+          <% } %>
+        </td>
       </tr>
     <% }) %>
   </table>
@@ -80,6 +88,14 @@
         <span class="badge"><%= o.settlement_label %></span>
       </div>
     </a>
+    <% if (o.status === 'draft' && (currentUser.role === 'admin' || o.user_id === currentUser.id)) { %>
+      <div class="draft-row-actions">
+        <a class="btn btn-secondary btn-sm" href="/returns/<%= o.id %>/edit">继续编辑草稿</a>
+        <form action="/returns/<%= o.id %>/delete" method="POST" onsubmit="return confirm('确认删除这张未提交的草稿退货单？删除后无法恢复。')">
+          <button type="submit" class="btn btn-sm btn-danger">删除草稿</button>
+        </form>
+      </div>
+    <% } %>
   <% }) %>
   <% if (orders.length === 0) { %><p class="muted">暂无退货单</p><% } %>
 </div>

@@ -162,7 +162,9 @@ router.post('/customers/new', requireLogin, (req, res) => {
   db.transaction(() => {
     const customer = db.prepare('INSERT INTO customers (name, contact, phone, address, operator_id) VALUES (?,?,?,?,?)')
       .run(nameCheck.name, contact || '', phone || '', address || '', operatorId);
-    replaceCustomerTags(db, Number(customer.lastInsertRowid), req.body.tag_ids);
+    const newId = Number(customer.lastInsertRowid);
+    replaceCustomerTags(db, newId, req.body.tag_ids);
+    writeAuditLog(db, req.session.user, '新增客户', '客户', newId, `新增客户【${nameCheck.name}】`);
   }).immediate();
   res.redirect('/customers');
 });
@@ -210,6 +212,15 @@ router.post('/customers/:id/edit', requireLogin, (req, res) => {
         .run(nameCheck.name, contact || '', phone || '', address || '', req.params.id);
     }
     replaceCustomerTags(db, customer.id, req.body.tag_ids);
+    const changes = [];
+    if (customer.name !== nameCheck.name) changes.push(`名称: ${customer.name} → ${nameCheck.name}`);
+    if (req.session.user.role === 'admin' && String(customer.operator_id || '') !== String(req.body.operator_id || '')) {
+      const oldOp = customer.operator_id ? db.prepare('SELECT name FROM users WHERE id=?').get(customer.operator_id)?.name || '未知' : '无';
+      const newOp = req.body.operator_id ? db.prepare('SELECT name FROM users WHERE id=?').get(req.body.operator_id)?.name || '未知' : '无';
+      changes.push(`归属业务员: ${oldOp} → ${newOp}`);
+    }
+    const summary = changes.length > 0 ? `修改客户【${nameCheck.name}】：${changes.join('，')}` : `修改客户【${nameCheck.name}】资料`;
+    writeAuditLog(db, req.session.user, '修改客户', '客户', customer.id, summary);
   }).immediate();
   res.redirect('/customers');
 });
@@ -220,7 +231,22 @@ router.post('/customers/reassign', requireAdmin, (req, res) => {
   const { from_user_id, to_user_id } = req.body;
   if (!from_user_id || !to_user_id) return res.redirect('/customers');
   if (from_user_id === to_user_id) return res.redirect('/customers');
-  db.prepare('UPDATE customers SET operator_id = ? WHERE operator_id = ?').run(to_user_id, from_user_id);
+  const fromUser = db.prepare('SELECT id, name FROM users WHERE id = ?').get(from_user_id);
+  const toUser = db.prepare('SELECT id, name FROM users WHERE id = ?').get(to_user_id);
+  if (!fromUser || !toUser) return res.redirect('/customers');
+  db.transaction(() => {
+    const count = db.prepare('SELECT COUNT(*) AS c FROM customers WHERE operator_id = ?').get(from_user_id).c;
+    db.prepare('UPDATE customers SET operator_id = ? WHERE operator_id = ?').run(to_user_id, from_user_id);
+    writeAuditLog(db, req.session.user, '批量转移客户', '客户', null,
+      `将业务员【${fromUser.name}】名下的 ${count} 位客户转移给【${toUser.name}】`, {
+        from_user_id: Number(from_user_id),
+        from_user_name: fromUser.name,
+        to_user_id: Number(to_user_id),
+        to_user_name: toUser.name,
+        count
+      }
+    );
+  }).immediate();
   res.redirect('/customers');
 });
 
@@ -239,8 +265,10 @@ router.post('/customers/:id/delete', requireAdmin, (req, res) => {
     return res.status(400).send(`无法删除：该客户名下还有 ${detail} 记录，请先处理相关单据（或者不删，改个名字标记为停用）`);
   }
   db.transaction(() => {
+    const customer = db.prepare('SELECT name FROM customers WHERE id = ?').get(req.params.id);
     db.prepare('DELETE FROM customer_tag_links WHERE customer_id = ?').run(req.params.id);
     db.prepare('DELETE FROM customers WHERE id = ?').run(req.params.id);
+    writeAuditLog(db, req.session.user, '删除客户', '客户', Number(req.params.id), `删除客户【${customer ? customer.name : req.params.id}】`);
   }).immediate();
   res.redirect('/customers');
 });

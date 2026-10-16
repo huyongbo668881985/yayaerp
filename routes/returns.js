@@ -10,6 +10,8 @@ const { isBlank, isValidDateString, isValidNonNegativeAmount, roundToCents } = r
 const { warehousesForUser, isWarehouseInScope, isWarehouseActive } = require('../lib/warehouseAccess');
 const { submittedItemsFromBody } = require('../lib/formDraft');
 const { writeAuditLog } = require('../lib/auditLog');
+const { PRODUCT_FIELDS } = require('../lib/catalog');
+const { salesVisibility, canViewSale } = require('../lib/salesResponsibility');
 const router = express.Router();
 
 // 草稿/待审核可以修改；实际收货审核后固定原单、明细和财务归属。
@@ -85,15 +87,15 @@ function buildItemsFromRequest(db, body) {
 function validateLinkedReturn(db, {
   relatedSaleId, customerId, items, sessionUser, excludeReturnId = null
 }) {
-  const sale = db.prepare('SELECT id, status, customer_id, user_id FROM sales_orders WHERE id = ?')
+  const sale = db.prepare('SELECT id, status, customer_id, user_id, responsible_id FROM sales_orders WHERE id = ?')
     .get(relatedSaleId);
   if (!sale) return `关联的销售单号 #${relatedSaleId} 不存在，请检查单号是否正确`;
   if (sale.status !== 'approved') {
     const statusLabel = SALE_STATUS_TEXT[sale.status] || sale.status;
     return `关联的销售单 #${relatedSaleId} 当前状态为"${statusLabel}"，只有已审核（库存已扣减）的销售单才能关联退货`;
   }
-  if (!canEditOrWithdraw(sale, sessionUser)) {
-    return `无权关联销售单 #${relatedSaleId}：操作员只能为自己录入的销售单办理关联退货`;
+  if (!canViewSale(sale, sessionUser)) {
+    return `无权关联销售单 #${relatedSaleId}：操作员只能为自己录入或负责的销售单办理关联退货`;
   }
 
   const normalizedCustomerId = isBlank(customerId) ? null : Number(customerId);
@@ -286,15 +288,16 @@ function isCustomerInScope(db, sessionUser, customerId, currentCustomerId) {
 router.get('/returns/sales-options', requireLogin, (req, res) => {
   const keyword = String(req.query.q || '').trim().slice(0, 60);
   const user = req.session.user;
+  const visibility = salesVisibility('so', user);
   const sql = `SELECT so.id, so.customer_id, so.warehouse_id, so.order_date, so.total_amount,
       c.name AS customer_name
     FROM sales_orders so
     LEFT JOIN customers c ON c.id = so.customer_id
     WHERE so.status = 'approved'
-      ${user.role === 'admin' ? '' : 'AND so.user_id = ?'}
+      ${visibility.sql}
       AND (? = '' OR instr(CAST(so.id AS TEXT), ?) > 0 OR instr(lower(coalesce(c.name, '')), lower(?)) > 0)
     ORDER BY so.id DESC LIMIT 20`;
-  const params = user.role === 'admin' ? [keyword, keyword, keyword] : [user.id, keyword, keyword, keyword];
+  const params = [...visibility.params, keyword, keyword, keyword];
   res.json(req.tenantDb.prepare(sql).all(...params));
 });
 
@@ -304,17 +307,19 @@ function renderReturnForm(req, res, order = null, error = null, values = null) {
   const saleId = Number(req.query.sale_id || form.related_sales_order_id);
   const sale = Number.isSafeInteger(saleId) && saleId > 0
     ? db.prepare("SELECT * FROM sales_orders WHERE id=? AND status='approved'").get(saleId) : null;
-  const linkedSale = sale && canEditOrWithdraw(sale, user) ? sale : null;
+  const linkedSale = sale && canViewSale(sale, user) ? sale : null;
   const formValues = values || (order ? null : linkedSale
     ? { customer_id: linkedSale.customer_id || '', warehouse_id: linkedSale.warehouse_id, related_sales_order_id: linkedSale.id } : {});
   res.render('return_form', {
     customers: customersForForm(db, user, order?.customer_id || linkedSale?.customer_id),
     warehouses: warehousesForUser(db, user),
-    products: db.prepare('SELECT * FROM products ORDER BY name').all(),
+    // 这两份数据会被 JSON 内联进页面脚本：必须是窄列，且不含任何成本信息（成本由服务端按原明细/商品档案取）。
+    products: db.prepare(`SELECT ${PRODUCT_FIELDS} FROM products ORDER BY name`).all(),
     order, error, formValues, today: todayLocalDate(), linkedSale,
-    originalItems: linkedSale ? saleItems(db, linkedSale.id, order?.id || -1) : [],
+    originalItems: linkedSale
+      ? saleItems(db, linkedSale.id, order?.id || -1).map(({ cost_price_snapshot, ...item }) => item) : [],
     exceptionMode: user.role === 'admin' && (!linkedSale && (req.query.exception === '1' || !!form.exception_reason || (!!order && !order.related_sales_order_id))),
-    existingItems: order ? db.prepare('SELECT * FROM return_order_items WHERE return_order_id=?').all(order.id) : [],
+    existingItems: order ? db.prepare('SELECT id, return_order_id, product_id, quantity, unit_label, base_quantity, unit_price, original_sales_item_id FROM return_order_items WHERE return_order_id=?').all(order.id) : [],
     draftItems: values ? submittedItemsFromBody(values) : null
   });
 }
@@ -524,6 +529,28 @@ router.post('/returns/:id/edit', requireLogin, requireMutationKey, (req, res) =>
       insertItem.run(order.id, it.pid, it.qty, it.unitLabel, it.baseQty, it.price, it.costSnapshot, it.originalSalesItemId);
     }
     return { redirect: '/returns/' + order.id };
+  });
+});
+
+router.post('/returns/:id/delete', requireLogin, (req, res) => {
+  const db = req.tenantDb;
+  return completeTransaction(req, res, () => {
+    const order = db.prepare('SELECT * FROM return_orders WHERE id = ?').get(req.params.id);
+    if (!order) return { status: 404, error: '单据不存在' };
+    if (order.finalized_at) return { status: 400, error: '该退货曾经入账，不能删除' };
+    if (order.status !== 'draft') return { status: 400, error: '只有未提交的草稿退货单可以删除' };
+    if (!canEditOrWithdraw(order, req.session.user)) return { status: 403, error: '无权限删除他人的退货单' };
+    if (!isWarehouseInScope(db, req.session.user, order.warehouse_id)) return { status: 403, error: '无权限删除非本人车辆的退货单' };
+
+    const refundCount = db.prepare('SELECT COUNT(*) AS c FROM return_refund_records WHERE return_order_id = ?').get(order.id).c;
+    if (refundCount > 0) {
+      return { status: 400, error: '该单据已有退款记录，无法删除' };
+    }
+
+    db.prepare('DELETE FROM return_order_items WHERE return_order_id = ?').run(order.id);
+    db.prepare('DELETE FROM return_orders WHERE id = ?').run(order.id);
+    writeAuditLog(db, req.session.user, '删除退货单', '退货单', order.id, `删除草稿，金额 ¥${order.total_amount.toFixed(2)}`);
+    return { redirect: '/returns' };
   });
 });
 
@@ -742,7 +769,8 @@ router.get('/returns/:id', requireLogin, (req, res) => {
   // 与列表页口径保持一致：操作员只能看自己录入的退货单（列表里有 ro.user_id = ? 过滤）
   if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限查看他人的退货单');
   const items = db.prepare(`
-    SELECT roi.*, p.name AS product_name
+    SELECT roi.id, roi.return_order_id, roi.product_id, roi.quantity, roi.unit_label,
+           roi.base_quantity, roi.unit_price, roi.original_sales_item_id, p.name AS product_name
     FROM return_order_items roi
     JOIN products p ON p.id = roi.product_id
     WHERE roi.return_order_id = ?

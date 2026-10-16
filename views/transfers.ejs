@@ -25,7 +25,14 @@
           <span class="badge" style="background:<%= st.bg %>;color:<%= st.fg %>"><%= st.text %></span>
         </td>
         <td><%= o.user_name %></td>
-        <td><a href="/transfers/<%= o.id %>" class="btn btn-sm btn-secondary">详情</a></td>
+        <td>
+          <a href="/transfers/<%= o.id %>" class="btn btn-sm btn-secondary">详情</a>
+          <% if (o.status === 'draft' && (currentUser.role === 'admin' || o.user_id === currentUser.id)) { %>
+            <form action="/transfers/<%= o.id %>/delete" method="POST" style="display:inline" onsubmit="return confirm('确认删除这张未提交的草稿调拨单？删除后无法恢复。')">
+              <button type="submit" class="btn btn-sm btn-danger">删除</button>
+            </form>
+          <% } %>
+        </td>
       </tr>
     <% }) %>
   </table>
@@ -54,6 +61,14 @@
         <span class="muted"><%= o.user_name %></span>
       </div>
     </a>
+    <% if (o.status === 'draft' && (currentUser.role === 'admin' || o.user_id === currentUser.id)) { %>
+      <div class="draft-row-actions">
+        <a class="btn btn-secondary btn-sm" href="/transfers/<%= o.id %>/edit">继续编辑草稿</a>
+        <form action="/transfers/<%= o.id %>/delete" method="POST" onsubmit="return confirm('确认删除这张未提交的草稿调拨单？删除后无法恢复。')">
+          <button type="submit" class="btn btn-sm btn-danger">删除草稿</button>
+        </form>
+      </div>
+    <% } %>
   <% }) %>
   <% if (orders.length === 0) { %><p class="muted">暂无调拨单</p><% } %>
 </div>

@@ -11,7 +11,7 @@ const { warehousesForUser, isWarehouseInScope, isWarehouseActive } = require('..
 const { writeAuditLog } = require('../lib/auditLog');
 const { submittedItemsFromBody } = require('../lib/formDraft');
 const { parseTagId, getCustomerTags } = require('../lib/customerTags');
-const { responsibleUsers, resolveResponsible } = require('../lib/salesResponsibility');
+const { responsibleUsers, resolveResponsible, salesVisibility, canViewSale } = require('../lib/salesResponsibility');
 const { productsForForm } = require('../lib/catalog');
 const router = express.Router();
 router.use(require('./orderOptions'));
@@ -95,7 +95,7 @@ function salesQueryString(params) {
   return text ? `?${text}` : '';
 }
 
-// 销售单列表 - 管理员看全部，操作员看自己的；支持日期、客户、结清状态与负责人筛选。
+// 销售单列表 - 管理员看全部，操作员看自己录入或自己负责的；支持日期、客户、结清状态与负责人筛选。
 // 管理员可使用 ?pending=1 集中查看所有待审核销售单，避免遗漏审核；操作员即使手动拼接该参数也不会生效。
 // 分页：每页 50 条。结清状态按关联退货与现金退款后的有效余额过滤，
 // 筛选、计数、排序和 LIMIT/OFFSET 均在数据库执行，避免加载所有订单。
@@ -110,9 +110,10 @@ router.get('/sales', requireLogin, (req, res) => {
   const guestOnly = req.query.guest === '1';
   const settlement = settlementFilter(req.query);
   const responsibleId = responsibleFilter(req.query);
+  const visibility = salesVisibility('so', user);
   const responsibleOptions = db.prepare(`SELECT id, name, username, active FROM users
-    WHERE ${user.role === 'admin' ? 'active = 1 OR EXISTS (SELECT 1 FROM sales_orders WHERE COALESCE(responsible_id, user_id) = users.id)' : 'id = ? OR EXISTS (SELECT 1 FROM sales_orders WHERE user_id = ? AND COALESCE(responsible_id, user_id) = users.id)'}
-    ORDER BY active DESC, name, id`).all(...(user.role === 'admin' ? [] : [user.id, user.id]));
+    WHERE ${user.role === 'admin' ? 'active = 1 OR EXISTS (SELECT 1 FROM sales_orders WHERE COALESCE(responsible_id, user_id) = users.id)' : `id = ? OR EXISTS (SELECT 1 FROM sales_orders so WHERE 1=1${visibility.sql} AND COALESCE(so.responsible_id, so.user_id) = users.id)`}
+    ORDER BY active DESC, name, id`).all(...(user.role === 'admin' ? [] : [user.id, ...visibility.params]));
   const pendingOnly = user.role === 'admin' && req.query.pending === '1';
   const orderStatus = ['draft','approved'].includes(req.query.status) ? req.query.status : '';
   const { sort, order } = parseSort(req.query, ['date', 'amount', 'debt'], 'date');
@@ -122,7 +123,7 @@ router.get('/sales', requireLogin, (req, res) => {
 
   const { orders, totalOrders, totalPages, page } = queryOrders(db, user, start, end, customerId, guestOnly, settlement, pendingOnly, tagId, orderStatus, responsibleId,
     { size: SALES_PAGE_SIZE, page: req.query.page, sort, order });
-  const draftCount = db.prepare("SELECT COUNT(*) n FROM sales_orders WHERE status='draft'" + (user.role === 'admin' ? '' : ' AND user_id=?')).get(...(user.role === 'admin' ? [] : [user.id])).n;
+  const draftCount = db.prepare(`SELECT COUNT(*) n FROM sales_orders so WHERE so.status='draft'${visibility.sql}`).get(...visibility.params).n;
   res.render('sales', {
     orders, user, customers, customerId, guestOnly, start: start || '', end: end || '', settlement, responsibleId, responsibleOptions, pendingOnly,
     sort, order, page, totalPages, totalOrders, orderStatus, draftCount,
@@ -206,8 +207,9 @@ router.get('/sales/export', requireLogin, (req, res) => {
     JOIN products p ON p.id = soi.product_id
     WHERE 1=1
   `;
-  const params = [];
-  if (user.role !== 'admin') { sql += ' AND so.user_id = ?'; params.push(user.id); }
+  const visibility = salesVisibility('so', user);
+  sql += visibility.sql;
+  const params = [...visibility.params];
   if (start) { sql += ' AND so.order_date >= ?'; params.push(start); }
   if (end) { sql += ' AND so.order_date <= ?'; params.push(end); }
   if (customerId) { sql += ' AND so.customer_id = ?'; params.push(customerId); }
@@ -389,7 +391,7 @@ router.get('/sales/:id/edit', requireLogin, (req, res) => {
   const customers = customersForForm(db, req.session.user, order.customer_id);
   const warehouses = warehousesForUser(db, req.session.user);
   const products = productsForForm(db, req.method === 'POST' ? req.body : (req.params.id ? db.prepare('SELECT product_id FROM sales_order_items WHERE sales_order_id=?').all(req.params.id) : []));
-  const existingItems = db.prepare('SELECT * FROM sales_order_items WHERE sales_order_id = ?').all(order.id);
+  const existingItems = db.prepare('SELECT id, sales_order_id, product_id, quantity, unit_label, base_quantity, unit_price, is_gift FROM sales_order_items WHERE sales_order_id = ?').all(order.id);
   res.render('sale_form', { responsibleOptions: responsibleUsers(db, order.responsible_id || order.user_id), customers, warehouses, products, error: null, order, existingItems, today: todayLocalDate() });
 });
 
@@ -751,12 +753,13 @@ router.get('/sales/:id', requireLogin, (req, res) => {
     WHERE so.id = ?
   `).get(req.params.id);
   if (!order) return res.status(404).send('单据不存在');
-  // 列表页按"管理员看全部、操作员只看自己的"过滤，详情页必须跟上同样的口径，
-  // 否则操作员手输 /sales/123 就能看到别人单据的客户、金额和商品明细。
-  if (!canEditOrWithdraw(order, req.session.user)) return res.status(403).send('无权限查看他人的销售单');
+  // 列表页按"管理员看全部、操作员看自己录入或自己负责的"过滤，详情页必须跟上同样的口径，
+  // 否则操作员手输 /sales/123 就能看到无关单据的客户、金额和商品明细。
+  if (!canViewSale(order, req.session.user)) return res.status(403).send('无权限查看他人的销售单');
   attachEffectivePayment(order);
   const items = db.prepare(`
-    SELECT soi.*, p.name AS product_name
+    SELECT soi.id, soi.sales_order_id, soi.product_id, soi.quantity, soi.unit_label,
+           soi.base_quantity, soi.unit_price, soi.is_gift, p.name AS product_name
     FROM sales_order_items soi
     JOIN products p ON p.id = soi.product_id
     WHERE soi.sales_order_id = ?
