@@ -38,27 +38,27 @@
 
 <div class="stat-grid">
   <div class="stat-card">
-    <div class="num">¥<%= summary.sales.amount.toFixed(2) %></div>
+    <div class="num">¥<%= summary.sales.amount.toFixed(1) %></div>
     <div class="label">销售额（已扣退货）· <%= summary.sales.count %> 单销售，<%= summary.sales.returnCount %> 单退货</div>
   </div>
   <div class="stat-card">
-    <div class="num" style="color:#16a34a">¥<%= summary.received.toFixed(2) %></div>
+    <div class="num" style="color:#16a34a">¥<%= summary.received.toFixed(1) %></div>
     <div class="label">实收金额（已收款，已扣现金退款）</div>
   </div>
   <div class="stat-card">
-    <div class="num" style="color:<%= summary.receivable.amount > 0 ? '#e5484d' : '#16a34a' %>">¥<%= summary.receivable.amount.toFixed(2) %></div>
+    <div class="num" style="color:<%= summary.receivable.amount > 0 ? '#e5484d' : '#16a34a' %>">¥<%= summary.receivable.amount.toFixed(1) %></div>
     <div class="label">应收金额（未结清）· <%= summary.receivable.count %> 单</div>
   </div>
   <div class="stat-card">
-    <div class="num" style="color:#e5484d">¥<%= summary.returnsAmount.toFixed(2) %></div>
+    <div class="num" style="color:#e5484d">¥<%= summary.returnsAmount.toFixed(1) %></div>
     <div class="label">退货金额（已冲减进销售额和毛利）</div>
   </div>
   <div class="stat-card">
-    <div class="num">¥<%= (includeReceivable ? summary.profitWithReceivable : summary.profitWithoutReceivable).toFixed(2) %></div>
+    <div class="num">¥<%= (includeReceivable ? summary.profitWithReceivable : summary.profitWithoutReceivable).toFixed(1) %></div>
     <div class="label">毛利（<%= includeReceivable ? '含应收账款' : '仅已结清' %>，已扣退货）</div>
   </div>
   <div class="stat-card">
-    <div class="num">¥<%= summary.receivableProfit.toFixed(2) %></div>
+    <div class="num">¥<%= summary.receivableProfit.toFixed(1) %></div>
     <div class="label">未结清订单毛利（按当前成本快照）</div>
   </div>
 </div>
@@ -76,8 +76,8 @@
         <td><%= o.order_date %></td>
         <td><%= o.customer_name || '散客' %></td>
         <td><%= o.warehouse_name %></td>
-        <td>¥<%= o.total_amount.toFixed(2) %></td>
-        <td>¥<%= o.paid_amount.toFixed(2) %></td>
+        <td>¥<%= o.total_amount.toFixed(1) %></td>
+        <td>¥<%= o.paid_amount.toFixed(1) %></td>
         <td>
           <% if (o.effective_status === 'paid') { %>
             <span class="badge" style="background:#dcfce7;color:#166534">已结清</span>
@@ -89,7 +89,7 @@
             <span class="badge" style="background:#fee2e2;color:#991b1b">未收款</span>
           <% } %>
         </td>
-        <td>¥<%= o.order_profit.toFixed(2) %></td>
+        <td>¥<%= o.order_profit.toFixed(1) %></td>
       </tr>
     <% }) %>
   </table>
@@ -116,8 +116,8 @@
         <span><%= o.warehouse_name %></span>
       </div>
       <div class="order-card-bottom">
-        <span class="order-card-amount">¥<%= o.total_amount.toFixed(2) %></span>
-        <span class="muted">毛利 ¥<%= o.order_profit.toFixed(2) %></span>
+        <span class="order-card-amount">¥<%= o.total_amount.toFixed(1) %></span>
+        <span class="muted">毛利 ¥<%= o.order_profit.toFixed(1) %></span>
       </div>
     </a>
   <% }) %>
@@ -134,8 +134,8 @@
         <td><%= o.order_date %></td>
         <td><%= o.customer_name || '散客' %></td>
         <td><%= o.warehouse_name %></td>
-        <td>¥<%= o.total_amount.toFixed(2) %></td>
-        <td>¥<%= o.refunded_amount.toFixed(2) %></td>
+        <td>¥<%= o.total_amount.toFixed(1) %></td>
+        <td>¥<%= o.refunded_amount.toFixed(1) %></td>
         <td>
           <% if (o.refund_status === 'refunded') { %>
             <span class="badge" style="background:#dcfce7;color:#166534">已退款</span>
@@ -145,7 +145,7 @@
             <span class="badge" style="background:#fee2e2;color:#991b1b">未退款</span>
           <% } %>
         </td>
-        <td>-¥<%= o.order_profit.toFixed(2) %></td>
+        <td>-¥<%= o.order_profit.toFixed(1) %></td>
       </tr>
     <% }) %>
   </table>
@@ -170,8 +170,8 @@
         <span><%= o.warehouse_name %></span>
       </div>
       <div class="order-card-bottom">
-        <span class="order-card-amount">¥<%= o.total_amount.toFixed(2) %></span>
-        <span class="muted">冲减毛利 ¥<%= o.order_profit.toFixed(2) %></span>
+        <span class="order-card-amount">¥<%= o.total_amount.toFixed(1) %></span>
+        <span class="muted">冲减毛利 ¥<%= o.order_profit.toFixed(1) %></span>
       </div>
     </a>
   <% }) %>

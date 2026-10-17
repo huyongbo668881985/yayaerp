@@ -1,0 +1,187 @@
+<%- include('partials/header') %>
+<div class="tabbar">
+  <a href="/products">商品</a>
+  <a href="/warehouses">仓库</a>
+  <a href="/settings/dashboard" class="active">首页看板</a>
+</div>
+
+<div class="dashboard-header-row">
+  <div>
+    <h1>首页看板设置</h1>
+    <p class="muted" style="margin:4px 0 0; font-size:13px">分别配置管理员与操作员登录首页时展示的指标卡片、排列顺序与浅色背景主题。</p>
+  </div>
+  <a class="btn btn-secondary btn-sm" href="/">← 返回首页</a>
+</div>
+
+<form method="POST" action="/settings/dashboard" id="dashboardSettingsForm">
+  <div class="dashboard-role-tabs" role="tablist" aria-label="视角切换">
+    <button type="button" class="dashboard-role-tab active" role="tab" aria-selected="true" data-role-tab="admin">
+      管理员视角 <span class="dashboard-role-badge" id="adminEnabledCount"></span>
+    </button>
+    <button type="button" class="dashboard-role-tab" role="tab" aria-selected="false" data-role-tab="operator">
+      操作员视角 <span class="dashboard-role-badge" id="operatorEnabledCount"></span>
+    </button>
+  </div>
+
+  <% [
+    { role: 'admin', title: '管理员视角卡片', hint: '管理员登录首页时按以下顺序显示已勾选的卡片（支持拖拽或点按上下箭头调序）。', cards: adminCards },
+    { role: 'operator', title: '操作员视角卡片', hint: '操作员登录首页时仅统计本人录入或负责的单据。涉及毛利与成本的卡片已按安全红线永久屏蔽。', cards: operatorCards }
+  ].forEach(function(panel, idx) { %>
+    <section class="dashboard-role-panel<%= idx === 0 ? ' active' : '' %>" data-role-panel="<%= panel.role %>">
+      <div class="dashboard-panel-intro">
+        <span><%= panel.hint %></span>
+        <% if (panel.role === 'operator') { %>
+          <span class="dashboard-security-pill">🔒 毛利与成本已硬性隔离</span>
+        <% } %>
+      </div>
+
+      <div class="dashboard-config-list" data-role-list="<%= panel.role %>">
+        <% panel.cards.forEach(function(card, cardIdx) { %>
+          <div class="dashboard-config-item stat-theme-<%= card.color %><%= card.enabled ? '' : ' is-disabled' %>" draggable="true" data-card-id="<%= card.id %>">
+            <input type="hidden" name="<%= panel.role %>_order" value="<%= card.id %>">
+            <div class="dashboard-config-main">
+              <label class="dashboard-config-toggle">
+                <input type="checkbox" name="<%= panel.role %>_enabled" value="<%= card.id %>" <%= card.enabled ? 'checked' : '' %> data-toggle-card>
+                <span class="dashboard-config-title"><%= card.label %></span>
+                <% if (card.adminOnly) { %>
+                  <span class="badge badge-admin" style="font-size:11px; padding:2px 6px">仅管理员</span>
+                <% } %>
+              </label>
+              <div class="dashboard-config-move" aria-label="调整顺序">
+                <button type="button" class="dashboard-move-btn" data-move="up" aria-label="上移 <%= card.label %>" title="上移">↑</button>
+                <button type="button" class="dashboard-move-btn" data-move="down" aria-label="下移 <%= card.label %>" title="下移">↓</button>
+              </div>
+            </div>
+            <p class="dashboard-config-desc"><%= card.desc %></p>
+            <div class="dashboard-color-row" role="radiogroup" aria-label="<%= card.label %> 背景颜色">
+              <span class="dashboard-color-label">卡片底色：</span>
+              <div class="dashboard-color-swatches">
+                <% colors.forEach(function(c) { %>
+                  <label class="dashboard-color-swatch<%= card.color === c.key ? ' is-selected' : '' %>" title="<%= c.label %>" style="--swatch-bg:<%= c.bg %>; --swatch-border:<%= c.border %>; --swatch-dot:<%= c.dot %>">
+                    <input type="radio" name="<%= panel.role %>_color_<%= card.id %>" value="<%= c.key %>" <%= card.color === c.key ? 'checked' : '' %> data-color-radio>
+                    <span class="swatch-circle" aria-hidden="true"></span>
+                    <span class="swatch-name"><%= c.label %></span>
+                  </label>
+                <% }) %>
+              </div>
+            </div>
+          </div>
+        <% }) %>
+      </div>
+    </section>
+  <% }) %>
+
+  <div class="dashboard-settings-actions">
+    <button type="submit" class="btn" name="redirect_to" value="home">保存并返回首页</button>
+    <button type="submit" class="btn btn-secondary" name="redirect_to" value="settings">仅保存</button>
+    <button type="submit" class="btn btn-secondary dashboard-reset-btn" name="action" value="reset" onclick="return confirm('确认将管理员与操作员的首页看板恢复为默认配置？')">恢复默认配置</button>
+  </div>
+</form>
+
+<script>
+(function () {
+  const THEME_CLASSES = ['stat-theme-blue','stat-theme-cyan','stat-theme-orange','stat-theme-red','stat-theme-green','stat-theme-amber','stat-theme-purple','stat-theme-pink','stat-theme-gray'];
+
+  // 视角标签页切换
+  const tabs = document.querySelectorAll('[data-role-tab]');
+  const panels = document.querySelectorAll('[data-role-panel]');
+  tabs.forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      const target = tab.getAttribute('data-role-tab');
+      tabs.forEach(function (t) {
+        const active = t.getAttribute('data-role-tab') === target;
+        t.classList.toggle('active', active);
+        t.setAttribute('aria-selected', String(active));
+      });
+      panels.forEach(function (p) {
+        p.classList.toggle('active', p.getAttribute('data-role-panel') === target);
+      });
+    });
+  });
+
+  function updateMoveButtons(list) {
+    const items = Array.from(list.querySelectorAll('.dashboard-config-item'));
+    items.forEach(function (item, idx) {
+      const upBtn = item.querySelector('[data-move="up"]');
+      const downBtn = item.querySelector('[data-move="down"]');
+      if (upBtn) upBtn.disabled = idx === 0;
+      if (downBtn) downBtn.disabled = idx === items.length - 1;
+    });
+  }
+
+  function updateCounts() {
+    ['admin', 'operator'].forEach(function (role) {
+      const list = document.querySelector('[data-role-list="' + role + '"]');
+      const badge = document.getElementById(role + 'EnabledCount');
+      if (!list || !badge) return;
+      const total = list.querySelectorAll('.dashboard-config-item').length;
+      const enabled = list.querySelectorAll('[data-toggle-card]:checked').length;
+      badge.textContent = '已启用 ' + enabled + '/' + total;
+    });
+  }
+
+  document.querySelectorAll('[data-role-list]').forEach(function (list) {
+    updateMoveButtons(list);
+
+    // 上移 / 下移按钮
+    list.addEventListener('click', function (e) {
+      const btn = e.target.closest('[data-move]');
+      if (!btn) return;
+      const item = btn.closest('.dashboard-config-item');
+      if (!item) return;
+      const dir = btn.getAttribute('data-move');
+      if (dir === 'up' && item.previousElementSibling) {
+        list.insertBefore(item, item.previousElementSibling);
+      } else if (dir === 'down' && item.nextElementSibling) {
+        list.insertBefore(item.nextElementSibling, item);
+      }
+      updateMoveButtons(list);
+    });
+
+    // 勾选开关实时样式
+    list.addEventListener('change', function (e) {
+      if (e.target.matches('[data-toggle-card]')) {
+        const item = e.target.closest('.dashboard-config-item');
+        if (item) item.classList.toggle('is-disabled', !e.target.checked);
+        updateCounts();
+      } else if (e.target.matches('[data-color-radio]')) {
+        const item = e.target.closest('.dashboard-config-item');
+        if (item) {
+          THEME_CLASSES.forEach(function (c) { item.classList.remove(c); });
+          item.classList.add('stat-theme-' + e.target.value);
+          item.querySelectorAll('.dashboard-color-swatch').forEach(function (sw) {
+            sw.classList.toggle('is-selected', sw.contains(e.target));
+          });
+        }
+      }
+    });
+
+    // 桌面端拖拽排序
+    let draggedItem = null;
+    list.addEventListener('dragstart', function (e) {
+      const item = e.target.closest('.dashboard-config-item');
+      if (!item) return;
+      draggedItem = item;
+      item.classList.add('is-dragging');
+      if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+    });
+    list.addEventListener('dragend', function () {
+      if (draggedItem) draggedItem.classList.remove('is-dragging');
+      draggedItem = null;
+      updateMoveButtons(list);
+    });
+    list.addEventListener('dragover', function (e) {
+      e.preventDefault();
+      if (!draggedItem) return;
+      const target = e.target.closest('.dashboard-config-item');
+      if (!target || target === draggedItem || target.parentNode !== list) return;
+      const rect = target.getBoundingClientRect();
+      const after = (e.clientY - rect.top) > rect.height / 2;
+      list.insertBefore(draggedItem, after ? target.nextSibling : target);
+    });
+  });
+
+  updateCounts();
+})();
+</script>
+<%- include('partials/footer') %>

@@ -136,7 +136,7 @@ const ledgerCount=db=>db.prepare('SELECT COUNT(*) n FROM customer_ledger').get()
   });
   await check('供应商采购对账汇总与打印，不误报未付账款',async()=>{
     await request('/purchases/new',{body:{supplier_id:'1',warehouse_id:'1',product_id:'1',quantity:'2',unit_price:'2.5',note:'采购说明',_request_key:randomUUID()}});purchaseId=db.prepare('SELECT MAX(id) id FROM purchase_orders').get().id;
-    const page=await request('/reconciliation/suppliers/1?start='+today+'&end='+today);assert.equal(page.status,200);assert.ok(page.text.includes('采购金额不代表未付账款'));assert.ok(page.text.includes('5.00'));assert.equal((await request('/reconciliation/suppliers/1?start='+today+'&end='+today+'&print=1')).status,200);
+    const page=await request('/reconciliation/suppliers/1?start='+today+'&end='+today);assert.equal(page.status,200);assert.ok(page.text.includes('采购金额不代表未付账款'));assert.ok(page.text.includes('5.0'));assert.equal((await request('/reconciliation/suppliers/1?start='+today+'&end='+today+'&print=1')).status,200);
   });
   await check('四类单据可打印，草稿标记、箱单位、赠品和结算口径正确且内部备注不外泄',async()=>{
     transferId=idOf(await request('/transfers/new',{body:{from_warehouse_id:'1',to_warehouse_id:'2',product_id:'1',quantity:'1',save_draft:'1',note:'秘密调拨备注',_request_key:randomUUID()}}));
@@ -144,7 +144,7 @@ const ledgerCount=db=>db.prepare('SELECT COUNT(*) n FROM customer_ledger').get()
     const page=await request(`/sales/${gift}/print`);assert.equal(page.status,200);assert.ok(page.text.includes('预览单 · 草稿'));assert.ok(page.text.includes('赠品'));assert.ok(page.text.includes('2箱'));assert.ok(page.text.includes('公开送货说明'));assert.ok(!page.text.includes('秘密成本说明'));assert.ok(!page.text.includes('cost_price'));
     for(const [kind,id]of[['sales',saleId],['returns',returnId],['purchases',purchaseId],['transfers',transferId]])assert.equal((await request(`/${kind}/${id}/print`)).status,200);
     assert.ok(!(await request(`/transfers/${transferId}/print`)).text.includes('秘密调拨备注'));
-    assert.ok((await request(`/sales/${saleId}/print`)).text.includes('待退款：¥3.00'));
+    assert.ok((await request(`/sales/${saleId}/print`)).text.includes('待退款：¥3.0'));
   });
   await check('打印权限与详情一致，不泄漏他人单据和其他车辆',async()=>{
     assert.equal((await request(`/purchases/${purchaseId}/print`,{user:2})).status,403);assert.equal((await request(`/sales/${saleId}/print`,{user:2})).status,403);

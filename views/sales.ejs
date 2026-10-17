@@ -155,9 +155,9 @@
         <td><%= o.order_date %><br><span class="muted">录入 <%= formatDateTime(o.created_at).slice(0, 16) %></span></td>
         <td><%= o.customer_name || '散客' %></td>
         <td><%= o.warehouse_name %></td>
-        <td>¥<%= o.total_amount.toFixed(2) %></td>
-        <td>¥<%= (o.paid_amount || 0).toFixed(2) %></td>
-        <td><% if (o.status === 'approved') { %>¥<%= o.effective_debt.toFixed(2) %><% if (o.pending_refund > 0) { %><span class="detail-owing">待退 ¥<%= o.pending_refund.toFixed(2) %></span><% } %><% if (o.returned_amount > 0) { %><span class="muted" style="font-size:11px">（退货¥<%= o.returned_amount.toFixed(2) %>，已退现金¥<%= o.cash_refunded_amount.toFixed(2) %>）</span><% } %><% } else { %><span class="muted">审核后生效</span><% } %></td>
+        <td>¥<%= o.total_amount.toFixed(1) %></td>
+        <td>¥<%= (o.paid_amount || 0).toFixed(1) %></td>
+        <td><% if (o.status === 'approved') { %>¥<%= o.effective_debt.toFixed(1) %><% if (o.pending_refund > 0) { %><span class="detail-owing">待退 ¥<%= o.pending_refund.toFixed(1) %></span><% } %><% if (o.returned_amount > 0) { %><span class="muted" style="font-size:11px">（退货¥<%= o.returned_amount.toFixed(1) %>，已退现金¥<%= o.cash_refunded_amount.toFixed(1) %>）</span><% } %><% } else { %><span class="muted">审核后生效</span><% } %></td>
         <td>
           <%- include('partials/payment_status', { order: o }) %>
         </td>
@@ -213,12 +213,12 @@
       </div>
       <div class="order-card-responsible">负责人：<%= o.responsible_name %></div>
       <div class="order-card-bottom">
-        <span class="order-card-amount"><small>订单金额</small>¥<%= o.total_amount.toFixed(2) %></span>
+        <span class="order-card-amount"><small>订单金额</small>¥<%= o.total_amount.toFixed(1) %></span>
         <%- include('partials/payment_status', { order: o }) %>
       </div>
-      <% if (o.status === 'approved' && o.pending_refund > 0) { %><div class="order-card-debt">待退现金 ¥<%= o.pending_refund.toFixed(2) %></div><% } %>
+      <% if (o.status === 'approved' && o.pending_refund > 0) { %><div class="order-card-debt">待退现金 ¥<%= o.pending_refund.toFixed(1) %></div><% } %>
       <% if (o.status === 'approved' && o.effective_debt > 0) { %>
-        <div class="order-card-debt">欠款 ¥<%= o.effective_debt.toFixed(2) %></div>
+        <div class="order-card-debt">欠款 ¥<%= o.effective_debt.toFixed(1) %></div>
       <% } %>
     </a>
     <% if (o.status === 'draft' && (currentUser.role === 'admin' || o.user_id === currentUser.id)) { %>

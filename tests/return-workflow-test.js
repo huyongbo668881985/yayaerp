@@ -106,7 +106,7 @@ const approveReturn = id => post('/returns/approve/'+id,{goods_received:'1'});
     assert.equal((await post('/returns/new',body)).status,400);assert.equal(count('return_orders'),before);
     const s=await sale(1000);assert.equal((await post('/returns/new',returnBody(s,1,{refunded_amount:'1'}))).status,400);
     const id=idOf(await post('/returns/new',{...body,exception_reason:'纸质原凭证、数量和价格已由客户确认'}));
-    assert.match((await request('/returns/'+id)).text, /当前可退现金<\/span><strong[^>]*>¥0\.00<\/strong>/);
+    assert.match((await request('/returns/'+id)).text, /当前可退现金<\/span><strong[^>]*>¥0\.0<\/strong>/);
     assert.equal((await approveReturn(id)).status,302);
   });
   await check('收到实物前不变库存不入账；部分收款先抵原单欠款，显示已结清',async()=>{

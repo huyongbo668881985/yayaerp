@@ -2,6 +2,7 @@
 <div class="tabbar">
   <a href="/products" class="active">商品</a>
   <a href="/warehouses">仓库</a>
+  <% if (isAdmin) { %><a href="/settings/dashboard">首页看板</a><% } %>
 </div>
 <h1>商品档案</h1>
 <% if (typeof success !== 'undefined' && success) { %><div class="notice-success" role="status">商品档案已更新</div><% } %>
@@ -33,9 +34,9 @@
           <% } %>
         </td>
         <% if (isAdmin) { %>
-          <td><% if (p.cost_price_pack != null) { %>¥<%= p.cost_price_pack.toFixed(2) %><% } else if (p.pack_unit) { %>约¥<%= (p.cost_price * p.pack_size).toFixed(2) %><% } else { %>-<% } %></td>
+          <td><% if (p.cost_price_pack != null) { %>¥<%= p.cost_price_pack.toFixed(1) %><% } else if (p.pack_unit) { %>约¥<%= (p.cost_price * p.pack_size).toFixed(1) %><% } else { %>-<% } %></td>
         <% } %>
-        <td><% if (p.sale_price_pack != null) { %>¥<%= p.sale_price_pack.toFixed(2) %><% } else if (p.pack_unit) { %>约¥<%= (p.sale_price * p.pack_size).toFixed(2) %><% } else { %>-<% } %></td>
+        <td><% if (p.sale_price_pack != null) { %>¥<%= p.sale_price_pack.toFixed(1) %><% } else if (p.pack_unit) { %>约¥<%= (p.sale_price * p.pack_size).toFixed(1) %><% } else { %>-<% } %></td>
         <% if (isAdmin) { %><td>¥<%= p.cost_price.toFixed(2) %></td><% } %>
         <td>¥<%= p.sale_price.toFixed(2) %></td>
         <td><%= p.low_stock_threshold %></td>

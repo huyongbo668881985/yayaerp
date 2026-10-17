@@ -59,7 +59,7 @@
     <div id="recentProducts" class="recent-products" aria-label="最近使用的商品"></div>
     <div id="items"></div>
     <button type="button" class="btn btn-secondary btn-sm" onclick="addRow()">＋ 添加商品</button>
-    <p style="margin-top:10px;font-size:16px"><strong>商品合计：¥<span id="itemsTotal">0.00</span></strong> <span class="muted">（赠品不计入）</span></p>
+    <p style="margin-top:10px;font-size:16px"><strong>商品合计：¥<span id="itemsTotal">0.0</span></strong> <span class="muted">（赠品不计入）</span></p>
 
     <h2 class="form-section-heading">金额与备注</h2>
     <div class="grid-3">
@@ -91,7 +91,7 @@
     </div>
   </form>
 </div>
-<div class="sale-mobile-submit" aria-label="销售单操作"><div><small>商品合计</small><strong>¥<span id="stickyItemsTotal">0.00</span></strong></div><% if (!order) { %><button class="btn btn-secondary" type="submit" form="saleForm" name="save_draft" value="1">存草稿</button><% } %><button class="btn" type="submit" form="saleForm"><%= order ? '保存修改' : '提交审核' %></button></div>
+<div class="sale-mobile-submit" aria-label="销售单操作"><div><small>商品合计</small><strong>¥<span id="stickyItemsTotal">0.0</span></strong></div><% if (!order) { %><button class="btn btn-secondary" type="submit" form="saleForm" name="save_draft" value="1">存草稿</button><% } %><button class="btn" type="submit" form="saleForm"><%= order ? '保存修改' : '提交审核' %></button></div>
 
 <script>
   const PRODUCTS = <%- JSON.stringify(products).replace(/</g, '\\u003c') %>;
@@ -389,13 +389,13 @@
       const qty = parseFloat(qtyInput.value) || 0;
       const price = parseFloat(priceInput.value) || 0;
       const lineTotal = giftCheckbox && giftCheckbox.checked ? 0 : qty * price;
-      row.querySelector('.sale-line-total strong').textContent = Number.isFinite(lineTotal) ? '¥' + lineTotal.toFixed(2) : '—';
+      row.querySelector('.sale-line-total strong').textContent = Number.isFinite(lineTotal) ? '¥' + lineTotal.toFixed(1) : '—';
       total += lineTotal;
     });
     currentOrderTotal = Number.isFinite(total) ? Math.round(total * 100) / 100 : 0;
     const el = document.getElementById('itemsTotal');
-    if (el) el.textContent = Number.isFinite(total) ? total.toFixed(2) : '—';
-    document.getElementById('stickyItemsTotal').textContent = Number.isFinite(total) ? total.toFixed(2) : '—';
+    if (el) el.textContent = Number.isFinite(total) ? total.toFixed(1) : '—';
+    document.getElementById('stickyItemsTotal').textContent = Number.isFinite(total) ? total.toFixed(1) : '—';
   }
   document.getElementById('items').addEventListener('input', recalcTotal);
   document.getElementById('items').addEventListener('change', recalcTotal);

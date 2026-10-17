@@ -131,7 +131,7 @@
       const total = rows.reduce((sum,row) => sum + (row.querySelector('.gift-checkbox')?.checked ? 0 : (Number(row.querySelector('[name="quantity"]').value)||0)*(Number(row.querySelector('[name="unit_price"]')?.value)||0)), 0);
       for (const id of ['itemsTotal','stickyItemsTotal']) {
         const element = document.getElementById(id);
-        if (element) element.textContent = items.closest('form').id === 'transferForm' ? String(rows.filter(row => row.querySelector('[name="product_id"]').value).length) : Number.isFinite(total) ? total.toFixed(2) : '—';
+        if (element) element.textContent = items.closest('form').id === 'transferForm' ? String(rows.filter(row => row.querySelector('[name="product_id"]').value).length) : Number.isFinite(total) ? total.toFixed(1) : '—';
       }
     };
     updateTotals(); new MutationObserver(updateTotals).observe(items, { childList: true });

@@ -5,7 +5,8 @@ const { todayLocalDate }=require('../utils/dates');
 const { isValidDateString }=require('../lib/validators');
 const { sendCsv }=require('../utils/csv');
 const router=express.Router();
-const money=value=>(value/100).toFixed(2);
+const csvMoney=value=>(value/100).toFixed(2);
+const viewMoney=value=>(value/100).toFixed(1);
 function dates(req) {
   const start=typeof req.query.start==='string'?req.query.start:todayLocalDate().slice(0,8)+'01';
   const end=typeof req.query.end==='string'?req.query.end:todayLocalDate();
@@ -24,12 +25,12 @@ router.get('/reconciliation/customers/:id',(req,res,next)=>{
     if(!customer)return res.status(404).send('客户不存在');
     const {start,end}=dates(req),data=statement(req.tenantDb,id||null,start,end);
     if(req.query.format==='csv') {
-      const rows=[['期初余额','','','','','','',money(data.opening)]];
-      for(const row of data.rows)rows.push([row.event_date,row.event_kind,(row.document_type==='sales'?'销售单':'退货单')+' #'+row.document_id,money(row.sales_cents),money(row.received_cents),money(row.returned_cents),money(row.refunded_cents),money(row.balance_cents)]);
-      rows.push(['本期合计','','',money(data.totals.sales),money(data.totals.received),money(data.totals.returned),money(data.totals.refunded),money(data.ending)]);
+      const rows=[['期初余额','','','','','','',csvMoney(data.opening)]];
+      for(const row of data.rows)rows.push([row.event_date,row.event_kind,(row.document_type==='sales'?'销售单':'退货单')+' #'+row.document_id,csvMoney(row.sales_cents),csvMoney(row.received_cents),csvMoney(row.returned_cents),csvMoney(row.refunded_cents),csvMoney(row.balance_cents)]);
+      rows.push(['本期合计','','',csvMoney(data.totals.sales),csvMoney(data.totals.received),csvMoney(data.totals.returned),csvMoney(data.totals.refunded),csvMoney(data.ending)]);
       return sendCsv(res,customer.name+'对账单.csv',['入账日期','业务','单号','销售','收款','退货','退款','余额'],rows);
     }
-    res.render('customer_statement',{customer,start,end,data,money,printedAt:new Date().toISOString(),print:req.query.print==='1'});
+    res.render('customer_statement',{customer,start,end,data,money:viewMoney,printedAt:new Date().toISOString(),print:req.query.print==='1'});
   }catch(error){if(error.status)return res.status(error.status).render('global_error',{message:error.message,returnTo:'/reconciliation',returnLabel:'返回对账'});next(error);}
 });
 router.get('/reconciliation/suppliers/:id',(req,res,next)=>{

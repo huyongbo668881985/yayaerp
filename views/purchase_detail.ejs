@@ -10,12 +10,12 @@
       <tr>
         <td><%= it.product_name %></td>
         <td><%= it.quantity %> <%= it.unit_label %></td>
-        <td>¥<%= it.unit_price.toFixed(2) %></td>
-        <td>¥<%= (it.quantity * it.unit_price).toFixed(2) %></td>
+        <td>¥<%= it.base_quantity > it.quantity ? it.unit_price.toFixed(1) : it.unit_price.toFixed(2) %></td>
+        <td>¥<%= (it.quantity * it.unit_price).toFixed(1) %></td>
       </tr>
     <% }) %>
   </table>
-  <p class="right"><strong>总计：¥<%= order.total_amount.toFixed(2) %></strong></p>
+  <p class="right"><strong>总计：¥<%= order.total_amount.toFixed(1) %></strong></p>
   <div style="display:flex; gap:8px; margin-top:16px">
     <a class="btn btn-secondary" href="/purchases">返回列表</a>
     <form action="/purchases/<%= order.id %>/delete" method="POST" onsubmit="return confirm('确认删除这张采购单？会把对应入库的库存扣回去。')">

@@ -90,18 +90,20 @@ async function check(label, work) {
   await worker.login('worker', 'WorkerPass_2026');
   await worker2.login('worker2', 'WorkerPass_2026');
 
-  // 1. 商品档案列表查询窄化（防御纵深）
-  await check('商品档案列表页：操作员查询绝不包含成本价字段，管理员查询正常展示', async () => {
+  // 1. 商品档案列表查询窄化（防御纵深）与小数精度规则（瓶单价2位、箱价1位）
+  await check('商品档案列表页：操作员查询绝不包含成本价字段，管理员展示瓶单价2位、箱价1位', async () => {
     const workerRes = await worker.request('/products');
     assert.equal(workerRes.status, 200);
     assert.ok(!workerRes.text.includes('¥50.00'), '操作员页面绝不应出现瓶成本 ¥50.00');
-    assert.ok(!workerRes.text.includes('¥300.00'), '操作员页面绝不应出现箱成本 ¥300.00');
+    assert.ok(!workerRes.text.includes('¥300.0'), '操作员页面绝不应出现箱成本 ¥300.0');
     assert.ok(!workerRes.text.includes('成本'), '操作员页面表头不应出现成本列');
+    assert.ok(workerRes.text.includes('¥100.00'), '操作员页面瓶售价保持 2 位小数 ¥100.00');
+    assert.ok(workerRes.text.includes('¥550.0'), '操作员页面箱售价为 1 位小数 ¥550.0');
 
     const adminRes = await admin.request('/products');
     assert.equal(adminRes.status, 200);
-    assert.ok(adminRes.text.includes('¥50.00'), '管理员应能看到瓶成本价');
-    assert.ok(adminRes.text.includes('¥300.00'), '管理员应能看到箱成本价');
+    assert.ok(adminRes.text.includes('¥50.00'), '管理员应能看到 2 位小数的瓶成本价 ¥50.00');
+    assert.ok(adminRes.text.includes('¥300.0'), '管理员应能看到 1 位小数的箱成本价 ¥300.0');
   });
 
   // 2. 基础数据变更审计日志
@@ -238,6 +240,48 @@ async function check(label, work) {
     assert.equal(detailRes.status, 200);
     assert.ok(detailRes.text.includes('全额收齐'), '欠款单详情页应包含全额收齐快捷按钮');
     assert.ok(detailRes.text.includes('id="recordPaymentInput"'), '欠款单详情页应有收款输入框');
+  });
+
+  // 5. 首页自定义看板、本月净增欠款口径与操作员毛利绝对隔离
+  await check('首页自定义看板：默认6卡、本月净增欠款拆解、双视角配置与操作员毛利硬拦截', async () => {
+    const adminHome = await admin.request('/');
+    assert.equal(adminHome.status, 200);
+    assert.ok(adminHome.text.includes('本月销售额（已审核）'), '管理员默认展示本月销售额');
+    assert.ok(adminHome.text.includes('本年度销售额（已审核）'), '管理员默认展示本年度销售额');
+    assert.ok(adminHome.text.includes('本月净增欠款'), '管理员默认展示本月净增欠款');
+    assert.ok(adminHome.text.includes('本月新欠'), '本月净增欠款包含新欠副标题');
+    assert.ok(adminHome.text.includes('清收旧欠'), '本月净增欠款包含清收旧欠副标题');
+    assert.ok(adminHome.text.includes('累计总欠款'), '管理员默认展示累计总欠款');
+    assert.ok(adminHome.text.includes('本月毛利（已结清）'), '管理员默认展示本月毛利');
+    assert.ok(adminHome.text.includes('待审核单据'), '管理员默认展示待审核单据');
+    assert.ok(!adminHome.text.includes('今日销售额（已审核）'), '默认不启用今日销售额');
+
+    // 操作员访问首页：绝不能出现任何毛利字样，且访问 /settings/dashboard 必须 403
+    const workerHome = await worker.request('/');
+    assert.equal(workerHome.status, 200);
+    assert.ok(!workerHome.text.includes('毛利'), '操作员首页绝不能包含任何毛利数据');
+    const workerSettings = await worker.request('/settings/dashboard');
+    assert.equal(workerSettings.status, 403, '操作员访问看板配置页必须被拒绝');
+
+    // 管理员尝试恶意为 operator 视角注入 monthly_profit 和 today_profit，后端必须硬过滤拦截
+    const saveRes = await admin.request('/settings/dashboard', {
+      admin_order: ['total_debt', 'monthly_sales', 'yearly_sales', 'monthly_net_debt', 'monthly_profit', 'pending_orders', 'today_sales', 'today_profit'],
+      admin_enabled: ['total_debt', 'today_sales'],
+      admin_color_total_debt: 'purple',
+      admin_color_today_sales: 'pink',
+      operator_order: ['monthly_profit', 'today_profit', 'monthly_sales', 'yearly_sales', 'monthly_net_debt', 'total_debt', 'pending_orders', 'today_sales'],
+      operator_enabled: ['monthly_profit', 'today_profit', 'monthly_sales']
+    });
+    assert.equal(saveRes.status, 302);
+
+    const adminHomeAfter = await admin.request('/');
+    assert.ok(adminHomeAfter.text.includes('stat-theme-purple'), '管理员自定义紫粉卡片色生效');
+    assert.ok(adminHomeAfter.text.includes('今日销售额（已审核）'), '管理员开启今日销售额生效');
+    assert.ok(!adminHomeAfter.text.includes('本年度销售额（已审核）'), '管理员关闭本年度销售额生效');
+
+    const workerHomeAfter = await worker.request('/');
+    assert.ok(!workerHomeAfter.text.includes('毛利'), '即使伪造请求，操作员首页依然绝不出现毛利');
+    assert.ok(workerHomeAfter.text.includes('本月销售额（已审核）'), '操作员视角配置生效');
   });
 
   console.log(`第二批整改测试通过：${passed} 项`);

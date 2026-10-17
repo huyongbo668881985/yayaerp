@@ -7,7 +7,7 @@
 <div class="card">
   <div class="detail-hero">
     <div><span class="detail-eyebrow">销售单 #<%= order.id %> · <%= order.order_date %></span><strong><%= order.customer_name || '散客' %></strong></div>
-    <div class="detail-hero-value"><span>订单金额</span><strong>¥<%= order.total_amount.toFixed(2) %></strong></div>
+    <div class="detail-hero-value"><span>订单金额</span><strong>¥<%= order.total_amount.toFixed(1) %></strong></div>
   </div>
   <div class="detail-meta">
     <div><span>仓库</span><strong><%= order.warehouse_name %></strong></div>
@@ -42,16 +42,16 @@
       <p class="detail-state-note">未审核，库存尚未变动</p>
     <% } %>
   <div class="detail-finance-grid">
-    <div><span><%= order.status === 'approved' ? '已收款' : '录入收款' %></span><strong>¥<%= (order.paid_amount || 0).toFixed(2) %></strong></div>
-    <% if (order.returned_amount > 0) { %><div><span>已审核退货</span><strong>¥<%= order.returned_amount.toFixed(2) %></strong></div><% } %>
-    <% if (order.cash_refunded_amount > 0) { %><div><span>已退现金</span><strong>¥<%= order.cash_refunded_amount.toFixed(2) %></strong></div><% } %>
-    <% if (order.pending_refund > 0) { %><div><span>待退现金</span><strong class="detail-owing">¥<%= order.pending_refund.toFixed(2) %></strong></div><% } %>
-    <div><span><%= order.status === 'approved' ? '欠款' : '预计待收' %></span><strong class="<%= order.status === 'approved' ? 'detail-owing' : '' %>">¥<%= order.effective_debt.toFixed(2) %></strong></div>
+    <div><span><%= order.status === 'approved' ? '已收款' : '录入收款' %></span><strong>¥<%= (order.paid_amount || 0).toFixed(1) %></strong></div>
+    <% if (order.returned_amount > 0) { %><div><span>已审核退货</span><strong>¥<%= order.returned_amount.toFixed(1) %></strong></div><% } %>
+    <% if (order.cash_refunded_amount > 0) { %><div><span>已退现金</span><strong>¥<%= order.cash_refunded_amount.toFixed(1) %></strong></div><% } %>
+    <% if (order.pending_refund > 0) { %><div><span>待退现金</span><strong class="detail-owing">¥<%= order.pending_refund.toFixed(1) %></strong></div><% } %>
+    <div><span><%= order.status === 'approved' ? '欠款' : '预计待收' %></span><strong class="<%= order.status === 'approved' ? 'detail-owing' : '' %>">¥<%= order.effective_debt.toFixed(1) %></strong></div>
   </div>
   <% if (relatedReturns && relatedReturns.length > 0) { %>
     <p>
       <strong>关联退货单：</strong>
-      <% relatedReturns.forEach(function(ro, idx) { %><a href="/returns/<%= ro.id %>">#<%= ro.id %></a>（¥<%= ro.total_amount.toFixed(2) %>，<%= ro.cancelled_at ? '已撤销' : ro.status === 'approved' ? '已审核' : (ro.status === 'submitted' ? '待审核' : (ro.status === 'rejected' ? '已拒绝' : '草稿')) %>）<%= idx < relatedReturns.length - 1 ? '、' : '' %><% }) %>
+      <% relatedReturns.forEach(function(ro, idx) { %><a href="/returns/<%= ro.id %>">#<%= ro.id %></a>（¥<%= ro.total_amount.toFixed(1) %>，<%= ro.cancelled_at ? '已撤销' : ro.status === 'approved' ? '已审核' : (ro.status === 'submitted' ? '待审核' : (ro.status === 'rejected' ? '已拒绝' : '草稿')) %>）<%= idx < relatedReturns.length - 1 ? '、' : '' %><% }) %>
     </p>
   <% } %>
   <h2 class="detail-section-heading">商品明细</h2>
@@ -61,18 +61,18 @@
       <tr>
         <td><%= it.product_name %></td>
         <td><%= it.quantity %> <%= it.unit_label %></td>
-        <td>¥<%= it.unit_price.toFixed(2) %></td>
-        <td>¥<%= (it.quantity * it.unit_price).toFixed(2) %></td>
+        <td>¥<%= it.base_quantity > it.quantity ? it.unit_price.toFixed(1) : it.unit_price.toFixed(2) %></td>
+        <td>¥<%= (it.quantity * it.unit_price).toFixed(1) %></td>
         <td><%= it.is_gift ? '赠品' : '正常销售' %></td>
       </tr>
     <% }) %>
   </table>
   <div class="detail-items-mobile">
     <% items.forEach(function(it) { %>
-      <div class="detail-item-card"><div><strong><%= it.product_name %></strong><span><%= it.quantity %> <%= it.unit_label %> × ¥<%= it.unit_price.toFixed(2) %><% if (it.is_gift) { %> · 赠品<% } %></span></div><strong>¥<%= (it.quantity * it.unit_price).toFixed(2) %></strong></div>
+      <div class="detail-item-card"><div><strong><%= it.product_name %></strong><span><%= it.quantity %> <%= it.unit_label %> × ¥<%= it.base_quantity > it.quantity ? it.unit_price.toFixed(1) : it.unit_price.toFixed(2) %><% if (it.is_gift) { %> · 赠品<% } %></span></div><strong>¥<%= (it.quantity * it.unit_price).toFixed(1) %></strong></div>
     <% }) %>
   </div>
-  <p class="right"><strong>总计：¥<%= order.total_amount.toFixed(2) %></strong></p>
+  <p class="right"><strong>总计：¥<%= order.total_amount.toFixed(1) %></strong></p>
 
   <div class="detail-actions">
     <% if (order.status === 'draft' && canManage) { %>

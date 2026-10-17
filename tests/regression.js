@@ -331,11 +331,11 @@ function latestIdInList(html, pattern) {
   section('D. 报表与导出');
   r = await A.raw('/reports?start=2026-09-01&end=2026-09-30');
   const clean = (h) => h.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').replace(/¥\s*/g, '¥');
-  const money = [...clean(r.text).matchAll(/¥([\-\d,]+\.\d{2})/g)].map(m => m[1]);
+  const money = [...clean(r.text).matchAll(/¥([\-\d,]+\.\d{1,2})/g)].map(m => m[1]);
   console.log('  报表金额序列: ' + money.join(' | '));
   ok(money.length >= 5, '报表渲染出全部汇总卡');
   // DOM 顺序：金额 div 在标签 div 之前，所以序列第 1 个 ¥ 就是销售额 2550
-  ok(money[0] === '2550.00', '销售额卡片 = 2550（实为 ' + money[0] + '）');
+  ok(money[0] === '2550.0', '销售额卡片 = 2550（实为 ' + money[0] + '）');
 
   r = await A.raw('/sales/export');
   ok(r.ct.includes('csv') && r.text.includes('啤酒A'), '销售CSV 含明细数据');

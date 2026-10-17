@@ -29,7 +29,7 @@
     <div id="items"></div>
     <button type="button" class="btn btn-secondary btn-sm" onclick="addRow()">+ 添加一行</button>
 
-    <p><strong>商品合计：¥<span id="itemsTotal">0.00</span></strong></p>
+    <p><strong>商品合计：¥<span id="itemsTotal">0.0</span></strong></p>
     <div class="form-row" style="margin-top:16px">
       <label>备注</label>
       <textarea name="note" rows="2"><%= form.note || '' %></textarea>
@@ -42,7 +42,7 @@
   </form>
 </div>
 
-<div class="sale-mobile-submit" aria-label="单据操作"><div><small>商品合计</small><strong>¥<span id="stickyItemsTotal">0.00</span></strong></div><button class="btn" type="submit" form="purchaseForm">提交入库</button></div>
+<div class="sale-mobile-submit" aria-label="单据操作"><div><small>商品合计</small><strong>¥<span id="stickyItemsTotal">0.0</span></strong></div><button class="btn" type="submit" form="purchaseForm">提交入库</button></div>
 <script>
   const PRODUCTS = <%- JSON.stringify(products).replace(/</g, '\\u003c') %>;
   let rowIndex = 0;

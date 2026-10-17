@@ -2,6 +2,7 @@
 <div class="tabbar">
   <a href="/products">商品</a>
   <a href="/warehouses" class="active">仓库</a>
+  <% if (isAdmin) { %><a href="/settings/dashboard">首页看板</a><% } %>
 </div>
 <h1>仓库管理</h1>
 <% if (notice) { %><p class="success" role="status"><%= notice %></p><% } %>

@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="csrf-token" content="<%= csrfToken %>">
   <title>鸭鸭进销存</title>
-  <link rel="stylesheet" href="/style.css?v=customer-operator-filter-1">
+  <link rel="stylesheet" href="/style.css?v=dashboard-custom-cards-1">
   <meta name="order-draft-context" content="<%= JSON.stringify({scope: currentUser && currentTenant ? currentTenant.tenant_code + ':' + currentUser.id : '', completed: typeof draftCompletionKeys !== 'undefined' ? draftCompletionKeys : []}) %>">
-  <script src="/orderForm.js?v=2" defer></script>
+  <script src="/orderForm.js?v=3" defer></script>
   <script src="/orderDraft.js?v=review-improvements-1" defer></script>
   <script src="/uiFeedback.js" defer></script>
   <script src="/orderStock.js" defer></script>
@@ -52,7 +52,7 @@
     <% if (currentUser.role === 'admin') { %>
       <a class="<%= currentPath === '/users' || currentPath.startsWith('/users/') ? 'active' : '' %>" href="/users">账号</a>
     <% } %>
-    <a class="<%= currentPath === '/products' || currentPath.startsWith('/products/') ? 'active' : '' %>" href="/products">基础信息</a>
+    <a class="<%= currentPath === '/products' || currentPath.startsWith('/products/') || currentPath === '/warehouses' || currentPath.startsWith('/warehouses/') || currentPath === '/settings/dashboard' ? 'active' : '' %>" href="/products">基础信息</a>
     <div class="nav-userbox">
       <span><%= currentUser.name %>（<%= currentUser.role === 'admin' ? '管理员' : '操作员' %>）</span>
       <a class="<%= currentPath === '/change-password' || currentPath.startsWith('/change-password/') ? 'active' : '' %>" href="/change-password">修改密码</a>

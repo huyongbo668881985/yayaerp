@@ -14,7 +14,7 @@
         <td><%= o.order_date %></td>
         <td><%= o.supplier_name || '-' %></td>
         <td><%= o.warehouse_name %></td>
-        <td>¥<%= o.total_amount.toFixed(2) %></td>
+        <td>¥<%= o.total_amount.toFixed(1) %></td>
         <td><%= o.user_name %></td>
         <td>
           <a href="/purchases/<%= o.id %>" class="btn btn-sm btn-secondary">详情</a>
@@ -39,7 +39,7 @@
           <span><%= o.warehouse_name %></span>
         </div>
         <div class="order-card-bottom">
-          <span class="order-card-amount">¥<%= o.total_amount.toFixed(2) %></span>
+          <span class="order-card-amount">¥<%= o.total_amount.toFixed(1) %></span>
           <span class="muted"><%= o.user_name %></span>
         </div>
       </a>

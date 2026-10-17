@@ -36,7 +36,7 @@
     </tr>
     <% summaries.forEach(function(row) { %>
       <tr>
-        <td><%= row.customer_name %></td><td><%= row.order_count %></td><td>¥<%= row.total_amount.toFixed(2) %></td><td>¥<%= row.paid_amount.toFixed(2) %></td><td class="summary-debt">¥<%= row.total_debt.toFixed(2) %></td>
+        <td><%= row.customer_name %></td><td><%= row.order_count %></td><td>¥<%= row.total_amount.toFixed(1) %></td><td>¥<%= row.paid_amount.toFixed(1) %></td><td class="summary-debt">¥<%= row.total_debt.toFixed(1) %></td>
         <td><a class="btn btn-sm btn-secondary" href="/sales<%= salesQueryString({ start: start, end: end, customer_id: row.id, guest: row.id ? '' : 1 }) %>">查看订单</a></td>
       </tr>
     <% }) %>
@@ -46,7 +46,7 @@
   <% summaries.forEach(function(row) { %>
     <a class="order-card" href="/sales<%= salesQueryString({ start: start, end: end, customer_id: row.id, guest: row.id ? '' : 1 }) %>">
       <div class="order-card-top"><span class="order-card-id"><%= row.customer_name %></span><span class="badge badge-admin"><%= row.order_count %> 单</span></div>
-      <div class="summary-card-grid"><span>销售总额<strong>¥<%= row.total_amount.toFixed(2) %></strong></span><span>净收款<strong>¥<%= row.paid_amount.toFixed(2) %></strong></span><span class="summary-debt">合计欠款<strong>¥<%= row.total_debt.toFixed(2) %></strong></span></div>
+      <div class="summary-card-grid"><span>销售总额<strong>¥<%= row.total_amount.toFixed(1) %></strong></span><span>净收款<strong>¥<%= row.paid_amount.toFixed(1) %></strong></span><span class="summary-debt">合计欠款<strong>¥<%= row.total_debt.toFixed(1) %></strong></span></div>
       <span class="summary-card-link">查看订单明细 →</span>
     </a>
   <% }) %>
