@@ -1,202 +1,372 @@
 <%- include('partials/header') %>
+<%
+  function fmtMoney(n) {
+    const num = Number(n || 0);
+    return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function shortDate(d) {
+    return typeof d === 'string' && d.length >= 10 ? d.slice(5) : (d || '');
+  }
+  const activeProfit = includeReceivable ? summary.profitWithReceivable : summary.profitWithoutReceivable;
+  const salesTotalSum = orders.reduce((s, o) => s + o.total_amount, 0);
+  const salesPaidSum = orders.reduce((s, o) => s + o.paid_amount, 0);
+  const salesProfitSum = orders.reduce((s, o) => s + o.order_profit, 0);
+  const salesMarginSum = salesTotalSum > 0.001 ? (salesProfitSum / salesTotalSum) * 100 : 0;
+
+  const returnsTotalSum = returnOrders.reduce((s, o) => s + o.total_amount, 0);
+  const returnsRefundedSum = returnOrders.reduce((s, o) => s + o.refunded_amount, 0);
+  const returnsProfitSum = returnOrders.reduce((s, o) => s + o.order_profit, 0);
+%>
 <div class="tabbar">
   <a href="/reports" class="active">经营报表</a>
   <a href="/stock-log">出入库流水</a>
 </div>
-<h1>经营报表</h1>
 
-<div class="card">
-  <form method="GET" action="/reports" style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap">
-    <div class="form-row" style="margin-bottom:0">
-      <label>开始日期</label>
-      <input type="date" name="start" id="startInput" value="<%= start %>">
-    </div>
-    <div class="form-row" style="margin-bottom:0">
-      <label>结束日期</label>
-      <input type="date" name="end" id="endInput" value="<%= end %>">
-    </div>
+<div class="report-toolbar">
+  <div class="report-seg report-range-seg" role="group" aria-label="快捷时间区间">
+    <button type="button" data-range="today" onclick="setRange('today')">今日</button>
+    <button type="button" data-range="thisMonth" onclick="setRange('thisMonth')">本月</button>
+    <button type="button" data-range="lastMonth" onclick="setRange('lastMonth')">上月</button>
+    <button type="button" data-range="last30" onclick="setRange('last30')">近30天</button>
+    <button type="button" data-range="thisYear" onclick="setRange('thisYear')">今年</button>
+    <button type="button" data-range="custom" onclick="toggleCustomDate(true)">自定义</button>
+  </div>
+
+  <div class="report-mobile-date-bar" onclick="toggleCustomDate()">
+    <span>📅 <%= (start || end) ? ((start || '起') + ' → ' + (end || '止')) : '全部日期' %></span>
+    <span class="report-date-edit-link">修改 ›</span>
+  </div>
+
+  <form method="GET" action="/reports" class="report-date-form" id="reportDateForm">
+    <span class="report-date-icon" aria-hidden="true">📅</span>
+    <input type="date" name="start" id="startInput" value="<%= start %>" aria-label="开始日期">
+    <span class="report-date-sep">→</span>
+    <input type="date" name="end" id="endInput" value="<%= end %>" aria-label="结束日期">
     <input type="hidden" name="mode" value="<%= includeReceivable ? 'with_receivable' : 'without_receivable' %>">
-    <button type="submit" class="btn btn-secondary">查询</button>
+    <button type="submit" class="btn btn-secondary btn-sm report-query-btn">查询</button>
   </form>
-  <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap">
-    <button type="button" class="btn btn-secondary btn-sm" onclick="setRange('thisMonth')">本月</button>
-    <button type="button" class="btn btn-secondary btn-sm" onclick="setRange('lastMonth')">上月</button>
-    <button type="button" class="btn btn-secondary btn-sm" onclick="setRange('last30')">近30天</button>
-    <button type="button" class="btn btn-secondary btn-sm" onclick="setRange('thisYear')">今年</button>
+
+  <div class="report-toolbar-spacer"></div>
+
+  <div class="report-mode-export-row">
+    <span class="report-toolbar-label"><span class="hide-mobile">毛利</span>口径</span>
+    <div class="report-seg report-mode-seg" role="group" aria-label="毛利口径">
+      <a class="<%= !includeReceivable ? 'is-active' : '' %>"
+         href="/reports?start=<%= start %>&end=<%= end %>&mode=without_receivable">仅已结清</a>
+      <a class="<%= includeReceivable ? 'is-active' : '' %>"
+         href="/reports?start=<%= start %>&end=<%= end %>&mode=with_receivable">含应收</a>
+    </div>
+    <a class="btn btn-sm report-export-btn"
+       href="/reports/export?start=<%= start %>&end=<%= end %>&mode=<%= includeReceivable ? 'with_receivable' : 'without_receivable' %>">⬇ 导出</a>
   </div>
 </div>
 
-<div class="card">
-  <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
-    <span class="muted">毛利口径：</span>
-    <a class="btn <%= includeReceivable ? 'btn-secondary' : '' %> btn-sm"
-       href="/reports?start=<%= start %>&end=<%= end %>&mode=without_receivable">不含应收（仅已结清）</a>
-    <a class="btn <%= includeReceivable ? '' : 'btn-secondary' %> btn-sm"
-       href="/reports?start=<%= start %>&end=<%= end %>&mode=with_receivable">含应收（全部已审核）</a>
+<div class="report-kpi-main">
+  <div class="report-kpi-card">
+    <div class="report-kpi-top">
+      <span>净销售额</span>
+      <span class="report-tip" title="区间内已审核销售单金额 − 区间内已审核退货单金额">?</span>
+    </div>
+    <div class="report-kpi-val"><small>¥</small><%= fmtMoney(summary.sales.amount) %></div>
+    <div class="report-kpi-sub">
+      <span><%= summary.sales.count %> 单<% if (summary.sales.returnCount > 0) { %><span class="hide-mobile">（退 <%= summary.sales.returnCount %> 单）</span><% } %></span>
+      <% if (comparison && comparison.salesDiffPct !== null) { %>
+        · <span class="hide-mobile"><%= comparison.label %> </span><span class="<%= comparison.salesDiffPct >= 0 ? 'trend-up' : 'trend-down' %>">
+          <%= comparison.salesDiffPct >= 0 ? '↑' : '↓' %><%= Math.abs(comparison.salesDiffPct).toFixed(1) %>%
+        </span>
+      <% } %>
+    </div>
+  </div>
+
+  <div class="report-kpi-card is-highlight">
+    <div class="report-kpi-top">
+      <span>毛利（<%= includeReceivable ? '含应收' : '仅已结清' %>）</span>
+      <span class="report-tip" title="按开单成本快照计算，已扣除退货冲减毛利">?</span>
+    </div>
+    <div class="report-kpi-val"><small>¥</small><%= fmtMoney(activeProfit) %></div>
+    <div class="report-kpi-sub">
+      <span>毛利率 <strong class="text-strong"><%= marginRate.toFixed(1) %>%</strong></span>
+      <% if (comparison && comparison.marginDiffPt !== null) { %>
+        · <span class="hide-mobile"><%= comparison.label %> </span><span class="<%= comparison.marginDiffPt >= 0 ? 'trend-up' : 'trend-down' %>">
+          <%= comparison.marginDiffPt >= 0 ? '↑' : '↓' %><%= Math.abs(comparison.marginDiffPt).toFixed(1) %>pt
+        </span>
+      <% } %>
+    </div>
+  </div>
+
+  <div class="report-kpi-card">
+    <div class="report-kpi-top">
+      <span>实收金额</span>
+      <span class="report-tip" title="区间内已审核销售单的已收现金 − 关联退货已实际退回的现金">?</span>
+    </div>
+    <div class="report-kpi-val text-success"><small>¥</small><%= fmtMoney(summary.received) %></div>
+    <div class="report-kpi-sub">回款率 <%= collectionRate.toFixed(1) %>%</div>
+  </div>
+
+  <div class="report-kpi-card">
+    <div class="report-kpi-top">
+      <span>应收未结清</span>
+      <span class="report-tip" title="区间内已审核销售单扣除关联退货后仍未结清的正余额">?</span>
+    </div>
+    <div class="report-kpi-val <%= summary.receivable.amount > 0 ? 'text-danger' : 'text-success' %>"><small>¥</small><%= fmtMoney(summary.receivable.amount) %></div>
+    <div class="report-kpi-sub">
+      <%= summary.receivable.count %> 单 · <a href="/sales?unpaid=1">查看<span class="hide-mobile">欠款单</span> ›</a>
+    </div>
   </div>
 </div>
 
-<div class="stat-grid">
-  <div class="stat-card">
-    <div class="num">¥<%= summary.sales.amount.toFixed(1) %></div>
-    <div class="label">销售额（已扣退货）· <%= summary.sales.count %> 单销售，<%= summary.sales.returnCount %> 单退货</div>
+<div class="report-kpi-sub-grid">
+  <div class="report-mini-card">
+    <span>退货冲减</span>
+    <span><strong class="text-danger">−¥<%= fmtMoney(summary.returnsAmount) %></strong> · <%= summary.sales.returnCount %> 单</span>
   </div>
-  <div class="stat-card">
-    <div class="num" style="color:#16a34a">¥<%= summary.received.toFixed(1) %></div>
-    <div class="label">实收金额（已收款，已扣现金退款）</div>
+  <div class="report-mini-card">
+    <span>未结清订单毛利</span>
+    <strong>¥<%= fmtMoney(summary.receivableProfit) %></strong>
   </div>
-  <div class="stat-card">
-    <div class="num" style="color:<%= summary.receivable.amount > 0 ? '#e5484d' : '#16a34a' %>">¥<%= summary.receivable.amount.toFixed(1) %></div>
-    <div class="label">应收金额（未结清）· <%= summary.receivable.count %> 单</div>
-  </div>
-  <div class="stat-card">
-    <div class="num" style="color:#e5484d">¥<%= summary.returnsAmount.toFixed(1) %></div>
-    <div class="label">退货金额（已冲减进销售额和毛利）</div>
-  </div>
-  <div class="stat-card">
-    <div class="num">¥<%= (includeReceivable ? summary.profitWithReceivable : summary.profitWithoutReceivable).toFixed(1) %></div>
-    <div class="label">毛利（<%= includeReceivable ? '含应收账款' : '仅已结清' %>，已扣退货）</div>
-  </div>
-  <div class="stat-card">
-    <div class="num">¥<%= summary.receivableProfit.toFixed(1) %></div>
-    <div class="label">未结清订单毛利（按当前成本快照）</div>
+  <div class="report-mini-card">
+    <span>含应收总毛利</span>
+    <strong>¥<%= fmtMoney(summary.profitWithReceivable) %></strong>
   </div>
 </div>
 
-<div style="margin:14px 0">
-  <a class="btn" href="/reports/export?start=<%= start %>&end=<%= end %>&mode=<%= includeReceivable ? 'with_receivable' : 'without_receivable' %>">导出这段明细CSV</a>
-</div>
+<div class="card report-detail-card">
+  <div class="report-detail-head">
+    <div class="report-tabs" role="tablist" aria-label="单据类型">
+      <button type="button" class="report-tab is-active" role="tab" aria-selected="true" data-tab-btn="sales" onclick="switchReportTab('sales')">
+        销售单 <span class="report-tab-cnt"><%= orders.length %></span>
+      </button>
+      <button type="button" class="report-tab" role="tab" aria-selected="false" data-tab-btn="returns" onclick="switchReportTab('returns')">
+        退货单 <span class="report-tab-cnt"><%= returnOrders.length %></span>
+      </button>
+    </div>
+    <div class="report-search-wrap">
+      <input type="search" id="reportSearchInput" class="report-search-input" placeholder="🔍 搜索客户 / 单号" aria-label="搜索客户或单号">
+    </div>
+  </div>
 
-<div class="card desktop-table-wrap">
-  <table>
-    <tr><th>单号</th><th>日期</th><th>客户</th><th>仓库</th><th>销售额</th><th>已收</th><th>收款状态</th><th>该单毛利</th></tr>
-    <% orders.forEach(function(o) { %>
-      <tr>
-        <td><a href="/sales/<%= o.id %>">#<%= o.id %></a></td>
-        <td><%= o.order_date %></td>
-        <td><%= o.customer_name || '散客' %></td>
-        <td><%= o.warehouse_name %></td>
-        <td>¥<%= o.total_amount.toFixed(1) %></td>
-        <td>¥<%= o.paid_amount.toFixed(1) %></td>
-        <td>
-          <% if (o.effective_status === 'paid') { %>
-            <span class="badge" style="background:#dcfce7;color:#166534">已结清</span>
-          <% } else if (o.effective_status === 'refund_pending') { %>
-      <span class="badge" style="background:#fef3c7;color:#92400e">待退款</span>
-      <% } else if (o.effective_status === 'partial') { %>
-            <span class="badge" style="background:#fef3c7;color:#92400e">部分结算</span>
-          <% } else { %>
-            <span class="badge" style="background:#fee2e2;color:#991b1b">未收款</span>
-          <% } %>
-        </td>
-        <td>¥<%= o.order_profit.toFixed(1) %></td>
-      </tr>
-    <% }) %>
-  </table>
-  <% if (orders.length === 0) { %><p class="muted">这段时间没有符合条件的订单</p><% } %>
-</div>
+  <!-- 销售单面板 -->
+  <div class="report-tab-panel is-active" data-tab-panel="sales">
+    <div class="report-mobile-sum">
+      <span>合计 <strong data-sum-count><%= orders.length %></strong> 单</span>
+      <span>销售 <strong><%= fmtMoney(salesTotalSum) %></strong></span>
+      <span>毛利 <strong><%= fmtMoney(salesProfitSum) %></strong></span>
+    </div>
 
-<div class="mobile-order-cards">
-  <% orders.forEach(function(o) { %>
-    <a href="/sales/<%= o.id %>" class="order-card">
-      <div class="order-card-top">
-        <span class="order-card-id">#<%= o.id %> <%= o.customer_name || '散客' %></span>
-        <% if (o.effective_status === 'paid') { %>
-          <span class="badge" style="background:#dcfce7;color:#166534">已结清</span>
-        <% } else if (o.effective_status === 'refund_pending') { %>
-      <span class="badge" style="background:#fef3c7;color:#92400e">待退款</span>
-      <% } else if (o.effective_status === 'partial') { %>
-          <span class="badge" style="background:#fef3c7;color:#92400e">部分结算</span>
-        <% } else { %>
-          <span class="badge" style="background:#fee2e2;color:#991b1b">未收款</span>
+    <div class="desktop-table-wrap report-table-wrap">
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th>单号</th>
+            <th>日期</th>
+            <th>客户</th>
+            <th>仓库</th>
+            <th class="num-col">销售额</th>
+            <th class="num-col">已收</th>
+            <th>状态</th>
+            <th class="num-col">毛利</th>
+            <th class="num-col">毛利率</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% orders.forEach(function(o) {
+               const rowMargin = o.total_amount > 0.001 ? (o.order_profit / o.total_amount) * 100 : 0;
+               const isNeg = o.order_profit < -0.005;
+          %>
+            <tr data-report-row data-search="#<%= o.id %> <%= o.customer_name || '散客' %> <%= o.warehouse_name %> <%= o.order_date %>">
+              <td><a href="/sales/<%= o.id %>">#<%= o.id %></a></td>
+              <td><%= shortDate(o.order_date) %></td>
+              <td><%= o.customer_name || '散客' %></td>
+              <td><%= o.warehouse_name %></td>
+              <td class="num-col"><%= fmtMoney(o.total_amount) %></td>
+              <td class="num-col"><%= fmtMoney(o.paid_amount) %></td>
+              <td>
+                <% if (o.effective_status === 'paid') { %>
+                  <span class="badge" style="background:#dcfce7;color:#166534">已结清</span>
+                <% } else if (o.effective_status === 'refund_pending') { %>
+                  <span class="badge" style="background:#fef3c7;color:#92400e">待退款</span>
+                <% } else if (o.effective_status === 'partial') { %>
+                  <span class="badge" style="background:#fef3c7;color:#92400e">部分结算</span>
+                <% } else { %>
+                  <span class="badge" style="background:#fee2e2;color:#991b1b">未收款</span>
+                <% } %>
+              </td>
+              <td class="num-col <%= isNeg ? 'text-danger' : '' %>"><%= isNeg ? '−' + fmtMoney(Math.abs(o.order_profit)) : fmtMoney(o.order_profit) %></td>
+              <td class="num-col <%= isNeg ? 'text-danger' : '' %>"><%= isNeg ? '−' + Math.abs(rowMargin).toFixed(1) : rowMargin.toFixed(1) %>%</td>
+            </tr>
+          <% }) %>
+        </tbody>
+        <% if (orders.length > 0) { %>
+          <tfoot>
+            <tr>
+              <td colspan="4">合计 <%= orders.length %> 单</td>
+              <td class="num-col"><%= fmtMoney(salesTotalSum) %></td>
+              <td class="num-col"><%= fmtMoney(salesPaidSum) %></td>
+              <td></td>
+              <td class="num-col <%= salesProfitSum < -0.005 ? 'text-danger' : '' %>"><%= fmtMoney(salesProfitSum) %></td>
+              <td class="num-col <%= salesMarginSum < -0.005 ? 'text-danger' : '' %>"><%= salesMarginSum.toFixed(1) %>%</td>
+            </tr>
+          </tfoot>
         <% } %>
-      </div>
-      <div class="order-card-mid">
-        <span><%= o.order_date %></span>
-        <span><%= o.warehouse_name %></span>
-      </div>
-      <div class="order-card-bottom">
-        <span class="order-card-amount">¥<%= o.total_amount.toFixed(1) %></span>
-        <span class="muted">毛利 ¥<%= o.order_profit.toFixed(1) %></span>
-      </div>
-    </a>
-  <% }) %>
-  <% if (orders.length === 0) { %><p class="muted">这段时间没有符合条件的订单</p><% } %>
-</div>
+      </table>
+      <% if (orders.length === 0) { %><p class="muted report-empty">这段时间没有符合条件的销售单</p><% } %>
+    </div>
 
-<h2 style="margin-top:24px">退货单明细（¥金额已从上面的销售额/毛利中扣除）</h2>
-<div class="card desktop-table-wrap">
-  <table>
-    <tr><th>单号</th><th>日期</th><th>客户</th><th>仓库</th><th>退货额</th><th>已退</th><th>退款状态</th><th>该单冲减毛利</th></tr>
-    <% returnOrders.forEach(function(o) { %>
-      <tr>
-        <td><a href="/returns/<%= o.id %>">#<%= o.id %></a></td>
-        <td><%= o.order_date %></td>
-        <td><%= o.customer_name || '散客' %></td>
-        <td><%= o.warehouse_name %></td>
-        <td>¥<%= o.total_amount.toFixed(1) %></td>
-        <td>¥<%= o.refunded_amount.toFixed(1) %></td>
-        <td>
-          <% if (o.refund_status === 'refunded') { %>
-            <span class="badge" style="background:#dcfce7;color:#166534">已退款</span>
-          <% } else if (o.refund_status === 'partial') { %>
-            <span class="badge" style="background:#fef3c7;color:#92400e">部分退款</span>
-          <% } else { %>
-            <span class="badge" style="background:#fee2e2;color:#991b1b">未退款</span>
-          <% } %>
-        </td>
-        <td>-¥<%= o.order_profit.toFixed(1) %></td>
-      </tr>
-    <% }) %>
-  </table>
-  <% if (returnOrders.length === 0) { %><p class="muted">这段时间没有符合条件的退货单</p><% } %>
-</div>
+    <div class="mobile-order-cards">
+      <% orders.forEach(function(o) {
+           const rowMargin = o.total_amount > 0.001 ? (o.order_profit / o.total_amount) * 100 : 0;
+           const isNeg = o.order_profit < -0.005;
+      %>
+        <a href="/sales/<%= o.id %>" class="order-card" data-report-card data-search="#<%= o.id %> <%= o.customer_name || '散客' %> <%= o.warehouse_name %> <%= o.order_date %>">
+          <div class="order-card-top">
+            <span class="order-card-id">#<%= o.id %> <%= o.customer_name || '散客' %></span>
+            <% if (o.effective_status === 'paid') { %>
+              <span class="badge" style="background:#dcfce7;color:#166534">已结清</span>
+            <% } else if (o.effective_status === 'refund_pending') { %>
+              <span class="badge" style="background:#fef3c7;color:#92400e">待退款</span>
+            <% } else if (o.effective_status === 'partial') { %>
+              <span class="badge" style="background:#fef3c7;color:#92400e">部分结算</span>
+            <% } else { %>
+              <span class="badge" style="background:#fee2e2;color:#991b1b">未收款</span>
+            <% } %>
+          </div>
+          <div class="order-card-mid">
+            <span><%= shortDate(o.order_date) %> · <%= o.warehouse_name %></span>
+            <% if (o.effective_status !== 'paid') { %>
+              <span>已收 ¥<%= fmtMoney(o.paid_amount) %></span>
+            <% } %>
+          </div>
+          <div class="order-card-bottom">
+            <span class="order-card-amount">¥<%= fmtMoney(o.total_amount) %></span>
+            <span class="muted">
+              毛利 <strong class="<%= isNeg ? 'text-danger' : 'text-strong' %>"><%= isNeg ? '−¥' + fmtMoney(Math.abs(o.order_profit)) : '¥' + fmtMoney(o.order_profit) %></strong>
+              · <span class="<%= isNeg ? 'text-danger' : '' %>"><%= isNeg ? '−' + Math.abs(rowMargin).toFixed(1) : rowMargin.toFixed(1) %>%</span>
+            </span>
+          </div>
+        </a>
+      <% }) %>
+      <% if (orders.length === 0) { %><p class="muted report-empty">这段时间没有符合条件的销售单</p><% } %>
+    </div>
 
-<div class="mobile-order-cards">
-  <% returnOrders.forEach(function(o) { %>
-    <a href="/returns/<%= o.id %>" class="order-card">
-      <div class="order-card-top">
-        <span class="order-card-id">#<%= o.id %> <%= o.customer_name || '散客' %></span>
-        <% if (o.refund_status === 'refunded') { %>
-          <span class="badge" style="background:#dcfce7;color:#166534">已退款</span>
-        <% } else if (o.refund_status === 'partial') { %>
-          <span class="badge" style="background:#fef3c7;color:#92400e">部分退款</span>
-        <% } else { %>
-          <span class="badge" style="background:#fee2e2;color:#991b1b">未退款</span>
+    <div class="report-pager-desktop" data-pager-desktop="sales"></div>
+    <div class="report-pager-mobile" data-pager-mobile="sales"></div>
+  </div>
+
+  <!-- 退货单面板 -->
+  <div class="report-tab-panel" data-tab-panel="returns">
+    <div class="report-mobile-sum">
+      <span>合计 <strong data-sum-count><%= returnOrders.length %></strong> 单</span>
+      <span>退货 <strong class="text-danger">−<%= fmtMoney(returnsTotalSum) %></strong></span>
+      <span>冲减毛利 <strong class="text-danger">−<%= fmtMoney(returnsProfitSum) %></strong></span>
+    </div>
+
+    <div class="desktop-table-wrap report-table-wrap">
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th>单号</th>
+            <th>日期</th>
+            <th>客户</th>
+            <th>仓库</th>
+            <th class="num-col">退货额</th>
+            <th class="num-col">已退</th>
+            <th>退款状态</th>
+            <th class="num-col">该单冲减毛利</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% returnOrders.forEach(function(o) { %>
+            <tr data-report-row data-search="#<%= o.id %> <%= o.customer_name || '散客' %> <%= o.warehouse_name %> <%= o.order_date %>">
+              <td><a href="/returns/<%= o.id %>">#<%= o.id %></a></td>
+              <td><%= shortDate(o.order_date) %></td>
+              <td><%= o.customer_name || '散客' %></td>
+              <td><%= o.warehouse_name %></td>
+              <td class="num-col text-danger">−<%= fmtMoney(o.total_amount) %></td>
+              <td class="num-col"><%= fmtMoney(o.refunded_amount) %></td>
+              <td>
+                <% if (o.refund_status === 'refunded') { %>
+                  <span class="badge" style="background:#dcfce7;color:#166534">已退款</span>
+                <% } else if (o.refund_status === 'partial') { %>
+                  <span class="badge" style="background:#fef3c7;color:#92400e">部分退款</span>
+                <% } else { %>
+                  <span class="badge" style="background:#fee2e2;color:#991b1b">未退款</span>
+                <% } %>
+              </td>
+              <td class="num-col text-danger">−<%= fmtMoney(o.order_profit) %></td>
+            </tr>
+          <% }) %>
+        </tbody>
+        <% if (returnOrders.length > 0) { %>
+          <tfoot>
+            <tr>
+              <td colspan="4">合计 <%= returnOrders.length %> 单</td>
+              <td class="num-col text-danger">−<%= fmtMoney(returnsTotalSum) %></td>
+              <td class="num-col"><%= fmtMoney(returnsRefundedSum) %></td>
+              <td></td>
+              <td class="num-col text-danger">−<%= fmtMoney(returnsProfitSum) %></td>
+            </tr>
+          </tfoot>
         <% } %>
-      </div>
-      <div class="order-card-mid">
-        <span><%= o.order_date %></span>
-        <span><%= o.warehouse_name %></span>
-      </div>
-      <div class="order-card-bottom">
-        <span class="order-card-amount">¥<%= o.total_amount.toFixed(1) %></span>
-        <span class="muted">冲减毛利 ¥<%= o.order_profit.toFixed(1) %></span>
-      </div>
-    </a>
-  <% }) %>
-  <% if (returnOrders.length === 0) { %><p class="muted">这段时间没有符合条件的退货单</p><% } %>
+      </table>
+      <% if (returnOrders.length === 0) { %><p class="muted report-empty">这段时间没有符合条件的退货单</p><% } %>
+    </div>
+
+    <div class="mobile-order-cards">
+      <% returnOrders.forEach(function(o) { %>
+        <a href="/returns/<%= o.id %>" class="order-card" data-report-card data-search="#<%= o.id %> <%= o.customer_name || '散客' %> <%= o.warehouse_name %> <%= o.order_date %>">
+          <div class="order-card-top">
+            <span class="order-card-id">#<%= o.id %> <%= o.customer_name || '散客' %></span>
+            <% if (o.refund_status === 'refunded') { %>
+              <span class="badge" style="background:#dcfce7;color:#166534">已退款</span>
+            <% } else if (o.refund_status === 'partial') { %>
+              <span class="badge" style="background:#fef3c7;color:#92400e">部分退款</span>
+            <% } else { %>
+              <span class="badge" style="background:#fee2e2;color:#991b1b">未退款</span>
+            <% } %>
+          </div>
+          <div class="order-card-mid">
+            <span><%= shortDate(o.order_date) %> · <%= o.warehouse_name %></span>
+            <span>已退 ¥<%= fmtMoney(o.refunded_amount) %></span>
+          </div>
+          <div class="order-card-bottom">
+            <span class="order-card-amount text-danger">−¥<%= fmtMoney(o.total_amount) %></span>
+            <span class="muted">冲减毛利 <strong class="text-danger">−¥<%= fmtMoney(o.order_profit) %></strong></span>
+          </div>
+        </a>
+      <% }) %>
+      <% if (returnOrders.length === 0) { %><p class="muted report-empty">这段时间没有符合条件的退货单</p><% } %>
+    </div>
+
+    <div class="report-pager-desktop" data-pager-desktop="returns"></div>
+    <div class="report-pager-mobile" data-pager-mobile="returns"></div>
+  </div>
 </div>
 
-<div class="card" style="margin-top:24px">
-  <p class="muted" style="font-size:13px; line-height:1.8; margin:0">
-    <strong style="color:#1A1A17">统计口径说明</strong><br>
+<details class="report-notes">
+  <summary>ⓘ 统计口径说明（点击展开）</summary>
+  <div class="report-notes-body">
     · 只统计「已审核」的单据，草稿 / 待审核 / 已拒绝不计入。<br>
-    · 销售额 = 区间内已审核销售单金额 − 区间内已审核退货单金额，各自按自己的单据日期归属到区间。<br>
+    · 净销售额 = 区间内已审核销售单金额 − 区间内已审核退货单金额，各自按自己的单据日期归属到区间。<br>
     · 结算余额 = 销售单金额 − 已收现金 − 已审核关联退货 + 已退现金。正数为欠款，负数为待退款，零余额才算已结清。<br>
-    · 应收金额只累计正余额；「不含应收」毛利只计已结清销售单，现金收齐或退货抵扣均可结清。<br>
-    · 实收金额 = 区间内已审核销售单的已收现金 − 其关联退货已实际退回的现金，不随「含/不含应收」切换。<br>
-    · 退货按退货日期冲减毛利；「不含应收」口径下，已退现金或关联销售单已结清的退货参与冲减。<br>
+    · 应收未结清只累计正余额；「仅已结清」毛利只计已结清销售单，现金收齐或退货抵扣均可结清。<br>
+    · 实收金额 = 区间内已审核销售单的已收现金 − 其关联退货已实际退回的现金，不随「仅已结清 / 含应收」切换。<br>
+    · 退货按退货日期冲减毛利；「仅已结清」口径下，已退现金或关联销售单已结清的退货参与冲减。<br>
     · 销售成本使用开单快照；关联退货按原销售单该商品的每基本单位加权成本冲回，独立退货使用自身成本快照。
-  </p>
-</div>
+  </div>
+</details>
 
 <script>
-function fmt(d) { return d.toISOString().slice(0, 10); }
-function setRange(kind) {
+function fmtLocal(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function getRangeBounds(kind) {
   const now = new Date();
   let start, end;
-  if (kind === 'thisMonth') {
+  if (kind === 'today') {
+    start = now;
+    end = now;
+  } else if (kind === 'thisMonth') {
     start = new Date(now.getFullYear(), now.getMonth(), 1);
     end = now;
   } else if (kind === 'lastMonth') {
@@ -204,16 +374,149 @@ function setRange(kind) {
     end = new Date(now.getFullYear(), now.getMonth(), 0);
   } else if (kind === 'last30') {
     end = now;
-    start = new Date(now);
-    start.setDate(start.getDate() - 29);
+    start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29);
   } else if (kind === 'thisYear') {
     start = new Date(now.getFullYear(), 0, 1);
     end = now;
   }
-  document.getElementById('startInput').value = fmt(start);
-  document.getElementById('endInput').value = fmt(end);
-  document.querySelector('form[action="/reports"]').submit();
+  return { start: fmtLocal(start), end: fmtLocal(end) };
 }
+
+function setRange(kind) {
+  const b = getRangeBounds(kind);
+  document.getElementById('startInput').value = b.start;
+  document.getElementById('endInput').value = b.end;
+  document.getElementById('reportDateForm').submit();
+}
+
+function toggleCustomDate(forceOpen) {
+  const form = document.getElementById('reportDateForm');
+  const open = typeof forceOpen === 'boolean' ? forceOpen : !form.classList.contains('is-open');
+  form.classList.toggle('is-open', open);
+  if (open) {
+    document.querySelectorAll('.report-range-seg [data-range]').forEach(btn => {
+      btn.classList.toggle('is-active', btn.dataset.range === 'custom');
+    });
+    document.getElementById('startInput').focus();
+  }
+}
+
+(function highlightRangeButton() {
+  const curStart = document.getElementById('startInput').value;
+  const curEnd = document.getElementById('endInput').value;
+  let matched = 'custom';
+  for (const k of ['today', 'thisMonth', 'lastMonth', 'last30', 'thisYear']) {
+    const b = getRangeBounds(k);
+    if (curStart === b.start && curEnd === b.end) {
+      matched = k;
+      break;
+    }
+  }
+  document.querySelectorAll('.report-range-seg [data-range]').forEach(btn => {
+    btn.classList.toggle('is-active', btn.dataset.range === matched);
+  });
+})();
+
+const reportState = {
+  activeTab: 'sales',
+  page: { sales: 1, returns: 1 },
+  mobileLimit: { sales: 20, returns: 20 },
+  pageSize: 20
+};
+
+function switchReportTab(tab) {
+  reportState.activeTab = tab;
+  document.querySelectorAll('[data-tab-btn]').forEach(btn => {
+    const active = btn.dataset.tabBtn === tab;
+    btn.classList.toggle('is-active', active);
+    btn.setAttribute('aria-selected', String(active));
+  });
+  document.querySelectorAll('[data-tab-panel]').forEach(panel => {
+    panel.classList.toggle('is-active', panel.dataset.tabPanel === tab);
+  });
+  applyFilterAndPagination(tab);
+}
+
+function applyFilterAndPagination(tab) {
+  const panel = document.querySelector(`[data-tab-panel="${tab}"]`);
+  if (!panel) return;
+  const q = (document.getElementById('reportSearchInput').value || '').trim().toLowerCase();
+  const rows = Array.from(panel.querySelectorAll('[data-report-row]'));
+  const cards = Array.from(panel.querySelectorAll('[data-report-card]'));
+
+  const matchedIdx = [];
+  rows.forEach((row, idx) => {
+    const text = (row.dataset.search || '').toLowerCase();
+    if (!q || text.includes(q)) matchedIdx.push(idx);
+  });
+
+  const total = matchedIdx.length;
+  const pageSize = reportState.pageSize;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  if (reportState.page[tab] > totalPages) reportState.page[tab] = totalPages;
+  const page = reportState.page[tab];
+  const startIdx = (page - 1) * pageSize;
+  const endIdx = Math.min(startIdx + pageSize, total);
+  const desktopVisible = new Set(matchedIdx.slice(startIdx, endIdx));
+
+  rows.forEach((row, idx) => {
+    row.style.display = desktopVisible.has(idx) ? '' : 'none';
+  });
+
+  const mLimit = reportState.mobileLimit[tab];
+  const mobileVisible = new Set(matchedIdx.slice(0, mLimit));
+  cards.forEach((card, idx) => {
+    card.style.display = mobileVisible.has(idx) ? '' : 'none';
+  });
+
+  const desktopPager = panel.querySelector(`[data-pager-desktop="${tab}"]`);
+  if (desktopPager) {
+    if (total === 0) {
+      desktopPager.innerHTML = '';
+    } else {
+      let pagesHtml = `<button type="button" class="report-page-btn" ${page <= 1 ? 'disabled' : ''} onclick="goReportPage('${tab}', ${page - 1})">‹</button>`;
+      for (let p = 1; p <= totalPages; p++) {
+        if (totalPages <= 7 || p === 1 || p === totalPages || Math.abs(p - page) <= 1) {
+          pagesHtml += `<button type="button" class="report-page-btn ${p === page ? 'is-active' : ''}" onclick="goReportPage('${tab}', ${p})">${p}</button>`;
+        } else if (p === page - 2 || p === page + 2) {
+          pagesHtml += `<span class="report-page-dots">…</span>`;
+        }
+      }
+      pagesHtml += `<button type="button" class="report-page-btn" ${page >= totalPages ? 'disabled' : ''} onclick="goReportPage('${tab}', ${page + 1})">›</button>`;
+      desktopPager.innerHTML = `<span>第 ${startIdx + 1}–${endIdx} 条，共 ${total} 条</span><div class="report-page-nav">${pagesHtml}</div>`;
+    }
+  }
+
+  const mobilePager = panel.querySelector(`[data-pager-mobile="${tab}"]`);
+  if (mobilePager) {
+    if (total > mLimit) {
+      mobilePager.innerHTML = `<button type="button" class="report-load-more" onclick="loadMoreMobile('${tab}')">加载更多（${mLimit} / ${total}）</button>`;
+    } else {
+      mobilePager.innerHTML = '';
+    }
+  }
+}
+
+function goReportPage(tab, p) {
+  reportState.page[tab] = p;
+  applyFilterAndPagination(tab);
+}
+
+function loadMoreMobile(tab) {
+  reportState.mobileLimit[tab] += reportState.pageSize;
+  applyFilterAndPagination(tab);
+}
+
+document.getElementById('reportSearchInput').addEventListener('input', () => {
+  reportState.page.sales = 1;
+  reportState.page.returns = 1;
+  reportState.mobileLimit.sales = 20;
+  reportState.mobileLimit.returns = 20;
+  applyFilterAndPagination(reportState.activeTab);
+});
+
+applyFilterAndPagination('sales');
+applyFilterAndPagination('returns');
 </script>
 
 <%- include('partials/footer') %>

@@ -110,6 +110,55 @@ function getReturnOrderList(db, start, end, includeReceivable) {
   return db.prepare(sql).all(...params);
 }
 
+function fmtLocalDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function parseYmd(str) {
+  if (typeof str !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(str)) return null;
+  const [y, m, d] = str.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return null;
+  return dt;
+}
+
+function buildComparison(db, start, end, includeReceivable, summary, currentMarginRate) {
+  const sd = parseYmd(start);
+  const ed = parseYmd(end);
+  if (!sd || !ed || sd > ed) return null;
+
+  let prevStart, prevEnd, label;
+  const isSameMonthFromFirst = sd.getDate() === 1 && sd.getFullYear() === ed.getFullYear() && sd.getMonth() === ed.getMonth();
+  if (isSameMonthFromFirst) {
+    const lastDayOfCurMonth = new Date(sd.getFullYear(), sd.getMonth() + 1, 0).getDate();
+    const lastDayOfPrevMonth = new Date(sd.getFullYear(), sd.getMonth(), 0).getDate();
+    prevStart = new Date(sd.getFullYear(), sd.getMonth() - 1, 1);
+    const targetDay = ed.getDate() === lastDayOfCurMonth ? lastDayOfPrevMonth : Math.min(ed.getDate(), lastDayOfPrevMonth);
+    prevEnd = new Date(sd.getFullYear(), sd.getMonth() - 1, targetDay);
+    label = '较上月';
+  } else {
+    const days = Math.round((ed - sd) / 86400000) + 1;
+    if (days > 366) return null;
+    prevEnd = new Date(sd.getFullYear(), sd.getMonth(), sd.getDate() - 1);
+    prevStart = new Date(prevEnd.getFullYear(), prevEnd.getMonth(), prevEnd.getDate() - (days - 1));
+    label = days === 1 ? '较前日' : '较上期';
+  }
+
+  const prevSummary = getSummary(db, fmtLocalDate(prevStart), fmtLocalDate(prevEnd));
+  const salesDiffPct = prevSummary.sales.amount > 0.001
+    ? ((summary.sales.amount - prevSummary.sales.amount) / prevSummary.sales.amount) * 100
+    : null;
+  const prevProfit = includeReceivable ? prevSummary.profitWithReceivable : prevSummary.profitWithoutReceivable;
+  const prevMarginRate = prevSummary.sales.amount > 0.001
+    ? (prevProfit / prevSummary.sales.amount) * 100
+    : null;
+  const marginDiffPt = (prevMarginRate !== null && currentMarginRate !== null)
+    ? (currentMarginRate - prevMarginRate)
+    : null;
+
+  return { label, salesDiffPct, marginDiffPt };
+}
+
 router.get('/reports', requireAdmin, (req, res) => {
   const db = req.tenantDb;
   const { start, end } = req.query;
@@ -119,7 +168,26 @@ router.get('/reports', requireAdmin, (req, res) => {
   const orders = getSalesOrderList(db, start, end, includeReceivable).map(attachEffectivePayment);
   const returnOrders = getReturnOrderList(db, start, end, includeReceivable);
 
-  res.render('report', { start: start || '', end: end || '', includeReceivable, summary, orders, returnOrders });
+  const activeProfit = includeReceivable ? summary.profitWithReceivable : summary.profitWithoutReceivable;
+  const settledNetSales = orders.reduce((s, o) => s + o.total_amount, 0) - returnOrders.reduce((s, o) => s + o.total_amount, 0);
+  const marginDenominator = (!includeReceivable && settledNetSales > 0.001) ? settledNetSales : summary.sales.amount;
+  const marginRate = marginDenominator > 0.001 ? (activeProfit / marginDenominator) * 100 : 0;
+  const collectionRate = summary.sales.amount > 0.001
+    ? Math.min(100, Math.max(0, (summary.received / summary.sales.amount) * 100))
+    : 0;
+  const comparison = buildComparison(db, start, end, includeReceivable, summary, marginRate);
+
+  res.render('report', {
+    start: start || '',
+    end: end || '',
+    includeReceivable,
+    summary,
+    orders,
+    returnOrders,
+    marginRate,
+    collectionRate,
+    comparison
+  });
 });
 
 router.get('/reports/export', requireAdmin, (req, res) => {
