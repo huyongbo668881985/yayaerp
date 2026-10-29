@@ -356,10 +356,36 @@ input[type=text], input[type=password], input[type=number], input[type=date], in
 .sales-orders-table-wrap table { min-width: 960px; }
 .sales-orders-table-wrap th { white-space: nowrap; }
 .sales-orders-table-wrap th, .sales-orders-table-wrap td { padding: 10px 8px; }
-.sales-orders-table-wrap td:nth-child(2) { min-width: 138px; }
-.sales-orders-table-wrap td:nth-child(3) { min-width: 100px; max-width: 140px; overflow-wrap: anywhere; }
-.sales-orders-table-wrap td:nth-child(4), .sales-orders-table-wrap td:nth-child(5), .sales-orders-table-wrap td:nth-child(6), .sales-orders-table-wrap td:nth-child(10), .sales-orders-table-wrap .btn { white-space: nowrap; }
-.sales-orders-table-wrap td:nth-child(7) > .muted { display: block; max-width: 150px; }
+.sales-orders-table-wrap table:not(.sales-selectable-table) td:nth-child(2),
+.sales-orders-table-wrap table.sales-selectable-table td:nth-child(3) { min-width: 138px; }
+.sales-orders-table-wrap table:not(.sales-selectable-table) td:nth-child(3),
+.sales-orders-table-wrap table.sales-selectable-table td:nth-child(4) { min-width: 100px; max-width: 140px; overflow-wrap: anywhere; }
+.sales-orders-table-wrap table:not(.sales-selectable-table) td:nth-child(4),
+.sales-orders-table-wrap table:not(.sales-selectable-table) td:nth-child(5),
+.sales-orders-table-wrap table:not(.sales-selectable-table) td:nth-child(6),
+.sales-orders-table-wrap table:not(.sales-selectable-table) td:nth-child(10),
+.sales-orders-table-wrap table.sales-selectable-table td:nth-child(5),
+.sales-orders-table-wrap table.sales-selectable-table td:nth-child(6),
+.sales-orders-table-wrap table.sales-selectable-table td:nth-child(7),
+.sales-orders-table-wrap table.sales-selectable-table td:nth-child(11),
+.sales-orders-table-wrap .btn { white-space: nowrap; }
+.sales-orders-table-wrap table:not(.sales-selectable-table) td:nth-child(7) > .muted,
+.sales-orders-table-wrap table.sales-selectable-table td:nth-child(8) > .muted { display: block; max-width: 150px; }
+.sales-select-col { width: 38px; text-align: center; }
+.sales-select-col input[type="checkbox"],
+.sales-batch-select-all input[type="checkbox"],
+.mobile-order-select input[type="checkbox"] { width: 17px; height: 17px; margin: 0; accent-color: var(--primary); cursor: pointer; vertical-align: middle; }
+.sales-orders-table-wrap tr[data-order-row].is-selected td { background: #eff6ff; }
+.sales-reassign-form { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.sales-reassign-form .form-row { margin-bottom: 0; flex: 1 1 200px; min-width: 180px; }
+.sales-batch-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 16px; margin-bottom: 12px; transition: border-color .15s ease, background-color .15s ease; }
+.sales-batch-bar.has-selection { border-color: #93c5fd; background: #f8fbff; }
+.sales-batch-left, .sales-batch-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sales-batch-select-all { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; font-size: 14px; cursor: pointer; margin: 0; }
+.sales-batch-count { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 14px; font-size: 12px; font-weight: 600; background: #f1f5f9; color: var(--muted); }
+.sales-batch-bar.has-selection .sales-batch-count { background: #dbeafe; color: #1d4ed8; }
+.sales-batch-label { margin: 0; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.sales-batch-right select { width: auto; min-width: 190px; }
 .order-card-responsible { color: var(--muted); font-size: 12px; margin: 8px 0; overflow-wrap: anywhere; }
 .responsible-field-hint { display: block; font-size: 12px; margin-top: 6px; }
 .sales-responsible-edit { margin: 14px 0; }
@@ -762,6 +788,35 @@ form > .form-section-heading:first-of-type { border-top: 0; padding-top: 0; marg
   /* 销售单列表：手机上用卡片代替11列的表格，横向滚动太难读 */
   .desktop-table-wrap { display: none; }
   .mobile-order-cards { display: flex; flex-direction: column; gap: 10px; }
+  .sales-reassign-form .form-row { flex-basis: 100%; min-width: 0; }
+  .sales-reassign-form .btn { width: 100%; }
+  .sales-batch-bar { padding: 12px; gap: 10px; }
+  .sales-batch-left, .sales-batch-right { width: 100%; justify-content: space-between; }
+  .sales-batch-right { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+  .sales-batch-label { grid-column: 1 / -1; font-size: 12px; }
+  .sales-batch-right select { width: 100%; min-width: 0; min-height: 44px; }
+  .sales-batch-right .btn { min-height: 44px; white-space: nowrap; }
+  .mobile-order-item { display: flex; flex-direction: column; }
+  .mobile-order-select {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 8px 14px;
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-bottom: 0;
+    border-radius: var(--radius) var(--radius) 0 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    cursor: pointer;
+    margin: 0;
+  }
+  .mobile-order-select-meta { margin-left: auto; color: var(--muted); font-size: 12px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-order-select + .order-card { border-top-left-radius: 0; border-top-right-radius: 0; }
+  .mobile-order-item.is-selected .mobile-order-select { background: #dbeafe; border-color: #93c5fd; color: #1e40af; }
+  .mobile-order-item.is-selected .order-card { border-color: #93c5fd; background: #f8fbff; }
   .order-card {
     display: block;
     background: var(--card);

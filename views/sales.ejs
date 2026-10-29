@@ -106,6 +106,46 @@
   <a class="sales-clear-filters" href="/sales">清空筛选</a>
 </div>
 <% } %>
+<% if (currentUser.role === 'admin') { %>
+<details class="card customer-reassign sales-reassign-panel" id="salesReassignPanel">
+  <summary>
+    <span>更多管理 · 批量转移订单负责人</span>
+    <span class="customer-reassign-hint">按人员交接欠款单或全部单据</span>
+  </summary>
+  <div class="customer-reassign-content">
+    <p class="muted">人员换岗或离职交接时，可将某位负责人名下的<strong>未结清（欠款）订单</strong>或<strong>全部销售单</strong>一次性转给接手人；也可直接在下方列表勾选多张订单精准转移（原录入人仍保留查看权限）。</p>
+    <form method="POST" action="/sales/reassign" class="sales-reassign-form" onsubmit="return confirm('确认按所选条件批量转移销售单负责人吗？')">
+      <input type="hidden" name="return_to" value="/sales<%= salesQueryString({ page }) %>">
+      <div class="form-row">
+        <label for="salesReassignFrom">原负责人</label>
+        <select id="salesReassignFrom" name="from_user_id" required>
+          <option value="">-- 请选择原负责人 --</option>
+          <% responsibleOptions.forEach(function(person) { %>
+            <option value="<%= person.id %>" <%= responsibleId === person.id ? 'selected' : '' %>><%= person.name %>（<%= person.username %>）<%= person.active ? '' : ' · 已停用' %></option>
+          <% }) %>
+        </select>
+      </div>
+      <div class="form-row">
+        <label for="salesReassignScope">转移范围</label>
+        <select id="salesReassignScope" name="scope">
+          <option value="outstanding">仅未结清订单（欠款 / 待退）</option>
+          <option value="all">该负责人名下全部销售单</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label for="salesReassignTo">转给新负责人</label>
+        <select id="salesReassignTo" name="to_user_id" required>
+          <option value="">-- 请选择接手人 --</option>
+          <% responsibleOptions.filter(function(p) { return p.active; }).forEach(function(person) { %>
+            <option value="<%= person.id %>"><%= person.name %>（<%= person.username %>）</option>
+          <% }) %>
+        </select>
+      </div>
+      <button type="submit" class="btn">一键批量转移</button>
+    </form>
+  </div>
+</details>
+<% } %>
 <div class="sales-results-summary">共 <strong><%= totalOrders %></strong> 单<% if (activeFilters.length) { %> · 符合当前筛选<% } %></div>
 <script>
   (function() {
@@ -143,14 +183,39 @@
   <a class="btn btn-secondary btn-sm <%= sort === 'amount' ? 'is-selected' : '' %>" href="/sales<%= salesQueryString({ start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: 'amount', order: sort === 'amount' && order === 'desc' ? 'asc' : 'desc' }) %>">金额<%= sort === 'amount' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a>
   <a class="btn btn-secondary btn-sm <%= sort === 'debt' ? 'is-selected' : '' %>" href="/sales<%= salesQueryString({ start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: 'debt', order: sort === 'debt' && order === 'desc' ? 'asc' : 'desc' }) %>">欠款<%= sort === 'debt' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a>
 </div>
+<% if (currentUser.role === 'admin' && orders.length > 0) { %>
+<form method="POST" action="/sales/batch-responsible" id="salesBatchTransferForm" class="card sales-batch-bar">
+  <input type="hidden" name="return_to" value="/sales<%= salesQueryString({ page }) %>">
+  <input type="hidden" name="order_ids" id="salesBatchOrderIds" value="">
+  <div class="sales-batch-left">
+    <label class="sales-batch-select-all" for="salesSelectAll">
+      <input type="checkbox" id="salesSelectAll">
+      <span>全选本页</span>
+    </label>
+    <span class="sales-batch-count" id="salesBatchCount" aria-live="polite">已选 0 单</span>
+  </div>
+  <div class="sales-batch-right">
+    <label for="salesBatchToUser" class="sales-batch-label">转移负责人给</label>
+    <select id="salesBatchToUser" name="to_user_id" required>
+      <option value="">-- 请选择接手人 --</option>
+      <% responsibleOptions.filter(function(p) { return p.active; }).forEach(function(person) { %>
+        <option value="<%= person.id %>"><%= person.name %>（<%= person.username %>）</option>
+      <% }) %>
+    </select>
+    <button type="submit" class="btn btn-sm" id="salesBatchSubmitBtn">转移所选订单</button>
+  </div>
+</form>
+<% } %>
 <div class="card desktop-table-wrap sales-orders-table-wrap">
-  <table>
+  <table class="<%= currentUser.role === 'admin' ? 'sales-selectable-table' : '' %>">
     <tr>
+      <% if (currentUser.role === 'admin') { %><th class="sales-select-col"><input type="checkbox" id="salesSelectAllTable" aria-label="全选本页销售单"></th><% } %>
       <th>单号</th><th><a href="/sales<%= salesQueryString({ start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: 'date', order: sort === 'date' && order === 'desc' ? 'asc' : 'desc' }) %>" class="table-sort">日期<%= sort === 'date' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th><th>客户</th><th>仓库</th><th><a href="/sales<%= salesQueryString({ start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: 'amount', order: sort === 'amount' && order === 'desc' ? 'asc' : 'desc' }) %>" class="table-sort">金额<%= sort === 'amount' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th><th>已收款</th><th><a href="/sales<%= salesQueryString({ start: start, end: end, customer_id: customerId, guest: guestOnly ? 1 : '', pending: pendingOnly ? 1 : '', sort: 'debt', order: sort === 'debt' && order === 'desc' ? 'asc' : 'desc' }) %>" class="table-sort">欠款<%= sort === 'debt' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th>
       <th>收款状态</th><th>审核状态</th><th>负责人</th><th>操作</th>
     </tr>
     <% orders.forEach(function(o) { %>
-      <tr>
+      <tr data-order-row="<%= o.id %>">
+        <% if (currentUser.role === 'admin') { %><td class="sales-select-col"><input type="checkbox" class="sales-order-checkbox" data-order-id="<%= o.id %>" value="<%= o.id %>" aria-label="选择销售单 #<%= o.id %>"></td><% } %>
         <td><a href="/sales/<%= o.id %>">#<%= o.id %></a></td>
         <td><%= o.order_date %><br><span class="muted">录入 <%= formatDateTime(o.created_at).slice(0, 16) %></span></td>
         <td><%= o.customer_name || '散客' %></td>
@@ -202,31 +267,40 @@
 
 <div class="mobile-order-cards">
   <% orders.forEach(function(o) { %>
-    <a href="/sales/<%= o.id %>" class="order-card">
-      <div class="order-card-top">
-        <span class="order-card-id"><%= o.customer_name || '散客' %></span>
-        <%- include('partials/order_status', { status: o.status }) %>
-      </div>
-      <div class="order-card-mid">
-        <span>销售单 #<%= o.id %> · <%= o.order_date %></span>
-        <span><%= o.warehouse_name %></span>
-      </div>
-      <div class="order-card-responsible">负责人：<%= o.responsible_name %></div>
-      <div class="order-card-bottom">
-        <span class="order-card-amount"><small>订单金额</small>¥<%= o.total_amount.toFixed(1) %></span>
-        <%- include('partials/payment_status', { order: o }) %>
-      </div>
-      <% if (o.status === 'approved' && o.pending_refund > 0) { %><div class="order-card-debt">待退现金 ¥<%= o.pending_refund.toFixed(1) %></div><% } %>
-      <% if (o.status === 'approved' && o.effective_debt > 0) { %>
-        <div class="order-card-debt">欠款 ¥<%= o.effective_debt.toFixed(1) %></div>
+    <div class="mobile-order-item" data-order-row="<%= o.id %>">
+      <% if (currentUser.role === 'admin') { %>
+        <label class="mobile-order-select">
+          <input type="checkbox" class="sales-order-checkbox" data-order-id="<%= o.id %>" value="<%= o.id %>" aria-label="选择销售单 #<%= o.id %>（<%= o.customer_name || '散客' %>）">
+          <span class="mobile-order-select-title">勾选 #<%= o.id %></span>
+          <span class="mobile-order-select-meta">负责人：<%= o.responsible_name %></span>
+        </label>
       <% } %>
-    </a>
-    <% if (o.status === 'draft' && (currentUser.role === 'admin' || o.user_id === currentUser.id)) { %>
-      <div class="draft-row-actions"><a class="btn btn-secondary btn-sm" href="/sales/<%= o.id %>/edit">继续编辑草稿</a>
-      <form action="/sales/<%= o.id %>/delete" method="POST" onsubmit="return confirm('确认删除这张未提交的草稿销售单？删除后无法恢复。')">
-        <button type="submit" class="btn btn-sm btn-danger">删除草稿</button>
-      </form></div>
-    <% } %>
+      <a href="/sales/<%= o.id %>" class="order-card">
+        <div class="order-card-top">
+          <span class="order-card-id"><%= o.customer_name || '散客' %></span>
+          <%- include('partials/order_status', { status: o.status }) %>
+        </div>
+        <div class="order-card-mid">
+          <span>销售单 #<%= o.id %> · <%= o.order_date %></span>
+          <span><%= o.warehouse_name %></span>
+        </div>
+        <div class="order-card-responsible">负责人：<%= o.responsible_name %></div>
+        <div class="order-card-bottom">
+          <span class="order-card-amount"><small>订单金额</small>¥<%= o.total_amount.toFixed(1) %></span>
+          <%- include('partials/payment_status', { order: o }) %>
+        </div>
+        <% if (o.status === 'approved' && o.pending_refund > 0) { %><div class="order-card-debt">待退现金 ¥<%= o.pending_refund.toFixed(1) %></div><% } %>
+        <% if (o.status === 'approved' && o.effective_debt > 0) { %>
+          <div class="order-card-debt">欠款 ¥<%= o.effective_debt.toFixed(1) %></div>
+        <% } %>
+      </a>
+      <% if (o.status === 'draft' && (currentUser.role === 'admin' || o.user_id === currentUser.id)) { %>
+        <div class="draft-row-actions"><a class="btn btn-secondary btn-sm" href="/sales/<%= o.id %>/edit">继续编辑草稿</a>
+        <form action="/sales/<%= o.id %>/delete" method="POST" onsubmit="return confirm('确认删除这张未提交的草稿销售单？删除后无法恢复。')">
+          <button type="submit" class="btn btn-sm btn-danger">删除草稿</button>
+        </form></div>
+      <% } %>
+    </div>
   <% }) %>
 </div>
 <%- include('partials/footer') %>
@@ -368,4 +442,78 @@
     openSalesCustomerPicker();
     salesCustomerSearch.reportValidity();
   });
+
+  // 批量勾选转移销售单负责人（桌面表格与手机卡片双向同步）
+  (function() {
+    const batchForm = document.getElementById('salesBatchTransferForm');
+    if (!batchForm) return;
+    const selectAllTop = document.getElementById('salesSelectAll');
+    const selectAllTable = document.getElementById('salesSelectAllTable');
+    const orderIdsInput = document.getElementById('salesBatchOrderIds');
+    const batchCountEl = document.getElementById('salesBatchCount');
+    const batchToSelect = document.getElementById('salesBatchToUser');
+    const checkboxes = Array.from(document.querySelectorAll('.sales-order-checkbox'));
+    const uniqueOrderIds = Array.from(new Set(checkboxes.map(function(cb) { return cb.dataset.orderId; })));
+
+    function syncBatchState() {
+      const selectedSet = new Set();
+      checkboxes.forEach(function(cb) {
+        if (cb.checked) selectedSet.add(cb.dataset.orderId);
+      });
+      const selectedList = Array.from(selectedSet);
+      orderIdsInput.value = selectedList.join(',');
+      batchCountEl.textContent = '已选 ' + selectedList.length + ' 单';
+      batchForm.classList.toggle('has-selection', selectedList.length > 0);
+
+      document.querySelectorAll('[data-order-row]').forEach(function(row) {
+        row.classList.toggle('is-selected', selectedSet.has(row.getAttribute('data-order-row')));
+      });
+
+      const allChecked = uniqueOrderIds.length > 0 && selectedList.length === uniqueOrderIds.length;
+      const someChecked = selectedList.length > 0 && selectedList.length < uniqueOrderIds.length;
+      [selectAllTop, selectAllTable].forEach(function(master) {
+        if (!master) return;
+        master.checked = allChecked;
+        master.indeterminate = someChecked;
+        if (selectedList.length > 0) master.setCustomValidity('');
+      });
+    }
+
+    checkboxes.forEach(function(cb) {
+      cb.addEventListener('change', function() {
+        const orderId = cb.dataset.orderId;
+        const checked = cb.checked;
+        checkboxes.forEach(function(peer) {
+          if (peer.dataset.orderId === orderId) peer.checked = checked;
+        });
+        syncBatchState();
+      });
+    });
+
+    [selectAllTop, selectAllTable].forEach(function(master) {
+      if (!master) return;
+      master.addEventListener('change', function() {
+        const checked = master.checked;
+        checkboxes.forEach(function(cb) { cb.checked = checked; });
+        syncBatchState();
+      });
+    });
+
+    batchForm.addEventListener('submit', function(event) {
+      const selectedIds = orderIdsInput.value ? orderIdsInput.value.split(',').filter(Boolean) : [];
+      if (selectedIds.length === 0) {
+        event.preventDefault();
+        if (selectAllTop) {
+          selectAllTop.setCustomValidity('请先在列表中勾选至少一张要转移的销售单');
+          selectAllTop.reportValidity();
+        }
+        return;
+      }
+      if (!batchToSelect.value) return;
+      const targetText = batchToSelect.options[batchToSelect.selectedIndex].textContent.trim();
+      if (!window.confirm('确认将已勾选的 ' + selectedIds.length + ' 张销售单转移给【' + targetText + '】吗？')) {
+        event.preventDefault();
+      }
+    });
+  })();
 </script>

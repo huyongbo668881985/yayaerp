@@ -163,6 +163,60 @@ async function check(label, work) { await work(); passed++; console.log('  PASS 
         assert.equal(db.prepare('SELECT COUNT(*) n FROM mutation_requests WHERE request_key=?').get(key).n,0);
       } finally { db.exec('DROP TRIGGER reject_responsible_audit'); }
     });
+    await check('多选批量转移订单负责人：保留原录入人可查看、记录审计、阻断非管理员与非法参数', async () => {
+      const b1 = sale(100, 30, 'approved', 2, 2);
+      const b2 = sale(100, 100, 'approved', 2, 2);
+      const b3 = sale(100, 50, 'approved', 2, 3);
+      assert.equal((await request('/sales/batch-responsible', { user: 2, body: { order_ids: `${b1},${b2}`, to_user_id: '3' } })).status, 403);
+      assert.equal((await request('/sales/batch-responsible', { body: { order_ids: '', to_user_id: '3' } })).status, 400);
+      assert.equal((await request('/sales/batch-responsible', { body: { order_ids: `${b1},999999`, to_user_id: '3' } })).status, 400);
+      assert.equal((await request('/sales/batch-responsible', { body: { order_ids: `${b1}`, to_user_id: '4' } })).status, 400);
+      assert.equal(db.prepare('SELECT responsible_id FROM sales_orders WHERE id=?').get(b1).responsible_id, 2);
+
+      const resBatch = await request('/sales/batch-responsible', {
+        body: { order_ids: `${b1},${b2},${b3}`, to_user_id: '3', return_to: '/sales?settlement=outstanding&responsible_id=2' }
+      });
+      assert.equal(resBatch.status, 302);
+      assert.equal(resBatch.location, '/sales?settlement=outstanding&responsible_id=2');
+      assert.equal(db.prepare('SELECT responsible_id, user_id, revision FROM sales_orders WHERE id=?').get(b1).responsible_id, 3);
+      assert.equal(db.prepare('SELECT responsible_id, user_id, revision FROM sales_orders WHERE id=?').get(b1).user_id, 2);
+      assert.equal(db.prepare('SELECT responsible_id, user_id, revision FROM sales_orders WHERE id=?').get(b1).revision, 1);
+      assert.equal(db.prepare('SELECT responsible_id, user_id, revision FROM sales_orders WHERE id=?').get(b2).responsible_id, 3);
+      assert.equal(db.prepare('SELECT revision FROM sales_orders WHERE id=?').get(b3).revision, 0);
+      // 原录入人（user 2）仍可查看，新负责人（user 3）也可查看
+      assert.equal((await request('/sales/' + b1, { user: 2 })).status, 200);
+      assert.equal((await request('/sales/' + b1, { user: 3 })).status, 200);
+      const batchLog = db.prepare("SELECT * FROM audit_logs WHERE action='批量转移销售单负责人' ORDER BY id DESC LIMIT 1").get();
+      assert.ok(batchLog && batchLog.summary.includes('2 张销售单') && batchLog.summary.includes('李四'));
+    });
+    await check('按人员与范围一键转移销售单负责人：支持仅转移未结清欠款单或全部单据', async () => {
+      const rDebt = sale(200, 50, 'approved', 4, 4);
+      const rPaid = sale(200, 200, 'approved', 4, 4);
+      const rDraft = sale(200, 0, 'draft', 4, 4);
+      assert.equal((await request('/sales/reassign', { user: 2, body: { from_user_id: '4', to_user_id: '3', scope: 'outstanding' } })).status, 403);
+      assert.equal((await request('/sales/reassign', { body: { from_user_id: '3', to_user_id: '3', scope: 'outstanding' } })).status, 400);
+      assert.equal((await request('/sales/reassign', { body: { from_user_id: '4', to_user_id: '4', scope: 'outstanding' } })).status, 400);
+      assert.equal((await request('/sales/reassign', { body: { from_user_id: '4', to_user_id: '3', scope: 'invalid' } })).status, 400);
+
+      // 仅转移未结清订单：rDebt 被转给 3，而已结清（rPaid、inactive）和草稿（rDraft）仍留在 4 名下
+      const resOutstanding = await request('/sales/reassign', {
+        body: { from_user_id: '4', to_user_id: '3', scope: 'outstanding', return_to: '/sales?settlement=outstanding' }
+      });
+      assert.equal(resOutstanding.status, 302);
+      assert.equal(resOutstanding.location, '/sales?settlement=outstanding');
+      assert.equal(db.prepare('SELECT responsible_id FROM sales_orders WHERE id=?').get(rDebt).responsible_id, 3);
+      assert.equal(db.prepare('SELECT responsible_id FROM sales_orders WHERE id=?').get(rPaid).responsible_id, 4);
+      assert.equal(db.prepare('SELECT responsible_id FROM sales_orders WHERE id=?').get(rDraft).responsible_id, 4);
+
+      // 转移全部销售单：rPaid、rDraft、inactive 全部转给 2
+      const resAll = await request('/sales/reassign', {
+        body: { from_user_id: '4', to_user_id: '2', scope: 'all' }
+      });
+      assert.equal(resAll.status, 302);
+      assert.equal(db.prepare('SELECT responsible_id FROM sales_orders WHERE id=?').get(rPaid).responsible_id, 2);
+      assert.equal(db.prepare('SELECT responsible_id FROM sales_orders WHERE id=?').get(rDraft).responsible_id, 2);
+      assert.equal(db.prepare('SELECT responsible_id FROM sales_orders WHERE id=?').get(inactive).responsible_id, 2);
+    });
     console.log(`销售订单筛选与负责人测试通过：${passed} 项`);
   } finally {
     if(server) await new Promise(resolve=>server.close(resolve));

@@ -780,6 +780,139 @@ router.post('/sales/:id/responsible', requireLogin, requireMutationKey, (req, re
   });
 });
 
+function safeSalesReturnTo(raw) {
+  const text = typeof raw === 'string' ? raw.trim() : '';
+  return /^\/sales(\?[a-zA-Z0-9_=&%.-]*)?$/.test(text) ? text : '/sales';
+}
+
+// 批量勾选转移销售单负责人（仅管理员）：只改 responsible_id 与版本号，保留原录入人 user_id，不触碰财务与库存。
+router.post('/sales/batch-responsible', requireLogin, (req, res) => {
+  const db = req.tenantDb;
+  if (req.session.user.role !== 'admin') return res.status(403).send('无权限，只有管理员能批量转移销售单负责人');
+  const rawIds = Array.isArray(req.body.order_ids)
+    ? req.body.order_ids
+    : (typeof req.body.order_ids === 'string' && req.body.order_ids.trim() ? req.body.order_ids.split(',') : []);
+  const orderIds = [...new Set(rawIds.map(v => Number(String(v).trim())).filter(id => Number.isSafeInteger(id) && id > 0))];
+  if (orderIds.length === 0) return res.status(400).send('请至少勾选一张要转移的销售单');
+  if (orderIds.length > 500) return res.status(400).send('单次最多勾选转移 500 张销售单');
+  const target = resolveResponsible(db, req.body.to_user_id ?? req.body.responsible_id, null);
+  if (target.error) return res.status(400).send(target.error);
+  const returnTo = safeSalesReturnTo(req.body.return_to);
+
+  const outcome = db.transaction(() => {
+    const placeholders = orderIds.map(() => '?').join(',');
+    const orders = db.prepare(`
+      SELECT so.id, so.user_id, so.responsible_id, COALESCE(ru.name, u.name, '未知') AS old_responsible_name
+      FROM sales_orders so
+      LEFT JOIN users u ON u.id = so.user_id
+      LEFT JOIN users ru ON ru.id = COALESCE(so.responsible_id, so.user_id)
+      WHERE so.id IN (${placeholders})
+      ORDER BY so.id ASC
+    `).all(...orderIds);
+    if (orders.length !== orderIds.length) {
+      return { status: 400, error: '部分选中的销售单不存在，请刷新页面后重试' };
+    }
+    const changed = orders.filter(o => (o.responsible_id || o.user_id) !== target.id);
+    const updateStmt = db.prepare('UPDATE sales_orders SET responsible_id = ?, revision = revision + 1 WHERE id = ?');
+    for (const o of changed) {
+      updateStmt.run(target.id, o.id);
+    }
+    if (changed.length > 0) {
+      const idPreview = changed.slice(0, 10).map(o => `#${o.id}`).join('、') + (changed.length > 10 ? ` 等 ${changed.length} 单` : '');
+      writeAuditLog(
+        db,
+        req.session.user,
+        '批量转移销售单负责人',
+        '销售单',
+        changed.length === 1 ? changed[0].id : null,
+        `将勾选的 ${changed.length} 张销售单（${idPreview}）负责人转移给【${target.name}】`,
+        {
+          mode: 'selected',
+          to_user_id: target.id,
+          to_user_name: target.name,
+          count: changed.length,
+          order_ids: changed.map(o => o.id),
+          previous_responsibles: changed.map(o => ({
+            order_id: o.id,
+            from_user_id: o.responsible_id || o.user_id,
+            from_user_name: o.old_responsible_name
+          }))
+        }
+      );
+    }
+    return { total: orders.length, changedCount: changed.length };
+  }).immediate();
+
+  if (outcome.error) return res.status(outcome.status).send(outcome.error);
+  req.session.flashSuccess = outcome.changedCount > 0
+    ? `已将 ${outcome.changedCount} 张销售单的负责人转移给【${target.name}】${outcome.total > outcome.changedCount ? `（其余 ${outcome.total - outcome.changedCount} 单原负责人已是该员工）` : ''}。`
+    : `所选的 ${outcome.total} 张销售单负责人均已是【${target.name}】，无需重复转移。`;
+  return res.redirect(returnTo);
+});
+
+// 按人员与范围一键批量转移销售单负责人（仅管理员）：支持仅转移未结清（欠款/待退）单据或该负责人名下全部销售单。
+router.post('/sales/reassign', requireLogin, (req, res) => {
+  const db = req.tenantDb;
+  if (req.session.user.role !== 'admin') return res.status(403).send('无权限，只有管理员能批量转移销售单负责人');
+  const fromId = Number(req.body.from_user_id);
+  if (!Number.isSafeInteger(fromId) || fromId <= 0) return res.status(400).send('请选择有效的原负责人');
+  const fromUser = db.prepare('SELECT id, name FROM users WHERE id = ?').get(fromId);
+  if (!fromUser) return res.status(400).send('所选原负责人不存在');
+  const target = resolveResponsible(db, req.body.to_user_id, null);
+  if (target.error) return res.status(400).send(target.error);
+  if (fromUser.id === target.id) return res.status(400).send('原负责人与目标负责人不能相同');
+  const rawScope = req.body.scope || 'outstanding';
+  if (!['outstanding', 'all'].includes(rawScope)) return res.status(400).send('无效的转移范围');
+  const scope = rawScope;
+  const returnTo = safeSalesReturnTo(req.body.return_to);
+
+  const changedCount = db.transaction(() => {
+    const candidates = db.prepare(`
+      SELECT so.id, so.status, so.total_amount, so.paid_amount,
+             ${RETURNED_AMOUNT_SUBQUERY} AS returned_amount, ${refundedAmountSubquery()} AS cash_refunded_amount
+      FROM sales_orders so
+      WHERE COALESCE(so.responsible_id, so.user_id) = ?
+      ORDER BY so.id ASC
+    `).all(fromUser.id).map(attachEffectivePayment);
+    const matched = scope === 'all'
+      ? candidates
+      : candidates.filter(row => row.status === 'approved' && row.effective_status !== 'paid');
+    const updateStmt = db.prepare('UPDATE sales_orders SET responsible_id = ?, revision = revision + 1 WHERE id = ?');
+    for (const row of matched) {
+      updateStmt.run(target.id, row.id);
+    }
+    if (matched.length > 0) {
+      const scopeLabel = scope === 'all' ? '全部' : '未结清';
+      const idPreview = matched.slice(0, 10).map(o => `#${o.id}`).join('、') + (matched.length > 10 ? ` 等 ${matched.length} 单` : '');
+      writeAuditLog(
+        db,
+        req.session.user,
+        '批量转移销售单负责人',
+        '销售单',
+        matched.length === 1 ? matched[0].id : null,
+        `将【${fromUser.name}】名下的 ${matched.length} 张${scopeLabel}销售单（${idPreview}）转移给【${target.name}】`,
+        {
+          mode: 'reassign',
+          scope,
+          from_user_id: fromUser.id,
+          from_user_name: fromUser.name,
+          to_user_id: target.id,
+          to_user_name: target.name,
+          count: matched.length,
+          order_ids: matched.map(o => o.id)
+        }
+      );
+    }
+    return matched.length;
+  }).immediate();
+
+  const scopeLabel = scope === 'all' ? '全部' : '未结清';
+  req.session.flashSuccess = changedCount > 0
+    ? `已将【${fromUser.name}】名下的 ${changedCount} 张${scopeLabel}销售单转移给【${target.name}】。`
+    : `【${fromUser.name}】名下暂无符合条件的${scopeLabel}销售单，未发生转移。`;
+  return res.redirect(returnTo);
+});
+
 router.get('/sales/:id', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const order = db.prepare(`
