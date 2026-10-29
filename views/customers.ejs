@@ -8,7 +8,7 @@
     </div>
     <div class="form-row customer-tag-filter">
       <label for="customerTagFilter">客户标签</label>
-      <select id="customerTagFilter" name="tag"><option value="">全部标签</option><% tags.forEach(function(tag) { %><option value="<%= tag.id %>" <%= tagId === tag.id ? 'selected' : '' %>><%= tag.name %></option><% }) %></select>
+      <select id="customerTagFilter" name="tag"><option value="">全部标签</option><option value="untagged" <%= tagId === 'untagged' ? 'selected' : '' %>>无标签</option><% tags.forEach(function(tag) { %><option value="<%= tag.id %>" <%= tagId === tag.id ? 'selected' : '' %>><%= tag.name %></option><% }) %></select>
     </div>
     <% if (isAdmin) { %>
     <div class="form-row customer-operator-filter">
@@ -107,7 +107,7 @@
           </div>
           <div class="customer-secondary-actions">
             <% if (isAdmin || c.operator_id === currentUser.id) { %>
-              <a href="/customers/<%= c.id %>/edit">编辑资料</a>
+              <a href="/customers/<%= c.id %>/edit<%= returnTo && returnTo !== '/customers' ? '?return_to=' + encodeURIComponent(returnTo) : '' %>">编辑资料</a>
             <% } %>
             <% if (isAdmin) { %>
               <form method="POST" action="/customers/<%= c.id %>/delete" onsubmit="return confirm('确认删除？如果该客户有历史订单会删除失败。')">
@@ -139,7 +139,7 @@
       </div>
       <details class="customer-more-actions"><summary>更多操作</summary><div class="customer-secondary-actions">
         <% if (isAdmin || c.operator_id === currentUser.id) { %>
-          <a href="/customers/<%= c.id %>/edit">编辑资料</a>
+          <a href="/customers/<%= c.id %>/edit<%= returnTo && returnTo !== '/customers' ? '?return_to=' + encodeURIComponent(returnTo) : '' %>">编辑资料</a>
         <% } %>
         <% if (isAdmin) { %>
           <form method="POST" action="/customers/<%= c.id %>/delete" onsubmit="return confirm('确认删除？如果该客户有历史订单会删除失败。')">

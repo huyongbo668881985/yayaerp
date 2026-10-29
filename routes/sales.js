@@ -10,7 +10,7 @@ const { isBlank, isValidDateString, isValidNonNegativeAmount, roundToCents } = r
 const { warehousesForUser, isWarehouseInScope, isWarehouseActive } = require('../lib/warehouseAccess');
 const { writeAuditLog } = require('../lib/auditLog');
 const { submittedItemsFromBody } = require('../lib/formDraft');
-const { parseTagId, getCustomerTags } = require('../lib/customerTags');
+const { parseTagFilter, getCustomerTags } = require('../lib/customerTags');
 const { responsibleUsers, resolveResponsible, salesVisibility, canViewSale } = require('../lib/salesResponsibility');
 const { productsForForm } = require('../lib/catalog');
 const router = express.Router();
@@ -118,7 +118,7 @@ router.get('/sales', requireLogin, (req, res) => {
   const orderStatus = ['draft','approved'].includes(req.query.status) ? req.query.status : '';
   const { sort, order } = parseSort(req.query, ['date', 'amount', 'debt'], 'date');
   const customers = customersForForm(db, user, isCustomerInScope(db, user, customerId, null) ? customerId : null);
-  const tagId = parseTagId(req.query.tag_id);
+  const tagId = parseTagFilter(req.query.tag_id);
   const tags = getCustomerTags(db);
 
   const { orders, totalOrders, totalPages, page } = queryOrders(db, user, start, end, customerId, guestOnly, settlement, pendingOnly, tagId, orderStatus, responsibleId,
@@ -186,7 +186,7 @@ router.get('/sales/export', requireLogin, (req, res) => {
   const responsibleId = responsibleFilter(req.query);
   const pendingOnly = user.role === 'admin' && req.query.pending === '1';
   const orderStatus = ['draft','approved'].includes(req.query.status) ? req.query.status : '';
-  const tagId = parseTagId(req.query.tag_id);
+  const tagId = parseTagFilter(req.query.tag_id);
 
   let sql = `
     SELECT so.id AS order_id, so.order_date, so.warehouse_id, so.status,
@@ -214,7 +214,12 @@ router.get('/sales/export', requireLogin, (req, res) => {
   if (end) { sql += ' AND so.order_date <= ?'; params.push(end); }
   if (customerId) { sql += ' AND so.customer_id = ?'; params.push(customerId); }
   if (responsibleId) { sql += ' AND COALESCE(so.responsible_id, so.user_id) = ?'; params.push(responsibleId); }
-  if (tagId) { sql += ' AND so.customer_id IN (SELECT customer_id FROM customer_tag_links WHERE tag_id = ?)'; params.push(tagId); }
+  if (tagId === 'untagged') {
+    sql += ' AND so.customer_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM customer_tag_links WHERE customer_id = so.customer_id)';
+  } else if (tagId) {
+    sql += ' AND so.customer_id IN (SELECT customer_id FROM customer_tag_links WHERE tag_id = ?)';
+    params.push(tagId);
+  }
   if (guestOnly) sql += ' AND so.customer_id IS NULL';
   if (pendingOnly) sql += " AND so.status = 'submitted'";
   if (orderStatus) { sql += ' AND so.status = ?'; params.push(orderStatus); }

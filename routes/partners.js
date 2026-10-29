@@ -1,7 +1,7 @@
 const express = require('express');
 const { requireLogin, requireAdmin } = require('../middleware/auth');
 const { writeAuditLog } = require('../lib/auditLog');
-const { TAG_COLORS, MAX_TAGS, parseTagId, getCustomerTags, validateTag, replaceCustomerTags, validTagIds, attachCustomerTags } = require('../lib/customerTags');
+const { TAG_COLORS, MAX_TAGS, parseTagId, parseTagFilter, getCustomerTags, validateTag, replaceCustomerTags, validTagIds, attachCustomerTags } = require('../lib/customerTags');
 const { pagination } = require('../lib/catalog');
 const router = express.Router();
 
@@ -52,7 +52,7 @@ router.get('/customers', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const user = req.session.user;
   const query = typeof req.query.q === 'string' ? req.query.q.trim() : '';
-  const tagId = parseTagId(req.query.tag);
+  const tagId = parseTagFilter(req.query.tag);
   const operatorId = user.role === 'admin'
     ? (req.query.operator_id === 'unassigned' ? 'unassigned' : parseTagId(req.query.operator_id))
     : null;
@@ -68,12 +68,14 @@ router.get('/customers', requireLogin, (req, res) => {
     : '';
   const searchParams = query ? Array(4).fill(`%${query}%`) : [];
   const tagClause = tagId
-    ? `${scopeClause || searchClause ? ' AND' : ' WHERE'} c.id IN (SELECT customer_id FROM customer_tag_links WHERE tag_id = ?)`
+    ? `${scopeClause || searchClause ? ' AND' : ' WHERE'} ${tagId === 'untagged'
+        ? 'NOT EXISTS (SELECT 1 FROM customer_tag_links WHERE customer_id = c.id)'
+        : 'c.id IN (SELECT customer_id FROM customer_tag_links WHERE tag_id = ?)'}`
     : '';
   const operatorClause = operatorId
     ? `${scopeClause || searchClause || tagClause ? ' AND' : ' WHERE'} c.operator_id ${operatorId === 'unassigned' ? 'IS NULL' : '= ?'}`
     : '';
-  const filterParams = [...scopeParams, ...searchParams, ...(tagId ? [tagId] : []), ...(operatorId && operatorId !== 'unassigned' ? [operatorId] : [])];
+  const filterParams = [...scopeParams, ...searchParams, ...(tagId && tagId !== 'untagged' ? [tagId] : []), ...(operatorId && operatorId !== 'unassigned' ? [operatorId] : [])];
   const paging = pagination(db.prepare('SELECT COUNT(*) n FROM customers c' + scopeClause + searchClause + tagClause + operatorClause).get(...filterParams).n, req.query.page);
   const customers = db.prepare(baseSql + scopeClause + searchClause + tagClause + operatorClause + ' ORDER BY c.id DESC LIMIT ? OFFSET ?')
     .all(...filterParams, paging.size, paging.offset);
@@ -81,9 +83,15 @@ router.get('/customers', requireLogin, (req, res) => {
   const totalCustomerCount = db.prepare(`SELECT COUNT(*) AS count FROM customers c${scopeClause}`)
     .get(...scopeParams).count;
   const users = db.prepare('SELECT id, name, role FROM users ORDER BY name').all();
+  const returnParams = new URLSearchParams();
+  if (query) returnParams.set('q', query);
+  if (tagId) returnParams.set('tag', String(tagId));
+  if (operatorId) returnParams.set('operator_id', String(operatorId));
+  if (paging.page > 1) returnParams.set('page', String(paging.page));
+  const returnTo = returnParams.toString() ? `/customers?${returnParams.toString()}` : '/customers';
   res.render('customers', {
     customers, users, paging, pageLink: page => '/customers?' + new URLSearchParams({q:query,tag:tagId || '',operator_id:operatorId || '',page}), isAdmin: user.role === 'admin', query, operatorId,
-    totalCustomerCount, displayedCustomerCount: paging.count,
+    totalCustomerCount, displayedCustomerCount: paging.count, returnTo,
     tags: getCustomerTags(db), tagId, tagColors: TAG_COLORS, maxTags: MAX_TAGS,
     tagError: typeof req.query.tag_error === 'string' ? req.query.tag_error : null,
     tagSuccess: typeof req.query.tag_success === 'string' ? req.query.tag_success : null,
@@ -176,6 +184,25 @@ function canEditCustomer(customer, sessionUser) {
   return sessionUser.role === 'admin' || customer.operator_id === sessionUser.id;
 }
 
+function safeCustomerReturnTo(raw) {
+  if (typeof raw !== 'string') return '/customers';
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith('/customers')) return '/customers';
+  try {
+    const url = new URL(trimmed, 'http://localhost');
+    if (url.origin !== 'http://localhost' || url.pathname !== '/customers') return '/customers';
+    const allowed = new URLSearchParams();
+    for (const key of ['q', 'tag', 'operator_id', 'page']) {
+      const val = url.searchParams.get(key);
+      if (val) allowed.set(key, val);
+    }
+    const qs = allowed.toString();
+    return qs ? `/customers?${qs}` : '/customers';
+  } catch {
+    return '/customers';
+  }
+}
+
 router.get('/customers/:id/edit', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
@@ -183,9 +210,10 @@ router.get('/customers/:id/edit', requireLogin, (req, res) => {
   if (!canEditCustomer(customer, req.session.user)) {
     return res.status(403).send('只能编辑自己名下的客户，如需修改请联系管理员');
   }
+  const returnTo = safeCustomerReturnTo(req.query.return_to);
   const users = db.prepare('SELECT id, name, role FROM users ORDER BY name').all();
   const selectedTagIds = db.prepare('SELECT tag_id FROM customer_tag_links WHERE customer_id = ?').all(customer.id).map(link => link.tag_id);
-  res.render('customer_form', { customer, users, error: null, tags: getCustomerTags(db), selectedTagIds, isAdmin: req.session.user.role === 'admin' });
+  res.render('customer_form', { customer, users, error: null, tags: getCustomerTags(db), selectedTagIds, isAdmin: req.session.user.role === 'admin', returnTo });
 });
 
 router.post('/customers/:id/edit', requireLogin, (req, res) => {
@@ -195,11 +223,12 @@ router.post('/customers/:id/edit', requireLogin, (req, res) => {
   if (!canEditCustomer(customer, req.session.user)) {
     return res.status(403).send('只能编辑自己名下的客户，如需修改请联系管理员');
   }
+  const returnTo = safeCustomerReturnTo(req.body.return_to || req.query.return_to);
   const { contact, phone, address } = req.body;
   const nameCheck = validateCustomerName(db, req.body.name, customer.id);
   if (nameCheck.error) {
     const users = db.prepare('SELECT id, name, role FROM users ORDER BY name').all();
-    return res.render('customer_form', { customer, users, error: nameCheck.error, tags: getCustomerTags(db), selectedTagIds: validTagIds(db, req.body.tag_ids), isAdmin: req.session.user.role === 'admin' });
+    return res.render('customer_form', { customer, users, error: nameCheck.error, tags: getCustomerTags(db), selectedTagIds: validTagIds(db, req.body.tag_ids), isAdmin: req.session.user.role === 'admin', returnTo });
   }
   db.transaction(() => {
     if (req.session.user.role === 'admin') {
@@ -222,7 +251,7 @@ router.post('/customers/:id/edit', requireLogin, (req, res) => {
     const summary = changes.length > 0 ? `修改客户【${nameCheck.name}】：${changes.join('，')}` : `修改客户【${nameCheck.name}】资料`;
     writeAuditLog(db, req.session.user, '修改客户', '客户', customer.id, summary);
   }).immediate();
-  res.redirect('/customers');
+  res.redirect(returnTo);
 });
 
 // 批量转移客户归属（人员变动时用，比如某业务员离职，把他名下客户一次性转给接手的人）

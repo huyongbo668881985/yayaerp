@@ -3,6 +3,9 @@
 <div class="card customer-edit-card" style="max-width:640px">
   <% if (error) { %><div class="error"><%= error %></div><% } %>
   <form method="POST" action="/customers/<%= customer.id %>/edit">
+    <% if (typeof returnTo === 'string' && returnTo !== '/customers') { %>
+      <input type="hidden" name="return_to" value="<%= returnTo %>">
+    <% } %>
     <div class="form-row"><label>名称 *</label><input type="text" name="name" required pattern="\S+" title="客户名称不能包含空格" value="<%= customer.name %>"></div>
     <div class="form-row"><label>联系人</label><input type="text" name="contact" value="<%= customer.contact || '' %>"></div>
     <div class="form-row"><label>电话</label><input type="text" name="phone" value="<%= customer.phone || '' %>"></div>
@@ -20,7 +23,7 @@
     <% } %>
     <%- include('partials/customer_tag_choices', { tags, selectedTagIds }) %>
     <div class="customer-edit-actions"><button class="btn" type="submit">保存</button>
-    <a class="btn btn-secondary" href="/customers">取消</a></div>
+    <a class="btn btn-secondary" href="<%= typeof returnTo === 'string' ? returnTo : '/customers' %>">取消</a></div>
   </form>
 </div>
 <%- include('partials/footer') %>

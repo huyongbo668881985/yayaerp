@@ -161,6 +161,32 @@ async function runCustomerTagTests(ok) {
       assert.deepEqual(result.customers.find(c => c.id === 1).tags.map(t => t.id), [flowId, priorityId]);
       assert.deepEqual((await request(`/customers?tag=${flowId}`, { user: 2, json: true })).data.customers.map(c => c.id), [1]);
       assert.equal((await request(`/customers?tag=${flowId}&q=他人`, { user: 2, json: true })).data.customers.length, 0);
+      const untaggedAdmin = (await request('/customers?tag=untagged', { json: true })).data;
+      assert.equal(untaggedAdmin.tagId, 'untagged');
+      assert.deepEqual(untaggedAdmin.customers.map(c => c.id), [4, 3]);
+      const untaggedOp = (await request('/customers?tag=untagged', { user: 2, json: true })).data;
+      assert.deepEqual(untaggedOp.customers.map(c => c.id), [4]);
+      const untaggedHtml = (await request('/customers?tag=untagged&page=2')).text;
+      assert.ok(untaggedHtml.includes('<option value="untagged" selected>无标签</option>'));
+      assert.ok(untaggedHtml.includes('return_to=%2Fcustomers%3Ftag%3Duntagged'));
+    });
+    await check('编辑客户保存与取消保留原筛选条件与页码，拒绝非法回跳地址', async () => {
+      const editPage = await request('/customers/4/edit?return_to=%2Fcustomers%3Ftag%3Duntagged%26q%3D%25E6%2596%25B0%25E5%25A2%259E%26page%3D2', { user: 2 });
+      assert.equal(editPage.status, 200);
+      assert.ok(editPage.text.includes('name="return_to" value="/customers?q=%E6%96%B0%E5%A2%9E&amp;tag=untagged&amp;page=2"'));
+      assert.ok(editPage.text.includes('href="/customers?q=%E6%96%B0%E5%A2%9E&amp;tag=untagged&amp;page=2">取消</a>'));
+      const saved = await request('/customers/4/edit', {
+        user: 2,
+        body: [...form('新增标签客户'), ['return_to', '/customers?tag=untagged&page=2']]
+      });
+      assert.equal(saved.status, 302);
+      assert.equal(saved.location, '/customers?tag=untagged&page=2');
+      const unsafe = await request('/customers/4/edit', {
+        user: 2,
+        body: [...form('新增标签客户'), ['return_to', 'https://evil.example/customers?tag=untagged']]
+      });
+      assert.equal(unsafe.status, 302);
+      assert.equal(unsafe.location, '/customers');
     });
     await check('管理员按归属人员筛选可叠加标签关键词，操作员不能借参数越权', async () => {
       const result = (await request(`/customers?operator_id=2&tag=${flowId}&q=客户`, { json: true })).data;
@@ -186,6 +212,14 @@ async function runCustomerTagTests(ok) {
       assert.deepEqual((await request(`/sales?tag_id=${flowId}`, { user: 2, json: true })).data.orders.map(order => order.id), [2]);
       assert.equal((await request(`/sales?tag_id=${flowId}&guest=1`, { json: true })).data.orders.length, 0);
       assert.equal((await request('/sales?tag_id=999999', { json: true })).data.orders.length, 0);
+      assert.deepEqual((await request('/sales?tag_id=untagged', { json: true })).data.orders.map(order => order.id), [5]);
+      assert.equal((await request('/sales?tag_id=untagged', { user: 2, json: true })).data.orders.length, 0);
+      const untaggedSalesHtml = (await request('/sales?tag_id=untagged')).text;
+      assert.ok(untaggedSalesHtml.includes('<option value="untagged" selected>无标签</option>'));
+      assert.ok(untaggedSalesHtml.includes('客户标签：无标签'));
+      const untaggedCsv = (await request('/sales/export?tag_id=untagged')).text.trim().split('\r\n');
+      assert.equal(untaggedCsv.length, 3);
+      assert.ok(untaggedCsv.slice(1).every(row => row.includes('未挂标签客户,,测试仓库')));
       assert.deepEqual((await request('/sales', { json: true })).data.orders, originalOrders);
     });
     await check('CSV 标签列紧跟客户，多标签用顿号连接，不放大明细、散客及未挂标签列为空', async () => {
