@@ -240,6 +240,80 @@ async function check(label, work) {
     assert.equal(detailRes.status, 200);
     assert.ok(detailRes.text.includes('全额收齐'), '欠款单详情页应包含全额收齐快捷按钮');
     assert.ok(detailRes.text.includes('id="recordPaymentInput"'), '欠款单详情页应有收款输入框');
+    assert.ok(detailRes.text.includes('id="wipeRemainderCheck"'), '欠款单详情页应有抹零结清复选框');
+  });
+
+  // 4.1 整单角级取整（方式A）与抹零到整元 / 抹零结清
+  await check('整单角级取整与抹零：散装产生分位自动取整到角，支持开单抹零到元与事后收款抹零结清', async () => {
+    // 场景1：散卖产生 300.02 元（2 × 150.01），不勾选抹零到元，自动四舍五入为 300.0 元，收 300 元即已结清
+    const createTenthsRes = await admin.request('/sales/new', {
+      warehouse_id: '1',
+      customer_id: '1',
+      responsible_id: '3',
+      order_date: '2026-10-16',
+      paid_amount: '300',
+      product_id: '1',
+      quantity: '2',
+      sale_unit: 'base',
+      unit_price: '150.01',
+    });
+    assert.equal(createTenthsRes.status, 302);
+    const tenthsOrder = db.prepare("SELECT * FROM sales_orders ORDER BY id DESC LIMIT 1").get();
+    assert.equal(tenthsOrder.total_amount, 300);
+    assert.equal(tenthsOrder.paid_amount, 300);
+
+    // 场景2：散卖产生 300.2 元（2 × 150.10），勾选 round_to_yuan='1'，整单抹零为 300 元
+    const createYuanRes = await admin.request('/sales/new', {
+      warehouse_id: '1',
+      customer_id: '1',
+      responsible_id: '3',
+      order_date: '2026-10-16',
+      paid_amount: '300',
+      round_to_yuan: '1',
+      product_id: '1',
+      quantity: '2',
+      sale_unit: 'base',
+      unit_price: '150.10',
+    });
+    assert.equal(createYuanRes.status, 302);
+    const yuanOrder = db.prepare("SELECT * FROM sales_orders ORDER BY id DESC LIMIT 1").get();
+    assert.equal(yuanOrder.total_amount, 300);
+    assert.equal(yuanOrder.paid_amount, 300);
+    const yuanLog = db.prepare("SELECT * FROM audit_logs WHERE entity_type='销售单' AND entity_id=? AND action='新建销售单'").get(yuanOrder.id);
+    assert.ok(yuanLog && yuanLog.summary.includes('已抹零 ¥0.2'), '审计日志应记录抹零金额');
+
+    // 场景3：已审核单据 300.2 元（未付），事后收款 300 元并勾选 wipe_remainder='1'，应结清且实收累计记满 300.2
+    db.prepare("INSERT INTO sales_orders (warehouse_id, user_id, responsible_id, customer_id, order_date, total_amount, paid_amount, status) VALUES (1, 1, 3, 1, '2026-10-16', 300.2, 0, 'approved')").run();
+    const approvedJiaoId = db.prepare("SELECT MAX(id) AS id FROM sales_orders").get().id;
+    const payJiaoRes = await admin.request(`/sales/${approvedJiaoId}/record-payment`, {
+      amount: '300',
+      wipe_remainder: '1',
+    });
+    assert.equal(payJiaoRes.status, 302);
+    const afterJiaoOrder = db.prepare("SELECT * FROM sales_orders WHERE id=?").get(approvedJiaoId);
+    assert.equal(afterJiaoOrder.paid_amount, 300.2);
+    const jiaoLog = db.prepare("SELECT * FROM audit_logs WHERE entity_type='销售单' AND entity_id=? AND action='记录销售收款'").get(approvedJiaoId);
+    assert.ok(jiaoLog && jiaoLog.summary.includes('抹零核销 ¥0.20'), '记录销售收款审计日志应包含抹零核销说明');
+
+    // 场景4：历史遗留 300.02 元单据（已收 300 元，差 0.02 元），事后收款 0 元并勾选 wipe_remainder='1' 直接核销尾差
+    db.prepare("INSERT INTO sales_orders (warehouse_id, user_id, responsible_id, customer_id, order_date, total_amount, paid_amount, status) VALUES (1, 1, 3, 1, '2026-10-16', 300.02, 300, 'approved')").run();
+    const legacyFenId = db.prepare("SELECT MAX(id) AS id FROM sales_orders").get().id;
+    const payFenRes = await admin.request(`/sales/${legacyFenId}/record-payment`, {
+      amount: '0',
+      wipe_remainder: '1',
+    });
+    assert.equal(payFenRes.status, 302);
+    const afterFenOrder = db.prepare("SELECT * FROM sales_orders WHERE id=?").get(legacyFenId);
+    assert.equal(afterFenOrder.paid_amount, 300.02);
+
+    // 场景5：差额 >= 1 元时勾选 wipe_remainder='1' 应被拒绝（返回 400）
+    db.prepare("INSERT INTO sales_orders (warehouse_id, user_id, responsible_id, customer_id, order_date, total_amount, paid_amount, status) VALUES (1, 1, 3, 1, '2026-10-16', 305.2, 0, 'approved')").run();
+    const rejectWipeId = db.prepare("SELECT MAX(id) AS id FROM sales_orders").get().id;
+    const rejectWipeRes = await admin.request(`/sales/${rejectWipeId}/record-payment`, {
+      amount: '300',
+      wipe_remainder: '1',
+    });
+    assert.equal(rejectWipeRes.status, 400);
   });
 
   // 5. 首页自定义看板、本月净增欠款口径与操作员毛利绝对隔离

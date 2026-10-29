@@ -127,11 +127,12 @@
     const bind = () => items.querySelectorAll('.item-row').forEach(bindRow);
     bind(); new MutationObserver(bind).observe(items, { childList: true });
     const updateTotals = () => {
+      if (typeof window.recalcTotal === 'function') { window.recalcTotal(); return; }
       const rows = Array.from(items.querySelectorAll('.item-row'));
       const total = rows.reduce((sum,row) => sum + (row.querySelector('.gift-checkbox')?.checked ? 0 : (Number(row.querySelector('[name="quantity"]').value)||0)*(Number(row.querySelector('[name="unit_price"]')?.value)||0)), 0);
       for (const id of ['itemsTotal','stickyItemsTotal']) {
         const element = document.getElementById(id);
-        if (element) element.textContent = items.closest('form').id === 'transferForm' ? String(rows.filter(row => row.querySelector('[name="product_id"]').value).length) : Number.isFinite(total) ? total.toFixed(1) : '—';
+        if (element) element.textContent = items.closest('form').id === 'transferForm' ? String(rows.filter(row => row.querySelector('[name="product_id"]').value).length) : Number.isFinite(total) ? (Math.round(total * 10) / 10).toFixed(1) : '—';
       }
     };
     updateTotals(); new MutationObserver(updateTotals).observe(items, { childList: true });

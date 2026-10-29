@@ -6,7 +6,7 @@ const { todayLocalDate } = require('../utils/dates');
 const { costSnapshotPerBaseUnit } = require('../lib/priceCalc');
 const { getSalePayment } = require('../lib/profitCalc');
 const { saleItems, prepareOriginalItems, refundState } = require('../lib/returnWorkflow');
-const { isBlank, isValidDateString, isValidNonNegativeAmount, roundToCents } = require('../lib/validators');
+const { isBlank, isValidDateString, isValidNonNegativeAmount, roundToCents, roundToTenths } = require('../lib/validators');
 const { warehousesForUser, isWarehouseInScope, isWarehouseActive } = require('../lib/warehouseAccess');
 const { submittedItemsFromBody } = require('../lib/formDraft');
 const { writeAuditLog } = require('../lib/auditLog');
@@ -380,7 +380,17 @@ router.post('/returns/new', requireLogin, requireMutationKey, (req, res) => {
     }
   }
 
-  const total = roundToCents(items.reduce((s, it) => s + it.qty * it.price, 0));
+  let total = roundToTenths(items.reduce((s, it) => s + it.qty * it.price, 0));
+  if (relatedId) {
+    const saleRow = db.prepare('SELECT total_amount FROM sales_orders WHERE id = ?').get(relatedId);
+    if (saleRow) {
+      const prevReturned = db.prepare(
+        "SELECT COALESCE(SUM(total_amount), 0) AS s FROM return_orders WHERE related_sales_order_id = ? AND status = 'approved'"
+      ).get(relatedId).s;
+      const maxReturnable = Math.max(0, roundToCents(saleRow.total_amount - prevReturned));
+      if (total > maxReturnable) total = maxReturnable;
+    }
+  }
   if (!Number.isSafeInteger(Math.round(total * 100)) || total < 0 || items.some(item => !Number.isSafeInteger(item.baseQty) || item.baseQty <= 0)) {
     res.status(400);
     return renderError('退货总额计算结果不合法，请检查商品数量和单价');
@@ -496,7 +506,17 @@ router.post('/returns/:id/edit', requireLogin, requireMutationKey, (req, res) =>
     }
   }
 
-  const total = roundToCents(items.reduce((s, it) => s + it.qty * it.price, 0));
+  let total = roundToTenths(items.reduce((s, it) => s + it.qty * it.price, 0));
+  if (relatedId) {
+    const saleRow = db.prepare('SELECT total_amount FROM sales_orders WHERE id = ?').get(relatedId);
+    if (saleRow) {
+      const prevReturned = db.prepare(
+        "SELECT COALESCE(SUM(total_amount), 0) AS s FROM return_orders WHERE related_sales_order_id = ? AND status = 'approved' AND id <> ?"
+      ).get(relatedId, order.id).s;
+      const maxReturnable = Math.max(0, roundToCents(saleRow.total_amount - prevReturned));
+      if (total > maxReturnable) total = maxReturnable;
+    }
+  }
   if (!Number.isSafeInteger(Math.round(total * 100)) || total < 0 || items.some(item => !Number.isSafeInteger(item.baseQty) || item.baseQty <= 0)) {
     res.status(400);
     return renderError('退货总额计算结果不合法，请检查商品数量和单价');

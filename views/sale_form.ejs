@@ -59,15 +59,34 @@
     <div id="recentProducts" class="recent-products" aria-label="最近使用的商品"></div>
     <div id="items"></div>
     <button type="button" class="btn btn-secondary btn-sm" onclick="addRow()">＋ 添加商品</button>
-    <p style="margin-top:10px;font-size:16px"><strong>商品合计：¥<span id="itemsTotal">0.0</span></strong> <span class="muted">（赠品不计入）</span></p>
+    <%
+      let initialRoundToYuan = false;
+      if (form && form.round_to_yuan !== undefined) {
+        initialRoundToYuan = (form.round_to_yuan === '1' || form.round_to_yuan === 'on');
+      } else if (order && typeof existingItems !== 'undefined' && existingItems.length > 0) {
+        const rawSum = existingItems.reduce(function(s, it) { return s + (it.is_gift ? 0 : it.quantity * it.unit_price); }, 0);
+        const tenthsSum = Math.round(rawSum * 10) / 10;
+        if (tenthsSum >= 1 && tenthsSum > order.total_amount + 0.01 && Math.abs(order.total_amount - Math.floor(tenthsSum)) < 0.01) {
+          initialRoundToYuan = true;
+        }
+      }
+    %>
+    <p style="margin-top:10px;font-size:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <span><strong>商品合计：¥<span id="itemsTotal">0.0</span></strong> <span class="muted" id="itemsTotalHint">（赠品不计入）</span></span>
+      <label style="display:inline-flex;align-items:center;gap:4px;font-size:13px;margin:0;cursor:pointer;font-weight:normal">
+        <input type="checkbox" name="round_to_yuan" id="roundToYuanCheckbox" value="1" style="width:auto;min-height:auto;margin:0" <%= initialRoundToYuan ? 'checked' : '' %>>
+        <span>抹零到整元</span>
+      </label>
+    </p>
 
     <h2 class="form-section-heading">金额与备注</h2>
     <div class="grid-3">
       <div class="form-row">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px">
           <label style="margin-bottom:0">收款金额</label>
-          <div style="display:flex; gap:6px">
+          <div style="display:flex; gap:6px; flex-wrap:wrap">
             <button type="button" class="btn btn-sm btn-secondary" id="fillFullPaidBtn" style="padding:2px 8px; font-size:12px; line-height:1.4">全额收齐</button>
+            <button type="button" class="btn btn-sm btn-secondary" id="wipeToYuanPaidBtn" style="padding:2px 8px; font-size:12px; line-height:1.4">抹零收整</button>
             <button type="button" class="btn btn-sm btn-secondary" id="clearPaidBtn" style="padding:2px 8px; font-size:12px; line-height:1.4">清零</button>
           </div>
         </div>
@@ -379,6 +398,8 @@
   }
 
   let currentOrderTotal = 0;
+  let currentTenthsTotal = 0;
+  const roundToYuanCheckbox = document.getElementById('roundToYuanCheckbox');
   function recalcTotal() {
     const rows = document.querySelectorAll('#items .item-row');
     let total = 0;
@@ -392,21 +413,46 @@
       row.querySelector('.sale-line-total strong').textContent = Number.isFinite(lineTotal) ? '¥' + lineTotal.toFixed(1) : '—';
       total += lineTotal;
     });
-    currentOrderTotal = Number.isFinite(total) ? Math.round(total * 100) / 100 : 0;
+    currentTenthsTotal = Number.isFinite(total) ? Math.round(total * 10) / 10 : 0;
+    const roundToYuan = !!(roundToYuanCheckbox && roundToYuanCheckbox.checked && currentTenthsTotal >= 1);
+    currentOrderTotal = roundToYuan ? Math.floor(currentTenthsTotal) : currentTenthsTotal;
     const el = document.getElementById('itemsTotal');
-    if (el) el.textContent = Number.isFinite(total) ? total.toFixed(1) : '—';
-    document.getElementById('stickyItemsTotal').textContent = Number.isFinite(total) ? total.toFixed(1) : '—';
+    if (el) el.textContent = Number.isFinite(total) ? currentOrderTotal.toFixed(1) : '—';
+    document.getElementById('stickyItemsTotal').textContent = Number.isFinite(total) ? currentOrderTotal.toFixed(1) : '—';
+    const hintEl = document.getElementById('itemsTotalHint');
+    if (hintEl) {
+      const wiped = Math.round((currentTenthsTotal - currentOrderTotal) * 10) / 10;
+      hintEl.textContent = wiped > 0
+        ? `（原合计 ¥${currentTenthsTotal.toFixed(1)}，已抹零 ¥${wiped.toFixed(1)}）`
+        : '（赠品不计入）';
+    }
   }
   document.getElementById('items').addEventListener('input', recalcTotal);
   document.getElementById('items').addEventListener('change', recalcTotal);
+  if (roundToYuanCheckbox) {
+    roundToYuanCheckbox.addEventListener('change', recalcTotal);
+  }
 
   const paidInput = document.getElementById('paidAmountInput');
   const fillFullPaidBtn = document.getElementById('fillFullPaidBtn');
+  const wipeToYuanPaidBtn = document.getElementById('wipeToYuanPaidBtn');
   const clearPaidBtn = document.getElementById('clearPaidBtn');
 
   if (fillFullPaidBtn && paidInput) {
     fillFullPaidBtn.addEventListener('click', function() {
-      paidInput.value = currentOrderTotal.toFixed(2);
+      paidInput.value = Number.isInteger(currentOrderTotal) ? String(currentOrderTotal) : currentOrderTotal.toFixed(1);
+      paidInput.dispatchEvent(new Event('input', { bubbles: true }));
+      paidInput.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  if (wipeToYuanPaidBtn && paidInput) {
+    wipeToYuanPaidBtn.addEventListener('click', function() {
+      if (roundToYuanCheckbox && currentTenthsTotal >= 1) {
+        roundToYuanCheckbox.checked = true;
+      }
+      recalcTotal();
+      paidInput.value = Number.isInteger(currentOrderTotal) ? String(currentOrderTotal) : currentOrderTotal.toFixed(1);
       paidInput.dispatchEvent(new Event('input', { bubbles: true }));
       paidInput.dispatchEvent(new Event('change', { bubbles: true }));
     });

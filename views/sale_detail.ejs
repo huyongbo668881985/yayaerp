@@ -46,7 +46,7 @@
     <% if (order.returned_amount > 0) { %><div><span>已审核退货</span><strong>¥<%= order.returned_amount.toFixed(1) %></strong></div><% } %>
     <% if (order.cash_refunded_amount > 0) { %><div><span>已退现金</span><strong>¥<%= order.cash_refunded_amount.toFixed(1) %></strong></div><% } %>
     <% if (order.pending_refund > 0) { %><div><span>待退现金</span><strong class="detail-owing">¥<%= order.pending_refund.toFixed(1) %></strong></div><% } %>
-    <div><span><%= order.status === 'approved' ? '欠款' : '预计待收' %></span><strong class="<%= order.status === 'approved' ? 'detail-owing' : '' %>">¥<%= order.effective_debt.toFixed(1) %></strong></div>
+    <div><span><%= order.status === 'approved' ? '欠款' : '预计待收' %></span><strong class="<%= order.status === 'approved' ? 'detail-owing' : '' %>">¥<%= (order.effective_debt > 0.001 && order.effective_debt < 0.05) ? order.effective_debt.toFixed(2) : order.effective_debt.toFixed(1) %></strong></div>
   </div>
   <% if (relatedReturns && relatedReturns.length > 0) { %>
     <p>
@@ -111,10 +111,16 @@
     <% } %>
 
     <% if (order.status === 'approved' && currentUser.role === 'admin' && order.effective_debt > 0.001) { %>
+      <% const debtExactStr = (Math.round(order.effective_debt * 100) % 10 === 0) ? order.effective_debt.toFixed(1) : order.effective_debt.toFixed(2); %>
+      <% const debtFloorStr = order.effective_debt >= 1 ? String(Math.floor(order.effective_debt)) : '0'; %>
       <form action="/sales/<%= order.id %>/record-payment" method="POST" style="display:flex; gap:6px; align-items:center; flex-wrap:wrap">
         <input type="hidden" name="_request_key" value="<%= newRequestKey() %>">
         <input type="number" id="recordPaymentInput" name="amount" placeholder="本次收款金额" step="0.01" min="0.01" max="<%= order.effective_debt.toFixed(2) %>" required style="width:140px">
-        <button type="button" class="btn btn-sm btn-secondary" onclick="document.getElementById('recordPaymentInput').value='<%= order.effective_debt.toFixed(2) %>'">全额收齐</button>
+        <button type="button" class="btn btn-sm btn-secondary" onclick="const inp=document.getElementById('recordPaymentInput'),chk=document.getElementById('wipeRemainderCheck');if(chk){chk.checked=false;}inp.min='0.01';inp.value='<%= debtExactStr %>';">全额收齐</button>
+        <label style="display:inline-flex; align-items:center; gap:4px; font-size:13px; margin:0; cursor:pointer">
+          <input type="checkbox" name="wipe_remainder" id="wipeRemainderCheck" value="1" style="width:auto; min-height:auto; margin:0" onchange="const inp=document.getElementById('recordPaymentInput');if(this.checked){inp.min='0';if(!inp.value||Math.abs(Number(inp.value)-<%= order.effective_debt %>)<0.005){inp.value='<%= debtFloorStr %>';}}else{inp.min='0.01';if(inp.value==='0'){inp.value='';}}">
+          <span>抹零结清</span>
+        </label>
         <button type="submit" class="btn" style="background:#16a34a">记录收款</button>
       </form>
     <% } %>

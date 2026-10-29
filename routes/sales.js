@@ -6,7 +6,7 @@ const { todayLocalDate } = require('../utils/dates');
 const { buildItemsFromRequest } = require('../lib/saleItems');
 const { queryOrders } = require('../lib/salesQuery');
 const { returnedAmountSubquery, refundedAmountSubquery, attachEffectivePayment, getSalePayment } = require('../lib/profitCalc');
-const { isBlank, isValidDateString, isValidNonNegativeAmount, roundToCents } = require('../lib/validators');
+const { isBlank, isValidDateString, isValidNonNegativeAmount, roundToCents, roundToTenths } = require('../lib/validators');
 const { warehousesForUser, isWarehouseInScope, isWarehouseActive } = require('../lib/warehouseAccess');
 const { writeAuditLog } = require('../lib/auditLog');
 const { submittedItemsFromBody } = require('../lib/formDraft');
@@ -348,7 +348,11 @@ router.post('/sales/new', requireLogin, requireMutationKey, (req, res) => {
 
   // 草稿/待审核阶段不动库存，这里只做数据落库，不检查库存、不生成出入库流水
   // 点"存草稿"按钮会带 save_draft=1 → 存为 draft，之后在详情页继续编辑/提交审核
-  const total = roundToCents(items.reduce((s, it) => s + it.qty * it.price, 0));
+  // 业务规则：商品单价保留到分，整单汇总后默认自动四舍五入到角（0.1元）；勾选"抹零到整元"时向下取整到元。
+  const tenthsTotal = roundToTenths(items.reduce((s, it) => s + it.qty * it.price, 0));
+  const roundToYuan = req.body.round_to_yuan === '1' || req.body.round_to_yuan === 'on';
+  const total = (roundToYuan && tenthsTotal >= 1) ? Math.floor(tenthsTotal) : tenthsTotal;
+  const wipedYuanAmount = roundToTenths(tenthsTotal - total);
   if (!Number.isFinite(total) || total < 0) {
     res.status(400);
     return renderError('销售总额计算结果不合法，请检查商品数量和单价');
@@ -358,7 +362,7 @@ router.post('/sales/new', requireLogin, requireMutationKey, (req, res) => {
     res.status(400);
     return renderError('已收款金额必须是大于等于 0 的有效数字');
   }
-  const paid = roundToCents(paidRaw);
+  const paid = roundToTenths(paidRaw);
   // 收款不能超过单据总额：多收的钱没有业务意义，还会把应收/欠款统计搞乱
   if (paid > total + 0.001) {
     res.status(400);
@@ -379,7 +383,10 @@ router.post('/sales/new', requireLogin, requireMutationKey, (req, res) => {
     for (const it of items) {
       insertItem.run(soId, it.pid, it.qty, it.unitLabel, it.baseQty, it.price, it.gift ? 1 : 0, it.costSnapshot);
     }
-    writeAuditLog(db, req.session.user, '新建销售单', '销售单', soId, `金额 ¥${total.toFixed(2)}`);
+    const auditSummary = wipedYuanAmount > 0
+      ? `金额 ¥${total.toFixed(2)}（已抹零 ¥${wipedYuanAmount.toFixed(1)}）`
+      : `金额 ¥${total.toFixed(2)}`;
+    writeAuditLog(db, req.session.user, '新建销售单', '销售单', soId, auditSummary);
     return { redirect: `/sales/${soId}?created=${status}` };
   });
 });
@@ -454,7 +461,10 @@ router.post('/sales/:id/edit', requireLogin, requireMutationKey, (req, res) => {
     return renderError('所选客户不在你的名下，无权使用：请选择自己负责的客户，或联系管理员处理');
   }
 
-  const total = roundToCents(items.reduce((s, it) => s + it.qty * it.price, 0));
+  const tenthsTotal = roundToTenths(items.reduce((s, it) => s + it.qty * it.price, 0));
+  const roundToYuan = req.body.round_to_yuan === '1' || req.body.round_to_yuan === 'on';
+  const total = (roundToYuan && tenthsTotal >= 1) ? Math.floor(tenthsTotal) : tenthsTotal;
+  const wipedYuanAmount = roundToTenths(tenthsTotal - total);
   if (!Number.isFinite(total) || total < 0) {
     res.status(400);
     return renderError('销售总额计算结果不合法，请检查商品数量和单价');
@@ -464,7 +474,7 @@ router.post('/sales/:id/edit', requireLogin, requireMutationKey, (req, res) => {
     res.status(400);
     return renderError('已收款金额必须是大于等于 0 的有效数字');
   }
-  const paid = roundToCents(paidRaw);
+  const paid = roundToTenths(paidRaw);
   // 与新建单一致：收款不能超过单据总额
   if (paid > total + 0.001) {
     res.status(400);
@@ -483,7 +493,10 @@ router.post('/sales/:id/edit', requireLogin, requireMutationKey, (req, res) => {
     for (const it of items) {
       insertItem.run(order.id, it.pid, it.qty, it.unitLabel, it.baseQty, it.price, it.gift ? 1 : 0, it.costSnapshot);
     }
-    writeAuditLog(db, req.session.user, '编辑销售单', '销售单', order.id, `金额更新为 ¥${total.toFixed(2)}`);
+    const auditSummary = wipedYuanAmount > 0
+      ? `金额更新为 ¥${total.toFixed(2)}（已抹零 ¥${wipedYuanAmount.toFixed(1)}）`
+      : `金额更新为 ¥${total.toFixed(2)}`;
+    writeAuditLog(db, req.session.user, '编辑销售单', '销售单', order.id, auditSummary);
     return { redirect: '/sales/' + order.id };
   });
 });
@@ -686,10 +699,18 @@ router.post('/sales/:id/record-payment', requireLogin, requireMutationKey, (req,
       return { status: 400, error: '只有已审核的销售单可以记录收款' };
     }
 
-    const amountRaw = Number(req.body.amount);
-    if (!Number.isFinite(amountRaw) || !(amountRaw > 0)) return { status: 400, error: '收款金额必须是大于 0 的有效数字' };
-    const amount = roundToCents(amountRaw);
-    if (!(amount > 0)) return { status: 400, error: '收款金额四舍五入到分后必须大于 0' };
+    const wipeRemainder = req.body.wipe_remainder === '1' || req.body.wipe_remainder === 'on';
+    let amount = 0;
+    if (wipeRemainder) {
+      const amountRaw = isBlank(req.body.amount) ? 0 : Number(req.body.amount);
+      if (!Number.isFinite(amountRaw) || amountRaw < 0) return { status: 400, error: '收款金额必须是大于等于 0 的有效数字' };
+      amount = roundToCents(amountRaw);
+    } else {
+      const amountRaw = Number(req.body.amount);
+      if (!Number.isFinite(amountRaw) || !(amountRaw > 0)) return { status: 400, error: '收款金额必须是大于 0 的有效数字' };
+      amount = roundToCents(amountRaw);
+      if (!(amount > 0)) return { status: 400, error: '收款金额四舍五入到分后必须大于 0' };
+    }
 
     // 收款上限复用结算余额；退过现金的关联退货不会再次抵掉同一笔欠款。
     // 必须与详情页展示的欠款（attachEffectivePayment 的 effective_debt）同一套算法：
@@ -707,6 +728,17 @@ router.post('/sales/:id/record-payment', requireLogin, requireMutationKey, (req,
       return { status: 400, error: `收款金额（¥${amount.toFixed(2)}）超过该单剩余未收金额（¥${remaining.toFixed(2)}），最多还能收 ¥${remaining.toFixed(2)}` };
     }
 
+    let wipeAmount = 0;
+    if (wipeRemainder) {
+      wipeAmount = Math.max(0, roundToCents(remaining - amount));
+      if (wipeAmount >= 1) {
+        return { status: 400, error: `抹零结清仅适用于不足 1 元的角/分尾差（当前待抹零差额 ¥${wipeAmount.toFixed(2)}），请核对收款金额` };
+      }
+      if (amount <= 0 && wipeAmount <= 0) {
+        return { status: 400, error: '收款金额必须是大于 0 的有效数字' };
+      }
+    }
+
     // payment_status 必须跟着 paid_amount 一起更新，不能只加金额不改状态
     // （以前漏了这行，导致"建单时只收定金、后来补完全款"的单子状态永远停在 partial）。
     //
@@ -715,14 +747,17 @@ router.post('/sales/:id/record-payment', requireLogin, requireMutationKey, (req,
     // 见 lib/profitCalc.js 的 salesSettledExpr，列表页/详情页/首页/报表全部走那一套。
     // 以前让 payment_status 兼职"结清判定"，落库快照追不上退货单的审核/反审核，
     // 定金 + 退货抵扣结清的单子会永远停在 partial，两边对不上账。
-    const newPaid = roundToCents((order.paid_amount || 0) + amount);
+    const newPaid = roundToCents((order.paid_amount || 0) + amount + wipeAmount);
     let paymentStatus = 'unpaid';
     if (order.total_amount > 0 && newPaid >= order.total_amount) paymentStatus = 'paid';
     else if (newPaid > 0) paymentStatus = 'partial';
 
     db.prepare('UPDATE sales_orders SET paid_amount = ?, payment_status = ? WHERE id = ?')
       .run(newPaid, paymentStatus, order.id);
-    writeAuditLog(db, req.session.user, '记录销售收款', '销售单', order.id, `本次收款 ¥${amount.toFixed(2)}，累计 ¥${newPaid.toFixed(2)}`);
+    const logSummary = wipeAmount > 0
+      ? `本次收款 ¥${amount.toFixed(2)}（抹零核销 ¥${wipeAmount.toFixed(2)}），累计 ¥${newPaid.toFixed(2)}`
+      : `本次收款 ¥${amount.toFixed(2)}，累计 ¥${newPaid.toFixed(2)}`;
+    writeAuditLog(db, req.session.user, '记录销售收款', '销售单', order.id, logSummary);
     return { redirect: '/sales/' + order.id };
   });
 });

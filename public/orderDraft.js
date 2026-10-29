@@ -1,5 +1,5 @@
 (() => {
-  const fields = ['customer_id','customer_search','supplier_id','warehouse_id','from_warehouse_id','to_warehouse_id','responsible_id','order_date','paid_amount','refunded_amount','remarks','note','related_sales_order_id','draft_revision','_request_key','exception_reason'];
+  const fields = ['customer_id','customer_search','supplier_id','warehouse_id','from_warehouse_id','to_warehouse_id','responsible_id','order_date','paid_amount','round_to_yuan','refunded_amount','remarks','note','related_sales_order_id','draft_revision','_request_key','exception_reason'];
   const expiry = 7 * 86400000;
   const prefix = 'jxc-order-draft:v1:';
   function entries(scope) {
@@ -37,7 +37,7 @@
     let candidates = [];
     function capture() {
       const values = {};
-      for (const name of fields) { const input = form.elements.namedItem(name); if (input && 'value' in input) values[name] = input.value; }
+      for (const name of fields) { const input = form.elements.namedItem(name); if (input && 'value' in input) values[name] = input.type === 'checkbox' ? (input.checked ? '1' : '') : input.value; }
       const labels = {};
       for (const name of ['customer_id','supplier_id','warehouse_id','from_warehouse_id','to_warehouse_id','responsible_id']) {
         const input = form.elements.namedItem(name);
@@ -106,7 +106,11 @@
       restoring = true;
       for (const name of fields) {
         if (entry.values[name] == null) continue;
-        const input = form.elements.namedItem(name); if (input && 'value' in input) input.value = entry.values[name];
+        const input = form.elements.namedItem(name);
+        if (input && 'value' in input) {
+          if (input.type === 'checkbox') input.checked = Boolean(entry.values[name]);
+          else input.value = entry.values[name];
+        }
       }
       form.querySelector('#items').replaceChildren();
       for (const item of entry.rows) {
