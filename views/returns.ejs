@@ -1,7 +1,11 @@
 <%- include('partials/header') %>
 <div class="tabbar">
-  <a href="/sales">销售</a>
+  <a href="/sales">销售订单</a>
+  <a href="/sales/summary">客户销售汇总</a>
   <a href="/returns" class="active">退货</a>
+  <% if (currentUser && currentUser.role === 'admin') { %>
+    <a href="/sales/handover">订单交接</a>
+  <% } %>
 </div>
 <h1>退货管理</h1>
 <% if (typeof pendingOnly !== 'undefined' && pendingOnly) { %><p class="muted">当前仅显示待审核单据 · <a href="/returns">查看全部</a></p><% } %>

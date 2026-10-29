@@ -174,6 +174,43 @@ router.get('/sales/summary', requireLogin, (req, res) => {
   });
 });
 
+// 管理员专属：订单交接页（默认展示未结清/欠款销售单，支持按人员一键交接或勾选多选转移）
+router.get('/sales/handover', requireLogin, (req, res) => {
+  const db = req.tenantDb;
+  const user = req.session.user;
+  if (user.role !== 'admin') return res.status(403).send('无权限，只有管理员能访问订单交接页面');
+  const { start, end } = req.query;
+  const requestedCustomerId = Number(req.query.customer_id);
+  const customerId = Number.isInteger(requestedCustomerId) && requestedCustomerId > 0 ? requestedCustomerId : null;
+  const guestOnly = req.query.guest === '1';
+  const settlement = ['all', 'outstanding', 'settled'].includes(req.query.settlement)
+    ? (req.query.settlement === 'all' ? '' : req.query.settlement)
+    : 'outstanding';
+  const settlementChoice = req.query.settlement === 'all' ? 'all' : (settlement || 'outstanding');
+  const responsibleId = responsibleFilter(req.query);
+  const responsibleOptions = db.prepare(`SELECT id, name, username, active FROM users
+    WHERE active = 1 OR EXISTS (SELECT 1 FROM sales_orders WHERE COALESCE(responsible_id, user_id) = users.id)
+    ORDER BY active DESC, name, id`).all();
+  const { sort, order } = parseSort(req.query, ['date', 'amount', 'debt'], 'date');
+  const customers = customersForForm(db, user, customerId);
+  const { orders, totalOrders, totalPages, page } = queryOrders(
+    db, user, start, end, customerId, guestOnly, settlement, false, null, '', responsibleId,
+    { size: SALES_PAGE_SIZE, page: req.query.page, sort, order }
+  );
+  res.render('sales_handover', {
+    orders, user, customers, customerId, guestOnly,
+    start: start || '', end: end || '',
+    settlement, settlementChoice,
+    responsibleId, responsibleOptions,
+    sort, order, page, totalPages, totalOrders,
+    handoverQueryString: params => salesQueryString({
+      start, end, customer_id: customerId, guest: guestOnly ? 1 : '',
+      settlement: settlementChoice, responsible_id: responsibleId,
+      sort, order, ...params
+    })
+  });
+});
+
 // 导出当前筛选范围内的销售单为 CSV
 router.get('/sales/export', requireLogin, (req, res) => {
   const db = req.tenantDb;
@@ -782,7 +819,7 @@ router.post('/sales/:id/responsible', requireLogin, requireMutationKey, (req, re
 
 function safeSalesReturnTo(raw) {
   const text = typeof raw === 'string' ? raw.trim() : '';
-  return /^\/sales(\?[a-zA-Z0-9_=&%.-]*)?$/.test(text) ? text : '/sales';
+  return /^\/sales(?:\/handover)?(\?[a-zA-Z0-9_=&%.-]*)?$/.test(text) ? text : '/sales/handover';
 }
 
 // 批量勾选转移销售单负责人（仅管理员）：只改 responsible_id 与版本号，保留原录入人 user_id，不触碰财务与库存。

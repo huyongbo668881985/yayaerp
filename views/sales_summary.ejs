@@ -3,6 +3,9 @@
   <a href="/sales">销售订单</a>
   <a href="/sales/summary" class="active">客户销售汇总</a>
   <a href="/returns">退货</a>
+  <% if (currentUser && currentUser.role === 'admin') { %>
+    <a href="/sales/handover">订单交接</a>
+  <% } %>
 </div>
 <h1>客户销售汇总</h1>
 <div class="card">

@@ -213,9 +213,28 @@ async function check(label, work) { await work(); passed++; console.log('  PASS 
         body: { from_user_id: '4', to_user_id: '2', scope: 'all' }
       });
       assert.equal(resAll.status, 302);
+      assert.equal(resAll.location, '/sales/handover');
       assert.equal(db.prepare('SELECT responsible_id FROM sales_orders WHERE id=?').get(rPaid).responsible_id, 2);
       assert.equal(db.prepare('SELECT responsible_id FROM sales_orders WHERE id=?').get(rDraft).responsible_id, 2);
       assert.equal(db.prepare('SELECT responsible_id FROM sales_orders WHERE id=?').get(inactive).responsible_id, 2);
+    });
+    await check('订单交接独立Tab页：仅管理员可见可访问，默认筛选未结清订单，主销售列表保持纯净', async () => {
+      const adminSalesHtml = (await request('/sales')).text;
+      assert.ok(adminSalesHtml.includes('href="/sales/handover"'), '管理员应看到订单交接Tab');
+      assert.ok(!adminSalesHtml.includes('salesBatchTransferForm'), '主销售列表不应显示全选本页操作栏');
+      assert.ok(!adminSalesHtml.includes('sales-order-checkbox'), '主销售列表不应显示多选复选框');
+
+      const operatorSalesHtml = (await request('/sales', { user: 2 })).text;
+      assert.ok(!operatorSalesHtml.includes('/sales/handover'), '操作员不应看到订单交接Tab');
+      assert.equal((await request('/sales/handover', { user: 2 })).status, 403, '操作员访问订单交接页应被服务端403拦截');
+
+      const handoverPage = await request('/sales/handover');
+      assert.equal(handoverPage.status, 200);
+      assert.ok(handoverPage.text.includes('salesBatchTransferForm'), '订单交接页应包含多选转移操作栏');
+      assert.ok(handoverPage.text.includes('salesReassignPanel'), '订单交接页应包含按负责人一键交接面板');
+      const handoverData = (await request('/sales/handover', { json: true })).data;
+      assert.equal(handoverData.settlementChoice, 'outstanding', '订单交接页默认展示未结清订单');
+      assert.ok(handoverData.orders.every(o => o.status === 'approved' && o.effective_status !== 'paid'));
     });
     console.log(`销售订单筛选与负责人测试通过：${passed} 项`);
   } finally {
