@@ -6,7 +6,7 @@ const { todayLocalDate } = require('../utils/dates');
 const { costSnapshotPerBaseUnit } = require('../lib/priceCalc');
 const { getSalePayment } = require('../lib/profitCalc');
 const { saleItems, prepareOriginalItems, refundState } = require('../lib/returnWorkflow');
-const { isBlank, isValidDateString, isValidNonNegativeAmount, roundToCents, roundToTenths } = require('../lib/validators');
+const { isBlank, isValidDateString, isValidNonNegativeAmount, roundToCents, roundToTenths, returnTotalMatchesItems } = require('../lib/validators');
 const { warehousesForUser, isWarehouseInScope, isWarehouseActive } = require('../lib/warehouseAccess');
 const { submittedItemsFromBody } = require('../lib/formDraft');
 const { writeAuditLog } = require('../lib/auditLog');
@@ -615,9 +615,19 @@ router.post('/returns/approve/:id', requireLogin, (req, res) => {
     if (!order.related_sales_order_id && !order.exception_reason.trim()) return { status: 400, error: '无原单退货需撤回，由管理员补齐例外核实依据后再审核' };
 
     const items = db.prepare('SELECT * FROM return_order_items WHERE return_order_id = ?').all(order.id);
+    let returnableCap = null;
+    if (order.related_sales_order_id) {
+      const saleRow = db.prepare('SELECT total_amount FROM sales_orders WHERE id = ?').get(order.related_sales_order_id);
+      if (saleRow) {
+        const prevReturned = db.prepare(
+          "SELECT COALESCE(SUM(total_amount), 0) AS s FROM return_orders WHERE related_sales_order_id = ? AND status = 'approved' AND id <> ?"
+        ).get(order.related_sales_order_id, order.id).s;
+        returnableCap = Math.max(0, roundToCents(saleRow.total_amount - prevReturned));
+      }
+    }
     if (!items.length || items.some(item => !Number.isSafeInteger(item.quantity) || item.quantity <= 0
       || !Number.isSafeInteger(item.base_quantity) || item.base_quantity <= 0 || !Number.isFinite(item.unit_price) || item.unit_price < 0)
-      || roundToCents(items.reduce((sum, item) => sum + item.quantity * item.unit_price, 0)) !== roundToCents(order.total_amount)) {
+      || !returnTotalMatchesItems(items.reduce((sum, item) => sum + item.quantity * item.unit_price, 0), order.total_amount, returnableCap)) {
       return { status: 400, error: '退货明细与金额不完整或不一致，请撤回核对，不能直接入库入账' };
     }
     if (order.related_sales_order_id) {
