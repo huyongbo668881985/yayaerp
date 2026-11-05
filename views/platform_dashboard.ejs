@@ -28,7 +28,7 @@
 
   <div class="card desktop-table-wrap">
     <table>
-      <tr><th>租户代码</th><th>名称</th><th>状态</th><th>到期日期</th><th>账号数</th><th>创建时间</th><th>操作</th></tr>
+      <tr><th>租户代码</th><th>名称</th><th>状态</th><th>AI 诊断</th><th>到期日期</th><th>账号数</th><th>创建时间</th><th>操作</th></tr>
       <% tenants.forEach(function(t) { %>
         <tr>
           <td><%= t.tenant_code %></td>
@@ -40,6 +40,15 @@
               <span class="badge badge-low">已到期</span>
             <% } else { %>
               <span class="badge badge-operator">运行中</span>
+            <% } %>
+          </td>
+          <td>
+            <% if (t.ai_enabled && t.ai_shelfguard_enabled) { %>
+              <span class="badge badge-operator">进销存 + 巡检</span>
+            <% } else if (t.ai_enabled) { %>
+              <span class="badge badge-operator">仅进销存</span>
+            <% } else { %>
+              <span class="muted">未开启</span>
             <% } %>
           </td>
           <td><%= t.expires_at || '不限' %></td>

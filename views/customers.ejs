@@ -103,6 +103,9 @@
         <td class="customer-table-actions">
           <div class="customer-primary-actions">
             <a href="/sales?customer_id=<%= c.id %>" class="btn btn-sm btn-secondary">查订单</a>
+            <% if (isAdmin && currentTenant && currentTenant.ai_enabled) { %>
+              <a href="/ai-assistant?customer_id=<%= c.id %>" class="btn btn-sm btn-secondary">✨ 诊断</a>
+            <% } %>
             <a href="/sales/new?customer_id=<%= c.id %>" class="btn btn-sm">新开单</a>
           </div>
           <div class="customer-secondary-actions">
@@ -135,6 +138,9 @@
       <% if (c.address) { %><div class="customer-address"><span><%= c.address %></span><button type="button" class="customer-copy-address" data-address="<%= c.address %>" onclick="copyCustomerAddress(this)">复制地址</button></div><% } %>
       <div class="customer-primary-actions">
         <a href="/sales?customer_id=<%= c.id %>" class="btn btn-secondary">查订单</a>
+        <% if (isAdmin && currentTenant && currentTenant.ai_enabled) { %>
+          <a href="/ai-assistant?customer_id=<%= c.id %>" class="btn btn-secondary">✨ 诊断</a>
+        <% } %>
         <a href="/sales/new?customer_id=<%= c.id %>" class="btn">新开单</a>
       </div>
       <details class="customer-more-actions"><summary>更多操作</summary><div class="customer-secondary-actions">

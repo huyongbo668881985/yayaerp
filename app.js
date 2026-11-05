@@ -34,6 +34,13 @@ app.use((req, res, next) => {
   }); next();
 });
 
+const extraImgOrigins = ['https://game.yft8.cn'];
+if (process.env.SHELFGUARD_BASE_URL) {
+  try {
+    extraImgOrigins.push(new URL(process.env.SHELFGUARD_BASE_URL).origin);
+  } catch (_) {}
+}
+
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -42,7 +49,7 @@ app.use(helmet({
       scriptSrcAttr: ["'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
-      imgSrc: ["'self'", 'data:'],
+      imgSrc: ["'self'", 'data:', ...new Set(extraImgOrigins)],
       connectSrc: ["'self'"],
       objectSrc: ["'none'"],
       frameAncestors: ["'none'"],
@@ -139,6 +146,7 @@ app.use(require('./routes/printing'));
 app.use(require('./routes/dashboard'));
 app.use(require('./routes/products'));
 app.use(require('./routes/report'));
+app.use(require('./routes/aiAssistant'));
 app.use(require('./routes/warehouses'));
 app.use(require('./routes/partners'));
 app.use(require('./routes/purchases'));

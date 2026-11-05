@@ -32,8 +32,8 @@ const platformLoginLimiter = createLoginLimiter({
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-// 校验并规整"到期日期"和"账号数上限"这两个可选配额字段
-// 返回 { error } 或 { expiresAt, maxUsers }
+// 校验并规整"到期日期"、"账号数上限"及"AI 经营诊断开关"
+// 返回 { error } 或 { expiresAt, maxUsers, aiEnabled, aiShelfguardEnabled }
 function parseQuotaFields(body) {
   let expiresAt = null;
   if (body.expires_at && body.expires_at.trim()) {
@@ -46,7 +46,9 @@ function parseQuotaFields(body) {
     if (!Number.isInteger(n) || n < 1) return { error: '账号数上限必须是大于0的整数' };
     maxUsers = n;
   }
-  return { expiresAt, maxUsers };
+  const aiEnabled = body.ai_enabled === '1' || body.ai_enabled === 'on' ? 1 : 0;
+  const aiShelfguardEnabled = aiEnabled && (body.ai_shelfguard_enabled === '1' || body.ai_shelfguard_enabled === 'on') ? 1 : 0;
+  return { expiresAt, maxUsers, aiEnabled, aiShelfguardEnabled };
 }
 
 router.get('/platform-admin/login', (req, res) => {
@@ -260,10 +262,22 @@ router.post('/platform-admin/tenants/:id/edit', requireSuperAdmin, (req, res) =>
     });
   }
 
-  const before = { name: tenant.name, expires_at: tenant.expires_at, max_users: tenant.max_users };
-  updateTenantLimits(tenant.id, { name: tenant_name.trim(), expiresAt: quota.expiresAt, maxUsers: quota.maxUsers });
+  const before = {
+    name: tenant.name,
+    expires_at: tenant.expires_at,
+    max_users: tenant.max_users,
+    ai_enabled: tenant.ai_enabled ? 1 : 0,
+    ai_shelfguard_enabled: tenant.ai_shelfguard_enabled ? 1 : 0
+  };
+  updateTenantLimits(tenant.id, {
+    name: tenant_name.trim(),
+    expiresAt: quota.expiresAt,
+    maxUsers: quota.maxUsers,
+    aiEnabled: quota.aiEnabled,
+    aiShelfguardEnabled: quota.aiShelfguardEnabled
+  });
   audit(req, 'update_limits', tenant,
-    `名称：${before.name} → ${tenant_name.trim()}；到期：${before.expires_at || '不限'} → ${quota.expiresAt || '不限'}；账号上限：${before.max_users == null ? '不限' : before.max_users} → ${quota.maxUsers == null ? '不限' : quota.maxUsers}`);
+    `名称：${before.name} → ${tenant_name.trim()}；到期：${before.expires_at || '不限'} → ${quota.expiresAt || '不限'}；账号上限：${before.max_users == null ? '不限' : before.max_users} → ${quota.maxUsers == null ? '不限' : quota.maxUsers}；AI诊断：${before.ai_enabled ? '开' : '关'} → ${quota.aiEnabled ? '开' : '关'}；巡检联动：${before.ai_shelfguard_enabled ? '开' : '关'} → ${quota.aiShelfguardEnabled ? '开' : '关'}`);
   res.redirect('/platform-admin');
 });
 

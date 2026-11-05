@@ -1,0 +1,398 @@
+<%- include('partials/header') %>
+
+<style>
+  .ai-page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .ai-page-header h1 {
+    margin: 0;
+  }
+  .ai-status-badges {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .ai-toolbar-card {
+    padding: 14px 16px;
+    margin-bottom: 14px;
+  }
+  .ai-toolbar-grid {
+    display: flex;
+    gap: 12px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+  }
+  .ai-toolbar-grid .form-row {
+    margin-bottom: 0;
+    flex: 1;
+    min-width: 180px;
+  }
+  .ai-chips-section {
+    margin-bottom: 14px;
+  }
+  .ai-chips-label {
+    font-size: 12px;
+    color: #57606a;
+    margin-bottom: 6px;
+    display: block;
+  }
+  .ai-chips-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .ai-chip-btn {
+    background: #f6f8fa;
+    border: 1px solid #d0d7de;
+    border-radius: 999px;
+    padding: 7px 14px;
+    font-size: 13px;
+    color: #1f2328;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-align: left;
+    line-height: 1.35;
+  }
+  .ai-chip-btn:hover:not(:disabled) {
+    background: #eef4ff;
+    border-color: #2f6feb;
+    color: #0969da;
+  }
+  .ai-chip-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  .ai-chat-card {
+    display: flex;
+    flex-direction: column;
+    min-height: 460px;
+    padding: 0;
+    overflow: hidden;
+  }
+  .ai-messages {
+    flex: 1;
+    padding: 18px;
+    overflow-y: auto;
+    max-height: 68vh;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    background: #fafbfc;
+  }
+  .ai-empty-state {
+    text-align: center;
+    padding: 42px 20px;
+    color: #57606a;
+  }
+  .ai-empty-state h2 {
+    font-size: 17px;
+    color: #1f2328;
+    margin: 0 0 8px;
+  }
+  .ai-empty-state p {
+    font-size: 13px;
+    max-width: 520px;
+    margin: 0 auto;
+    line-height: 1.6;
+  }
+  .ai-msg {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-width: 92%;
+  }
+  .ai-msg-user {
+    align-self: flex-end;
+    align-items: flex-end;
+  }
+  .ai-msg-assistant {
+    align-self: flex-start;
+    align-items: flex-start;
+    width: 100%;
+    max-width: 100%;
+  }
+  .ai-bubble-user {
+    background: #2f6feb;
+    color: #fff;
+    padding: 10px 15px;
+    border-radius: 14px 14px 2px 14px;
+    font-size: 14px;
+    line-height: 1.5;
+    word-break: break-word;
+  }
+  .ai-bubble-assistant {
+    background: #fff;
+    border: 1px solid #d8dee4;
+    border-radius: 12px;
+    padding: 16px;
+    width: 100%;
+    box-sizing: border-box;
+    box-shadow: 0 1px 2px rgba(31, 35, 40, 0.04);
+  }
+  .ai-status-step {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: #0969da;
+    background: #ddf4ff;
+    padding: 6px 12px;
+    border-radius: 999px;
+  }
+  .ai-evidence-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .ai-evidence-card {
+    background: #f6f8fa;
+    border: 1px solid #d0d7de;
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .ai-evidence-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+    font-weight: 600;
+    font-size: 13px;
+    color: #1f2328;
+  }
+  .ai-evidence-links {
+    display: flex;
+    gap: 10px;
+    font-size: 12px;
+    font-weight: normal;
+  }
+  .ai-metrics-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+  }
+  .ai-metric-box {
+    background: #fff;
+    border: 1px solid #eaeef2;
+    border-radius: 8px;
+    padding: 8px 10px;
+  }
+  .ai-metric-label {
+    font-size: 12px;
+    color: #57606a;
+  }
+  .ai-metric-value {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1f2328;
+    margin: 2px 0;
+  }
+  .ai-metric-sub {
+    font-size: 11px;
+    color: #656d76;
+  }
+  .ai-stopped-alert {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #9a6700;
+    background: #fff8c5;
+    border: 1px solid #d4a72c;
+    border-radius: 6px;
+    padding: 6px 10px;
+  }
+  .ai-photo-strip {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    margin-top: 10px;
+    padding-bottom: 4px;
+  }
+  .ai-photo-item {
+    flex: 0 0 120px;
+    background: #fff;
+    border: 1px solid #d0d7de;
+    border-radius: 8px;
+    overflow: hidden;
+    font-size: 11px;
+  }
+  .ai-photo-item img {
+    width: 120px;
+    height: 90px;
+    object-fit: cover;
+    display: block;
+    cursor: zoom-in;
+  }
+  .ai-photo-caption {
+    padding: 4px 6px;
+    color: #57606a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ai-markdown-body {
+    font-size: 14px;
+    line-height: 1.65;
+    color: #1f2328;
+  }
+  .ai-markdown-body h3, .ai-markdown-body h4 {
+    margin: 12px 0 6px;
+    font-size: 15px;
+  }
+  .ai-markdown-body ul, .ai-markdown-body ol {
+    margin: 6px 0;
+    padding-left: 20px;
+  }
+  .ai-markdown-body li {
+    margin-bottom: 4px;
+  }
+  .ai-markdown-body p {
+    margin: 6px 0;
+  }
+  .ai-markdown-body blockquote {
+    margin: 8px 0;
+    padding: 8px 12px;
+    background: #f6f8fa;
+    border-left: 3px solid #2f6feb;
+    color: #57606a;
+    font-size: 13px;
+  }
+  .ai-msg-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px dashed #eaeef2;
+  }
+  .ai-input-bar {
+    display: flex;
+    gap: 10px;
+    padding: 12px 16px;
+    background: #fff;
+    border-top: 1px solid #d8dee4;
+    align-items: flex-end;
+  }
+  .ai-input-bar textarea {
+    flex: 1;
+    resize: none;
+    min-height: 42px;
+    max-height: 120px;
+    padding: 9px 12px;
+    border: 1px solid #d0d7de;
+    border-radius: 8px;
+    font-size: 14px;
+    line-height: 1.4;
+    font-family: inherit;
+  }
+  .ai-lightbox {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.78);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    padding: 20px;
+  }
+  .ai-lightbox.open {
+    display: flex;
+  }
+  .ai-lightbox img {
+    max-width: 94vw;
+    max-height: 88vh;
+    border-radius: 8px;
+    background: #fff;
+  }
+  @media (max-width: 768px) {
+    .ai-messages {
+      padding: 12px;
+      max-height: 62vh;
+    }
+    .ai-toolbar-grid .form-row {
+      min-width: 100%;
+    }
+    .ai-metrics-row {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+</style>
+
+<div class="ai-page-header">
+  <h1>✨ 经营诊断助手</h1>
+  <div class="ai-status-badges">
+    <span class="badge badge-operator">📊 进销存账务已就绪</span>
+    <% if (aiStatus.shelfguardEnabled) { %>
+      <span class="badge <%= aiStatus.shelfguardConfigured ? 'badge-operator' : 'badge-low' %>">
+        📸 ShelfGuard 巡检<%= aiStatus.shelfguardConfigured ? '已联动' : '待配密钥' %>
+      </span>
+    <% } else { %>
+      <span class="badge" style="background:#eaeef2;color:#57606a">仅进销存模式</span>
+    <% } %>
+  </div>
+</div>
+
+<div class="card ai-toolbar-card">
+  <div class="ai-toolbar-grid">
+    <div class="form-row">
+      <label for="aiCustomerSelect">诊断对象（门店）</label>
+      <select id="aiCustomerSelect">
+        <option value="">🏢 全局视角（全部门店排行与对比）</option>
+        <% customers.forEach(function(c) { %>
+          <option value="<%= c.id %>" data-name="<%= c.name %>" <%= initialCustomerId === c.id ? 'selected' : '' %>>
+            <%= c.name %><%= c.operator_name ? '（' + c.operator_name + '）' : '' %>
+          </option>
+        <% }) %>
+      </select>
+    </div>
+    <div class="form-row" style="max-width: 220px;">
+      <label for="aiDaysSelect">时间范围</label>
+      <select id="aiDaysSelect">
+        <option value="30">近 30 天（环比上个30天）</option>
+        <option value="90" selected>近 90 天（环比上个90天）</option>
+        <option value="180">近 180 天（半年趋势）</option>
+      </select>
+    </div>
+    <div style="display:flex; gap:8px;">
+      <button type="button" class="btn btn-secondary" id="aiClearBtn">清空对话</button>
+    </div>
+  </div>
+</div>
+
+<div class="ai-chips-section">
+  <span class="ai-chips-label" id="aiChipsLabel">💡 点击下方常见问题立即诊断：</span>
+  <div class="ai-chips-wrap" id="aiChipsContainer"></div>
+</div>
+
+<div class="card ai-chat-card">
+  <div class="ai-messages" id="aiMessages">
+    <div class="ai-empty-state" id="aiEmptyState">
+      <h2>选择一家门店或点击上方快捷问题开始诊断</h2>
+      <p>
+        助手会自动调用只读工具核查该门店的<strong>销售额环比、毛利、停拿品种、应收欠款</strong><% if (aiStatus.shelfguardEnabled) { %>，并同步拉取 <strong>ShelfGuard 巡检拜访次数、陈列评分与货架照片</strong><% } %>，先摆出真实数据卡片，再给出归因分析与核实建议。
+      </p>
+    </div>
+  </div>
+  <form class="ai-input-bar" id="aiChatForm" onsubmit="return false;">
+    <textarea id="aiInput" rows="1" placeholder="输入你想了解的经营问题，例如：东门烟酒店最近为什么销量下滑？（Enter 发送，Shift+Enter 换行）"></textarea>
+    <button type="submit" class="btn" id="aiSendBtn">发送诊断</button>
+  </form>
+</div>
+
+<div class="ai-lightbox" id="aiLightbox" role="dialog" aria-label="巡检照片预览">
+  <img id="aiLightboxImg" src="" alt="巡检照片大图">
+</div>
+
+<script id="aiAssistantConfig" type="application/json"><%- JSON.stringify({
+  initialCustomerId: initialCustomerId || null,
+  shelfguardEnabled: Boolean(aiStatus.shelfguardEnabled)
+}) %></script>
+<script src="/aiAssistant.js" defer></script>
+
+<%- include('partials/footer') %>

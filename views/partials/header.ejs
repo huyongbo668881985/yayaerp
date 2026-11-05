@@ -46,6 +46,9 @@
     <% if (currentUser.role === 'admin') { %>
       <a class="<%= currentPath === '/purchases' || currentPath.startsWith('/purchases/') ? 'active' : '' %>" href="/purchases">采购</a>
       <a class="<%= currentPath === '/reports' || currentPath.startsWith('/reports/') ? 'active' : '' %>" href="/reports">经营报表</a>
+      <% if (currentTenant && currentTenant.ai_enabled) { %>
+        <a class="<%= currentPath === '/ai-assistant' || currentPath.startsWith('/ai-assistant/') ? 'active' : '' %>" href="/ai-assistant">✨ 经营诊断</a>
+      <% } %>
       <a class="<%= currentPath === '/reconciliation' || currentPath.startsWith('/reconciliation/') ? 'active' : '' %>" href="/reconciliation">对账</a>
       <a class="<%= currentPath === '/imports' || currentPath.startsWith('/imports/') ? 'active' : '' %>" href="/imports">导入</a>
     <% } %>

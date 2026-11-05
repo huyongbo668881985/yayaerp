@@ -1,6 +1,6 @@
 <% const query=new URLSearchParams({start,end}).toString(); %>
 <% if(!print) { %><%- include('partials/header') %>
-<div class="page-heading-actions"><h1><%= customer.name %> · 客户对账单</h1><div class="action-row"><a class="btn btn-secondary" href="/reconciliation">返回对账</a><a class="btn btn-secondary" href="?format=csv&<%= query %>">导出 CSV</a><a class="btn" href="?print=1&<%= query %>">打印 / PDF</a></div></div>
+<div class="page-heading-actions"><h1><%= customer.name %> · 客户对账单</h1><div class="action-row"><a class="btn btn-secondary" href="/reconciliation">返回对账</a><% if (customer.id && currentTenant && currentTenant.ai_enabled) { %><a class="btn btn-secondary" href="/ai-assistant?customer_id=<%= customer.id %>">✨ 诊断此店</a><% } %><a class="btn btn-secondary" href="?format=csv&<%= query %>">导出 CSV</a><a class="btn" href="?print=1&<%= query %>">打印 / PDF</a></div></div>
 <% } else { %><%- include('partials/print_head',{title:customer.name+' · 客户对账单',back:'?'+query,receipt:false}) %><% } %>
 <% if(data.unverifiedReturnAccounts){ %><p class="flow-notice">有 <%= data.unverifiedReturnAccounts %> 笔历史退货流水缺少可还原的关联审计。旧金额保持原样，管理员需核对历史原单归属后使用分单应收和待退款汇总。</p><% } %>
 <p><%= start %> 至 <%= end %> · 客户：<%= customer.name %><% if(customer.phone){ %> · 电话：<%= customer.phone %><% } %></p>

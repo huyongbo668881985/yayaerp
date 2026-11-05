@@ -30,6 +30,24 @@
         <label>账号数上限</label>
         <input type="number" name="max_users" min="1" value="<%= tenant.max_users || '' %>" placeholder="留空 = 不限">
       </div>
+      <hr style="margin:16px 0;border:none;border-top:1px solid #eee">
+      <div class="form-row">
+        <label style="font-weight:600">✨ AI 经营诊断助手（仅对租户管理员开放）</label>
+        <label style="display:flex; align-items:flex-start; gap:8px; margin-top:6px; font-weight:normal; cursor:pointer">
+          <input type="checkbox" id="aiEnabledCheckbox" name="ai_enabled" value="1" <%= tenant.ai_enabled ? 'checked' : '' %> style="width:auto; margin-top:3px" onchange="const sg=document.getElementById('aiSgCheckbox'); if(!this.checked){sg.checked=false;sg.disabled=true;}else{sg.disabled=false;}">
+          <span>
+            <strong>开启 AI 经营诊断（进销存数据）</strong><br>
+            <span class="muted" style="font-size:12px">开启后，该租户的管理员可在导航栏看到「✨ 经营诊断」入口，查询本租户的销售、毛利、应收欠款与商品动销。</span>
+          </span>
+        </label>
+        <label style="display:flex; align-items:flex-start; gap:8px; margin-top:10px; font-weight:normal; cursor:pointer">
+          <input type="checkbox" id="aiSgCheckbox" name="ai_shelfguard_enabled" value="1" <%= tenant.ai_enabled && tenant.ai_shelfguard_enabled ? 'checked' : '' %> <%= tenant.ai_enabled ? '' : 'disabled' %> style="width:auto; margin-top:3px">
+          <span>
+            <strong>关联 ShelfGuard 终端巡检数据</strong><br>
+            <span class="muted" style="font-size:12px">允许 AI 同时拉取 ShelfGuard 的门店拜访次数、陈列评分与货架照片做联合诊断（仅限已对接巡检系统的主租户勾选）。</span>
+          </span>
+        </label>
+      </div>
       <button class="btn" type="submit" style="width:100%">保存</button>
     </form>
   </div>
