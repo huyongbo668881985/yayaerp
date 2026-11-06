@@ -4,9 +4,20 @@
   const configEl = document.getElementById('aiAssistantConfig');
   const config = configEl ? JSON.parse(configEl.textContent || '{}') : {};
 
+  const storePickerEl = document.getElementById('aiStorePicker');
+  const customerSearchInput = document.getElementById('aiCustomerSearchInput');
+  const customerResetGlobalBtn = document.getElementById('aiCustomerResetGlobalBtn');
+  const customerDropdown = document.getElementById('aiCustomerDropdown');
   const customerSelect = document.getElementById('aiCustomerSelect');
   const daysSelect = document.getElementById('aiDaysSelect');
-  const clearBtn = document.getElementById('aiClearBtn');
+  const newChatBtn = document.getElementById('aiNewChatBtn');
+  const historyToggleBtn = document.getElementById('aiHistoryToggleBtn');
+  const historyCountEl = document.getElementById('aiHistoryCount');
+  const historyPanel = document.getElementById('aiHistoryPanel');
+  const historyListEl = document.getElementById('aiHistoryList');
+  const clearAllHistoryBtn = document.getElementById('aiClearAllHistoryBtn');
+  const historyCloseBtn = document.getElementById('aiHistoryCloseBtn');
+
   const chipsLabel = document.getElementById('aiChipsLabel');
   const chipsContainer = document.getElementById('aiChipsContainer');
   const messagesEl = document.getElementById('aiMessages');
@@ -18,7 +29,23 @@
   const lightboxImg = document.getElementById('aiLightboxImg');
 
   let chatHistory = [];
+  let currentSessionId = null;
+  let sessionsList = Array.isArray(config.sessions) ? config.sessions : [];
   let isBusy = false;
+
+  // 提取所有门店选项供前端实时搜索过滤
+  const allStoreOptions = Array.from(customerSelect.options)
+    .filter(opt => opt.value !== '')
+    .map(opt => ({
+      id: String(opt.value),
+      name: opt.getAttribute('data-name') || opt.textContent.trim(),
+      operator: opt.getAttribute('data-operator') || '',
+      label: opt.textContent.trim(),
+      searchKey: `${opt.getAttribute('data-name') || ''} ${opt.getAttribute('data-operator') || ''} ${opt.textContent || ''}`.toLowerCase()
+    }));
+
+  let activeDropdownIdx = -1;
+  let currentMatchedStores = [];
 
   const GLOBAL_PROMPTS = config.shelfguardEnabled
     ? [
@@ -58,6 +85,23 @@
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
+  }
+
+  function getCsrfToken() {
+    const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+    return csrfMeta ? csrfMeta.content : '';
+  }
+
+  function formatDateTimeShort(raw) {
+    if (!raw) return '';
+    const iso = String(raw).includes('T') ? String(raw) : String(raw).replace(' ', 'T') + 'Z';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return String(raw).slice(0, 16);
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mi = String(d.getMinutes()).padStart(2, '0');
+    return `${mm}-${dd} ${hh}:${mi}`;
   }
 
   function renderMarkdown(mdText) {
@@ -134,7 +178,7 @@
       const photosHtml = Array.isArray(card.photos) && card.photos.length > 0
         ? `<div class="ai-photo-strip">${card.photos.map(p => `
             <div class="ai-photo-item">
-              <img src="${escapeHtml(p.url)}" alt="巡检照片" data-full-src="${escapeHtml(p.url)}">
+              <img src="${escapeHtml(p.url)}" alt="巡检照片" width="120" height="90" loading="lazy" data-full-src="${escapeHtml(p.url)}">
               <div class="ai-photo-caption" title="${escapeHtml(p.summary || '')}">${escapeHtml(p.date)} ${p.score != null ? p.score + '分' : ''}</div>
             </div>
           `).join('')}</div>`
@@ -154,11 +198,153 @@
     }).join('')}</div>`;
   }
 
+  // ===== 可搜索门店选择器逻辑 =====
   function getSelectedStoreName() {
     const opt = customerSelect.options[customerSelect.selectedIndex];
     return opt && opt.value ? (opt.getAttribute('data-name') || opt.textContent.trim()) : '';
   }
 
+  function getSelectedStoreDisplayLabel() {
+    const opt = customerSelect.options[customerSelect.selectedIndex];
+    if (!opt || !opt.value) return '';
+    return `🏪 ${opt.textContent.trim()}`;
+  }
+
+  function syncStoreInputDisplay() {
+    if (customerSelect.value) {
+      customerSearchInput.value = getSelectedStoreDisplayLabel();
+      customerResetGlobalBtn.hidden = false;
+    } else {
+      customerSearchInput.value = '';
+      customerResetGlobalBtn.hidden = true;
+    }
+  }
+
+  function closeStoreDropdown() {
+    customerDropdown.hidden = true;
+    customerSearchInput.setAttribute('aria-expanded', 'false');
+    activeDropdownIdx = -1;
+  }
+
+  function selectStoreValue(val) {
+    customerSelect.value = val ? String(val) : '';
+    syncStoreInputDisplay();
+    closeStoreDropdown();
+    renderChips();
+  }
+
+  function renderStoreDropdown(filterQuery) {
+    const q = String(filterQuery || '').trim().toLowerCase();
+    // 如果当前输入框显示的就是已选门店完整标签，则展开时展示全部以便切换
+    const effectiveQuery = (customerSelect.value && customerSearchInput.value === getSelectedStoreDisplayLabel())
+      ? ''
+      : q;
+
+    const matched = effectiveQuery
+      ? allStoreOptions.filter(s => s.searchKey.includes(effectiveQuery)).slice(0, 60)
+      : allStoreOptions.slice(0, 80);
+
+    currentMatchedStores = [{ id: '', name: '全局视角（全部门店排行与对比）', operator: '' }, ...matched];
+    activeDropdownIdx = -1;
+
+    customerDropdown.innerHTML = '';
+    currentMatchedStores.forEach((item, idx) => {
+      const li = document.createElement('li');
+      li.setAttribute('role', 'option');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      const isSelected = String(customerSelect.value || '') === String(item.id);
+      btn.className = 'ai-store-option' + (isSelected ? ' selected' : '');
+      btn.dataset.index = String(idx);
+      if (item.id === '') {
+        btn.innerHTML = `<span>🏢 全局视角（全部门店排行与对比）</span><span class="ai-store-option-op">全公司汇总</span>`;
+      } else {
+        btn.innerHTML = `<span>🏪 ${escapeHtml(item.name)}</span><span class="ai-store-option-op">${escapeHtml(item.operator ? '业务员：' + item.operator : '')}</span>`;
+      }
+      btn.addEventListener('mousedown', e => {
+        e.preventDefault();
+        selectStoreValue(item.id);
+      });
+      li.appendChild(btn);
+      customerDropdown.appendChild(li);
+    });
+
+    if (effectiveQuery && matched.length === 0) {
+      const emptyLi = document.createElement('li');
+      emptyLi.className = 'ai-store-empty';
+      emptyLi.textContent = `未找到匹配「${filterQuery}」的门店，可尝试输入部分关键字或业务员姓名`;
+      customerDropdown.appendChild(emptyLi);
+    }
+
+    customerDropdown.hidden = false;
+    customerSearchInput.setAttribute('aria-expanded', 'true');
+  }
+
+  function highlightDropdownOption(newIdx) {
+    const buttons = Array.from(customerDropdown.querySelectorAll('.ai-store-option'));
+    if (!buttons.length) return;
+    if (newIdx < 0) newIdx = buttons.length - 1;
+    if (newIdx >= buttons.length) newIdx = 0;
+    activeDropdownIdx = newIdx;
+    buttons.forEach((b, i) => {
+      b.classList.toggle('active', i === activeDropdownIdx);
+    });
+    buttons[activeDropdownIdx].scrollIntoView({ block: 'nearest' });
+  }
+
+  customerSearchInput.addEventListener('focus', () => {
+    if (customerSelect.value && customerSearchInput.value === getSelectedStoreDisplayLabel()) {
+      customerSearchInput.select();
+    }
+    renderStoreDropdown(customerSearchInput.value);
+  });
+
+  customerSearchInput.addEventListener('input', () => {
+    renderStoreDropdown(customerSearchInput.value);
+  });
+
+  customerSearchInput.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (customerDropdown.hidden) renderStoreDropdown(customerSearchInput.value);
+      highlightDropdownOption(activeDropdownIdx + 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (customerDropdown.hidden) renderStoreDropdown(customerSearchInput.value);
+      highlightDropdownOption(activeDropdownIdx - 1);
+    } else if (e.key === 'Enter') {
+      if (!customerDropdown.hidden && activeDropdownIdx >= 0 && currentMatchedStores[activeDropdownIdx]) {
+        e.preventDefault();
+        selectStoreValue(currentMatchedStores[activeDropdownIdx].id);
+      } else if (!customerDropdown.hidden && currentMatchedStores.length === 2 && customerSearchInput.value.trim()) {
+        // 唯一匹配门店时按回车直接选中
+        e.preventDefault();
+        selectStoreValue(currentMatchedStores[1].id);
+      }
+    } else if (e.key === 'Escape') {
+      syncStoreInputDisplay();
+      closeStoreDropdown();
+    }
+  });
+
+  customerSearchInput.addEventListener('blur', () => {
+    setTimeout(() => {
+      syncStoreInputDisplay();
+      closeStoreDropdown();
+    }, 150);
+  });
+
+  customerResetGlobalBtn.addEventListener('click', () => {
+    selectStoreValue('');
+  });
+
+  document.addEventListener('click', e => {
+    if (storePickerEl && !storePickerEl.contains(e.target)) {
+      closeStoreDropdown();
+    }
+  });
+
+  // ===== 快捷提问 Chips =====
   function renderChips() {
     const storeName = getSelectedStoreName();
     chipsLabel.textContent = storeName
@@ -193,6 +379,216 @@
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
+  function bindBubbleInteractions(bubbleEl, rawAnswerText) {
+    const copyBtn = bubbleEl.querySelector('.ai-copy-btn');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(rawAnswerText);
+          copyBtn.textContent = '✓ 已复制';
+          setTimeout(() => { copyBtn.textContent = '📋 复制诊断结果'; }, 1800);
+        } catch (_) {
+          copyBtn.textContent = '复制失败';
+        }
+      });
+    }
+    Array.from(bubbleEl.querySelectorAll('img[data-full-src]')).forEach(img => {
+      img.addEventListener('click', () => {
+        lightboxImg.src = img.getAttribute('data-full-src');
+        lightbox.classList.add('open');
+      });
+    });
+  }
+
+  function appendUserBubble(text) {
+    const userMsgEl = document.createElement('div');
+    userMsgEl.className = 'ai-msg ai-msg-user';
+    userMsgEl.innerHTML = `<div class="ai-bubble-user">${escapeHtml(text)}</div>`;
+    messagesEl.appendChild(userMsgEl);
+  }
+
+  function appendAssistantBubble(answer, cards) {
+    const assistantMsgEl = document.createElement('div');
+    assistantMsgEl.className = 'ai-msg ai-msg-assistant';
+    const cardsHtml = renderEvidenceCards(cards);
+    const mdHtml = renderMarkdown(answer);
+    assistantMsgEl.innerHTML = `
+      <div class="ai-bubble-assistant">
+        ${cardsHtml}
+        <div class="ai-markdown-body">${mdHtml}</div>
+        <div class="ai-msg-actions">
+          <button type="button" class="btn btn-secondary btn-sm ai-copy-btn">📋 复制诊断结果</button>
+        </div>
+      </div>
+    `;
+    messagesEl.appendChild(assistantMsgEl);
+    bindBubbleInteractions(assistantMsgEl.querySelector('.ai-bubble-assistant'), answer);
+  }
+
+  // ===== 历史对话列表与会话切换 =====
+  function renderHistoryList() {
+    if (historyCountEl) {
+      historyCountEl.textContent = String(sessionsList.length);
+    }
+    if (!historyListEl) return;
+    historyListEl.innerHTML = '';
+
+    if (sessionsList.length === 0) {
+      const emptyLi = document.createElement('li');
+      emptyLi.className = 'ai-history-empty';
+      emptyLi.textContent = '暂无历史对话记录，发起提问后会自动保存在这里。';
+      historyListEl.appendChild(emptyLi);
+      return;
+    }
+
+    sessionsList.forEach(s => {
+      const li = document.createElement('li');
+      li.className = 'ai-history-item' + (Number(currentSessionId) === Number(s.id) ? ' active' : '');
+
+      const selectBtn = document.createElement('button');
+      selectBtn.type = 'button';
+      selectBtn.className = 'ai-history-select-btn';
+      const scopeTag = s.customerName ? `🏪 ${s.customerName}` : '🏢 全局视角';
+      const rounds = Math.max(1, Math.ceil((s.messageCount || 2) / 2));
+      selectBtn.innerHTML = `
+        <div class="ai-history-item-title">${escapeHtml(s.title || '经营诊断对话')}</div>
+        <div class="ai-history-item-meta">
+          <span>${escapeHtml(scopeTag)}</span>
+          <span>近 ${escapeHtml(s.days || 90)} 天</span>
+          <span>${rounds} 轮问答</span>
+          <span>${escapeHtml(formatDateTimeShort(s.updatedAt))}</span>
+        </div>
+      `;
+      selectBtn.addEventListener('click', () => {
+        loadSessionById(s.id);
+      });
+
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'btn btn-secondary btn-sm';
+      delBtn.textContent = '删除';
+      delBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        deleteSessionById(s.id);
+      });
+
+      li.appendChild(selectBtn);
+      li.appendChild(delBtn);
+      historyListEl.appendChild(li);
+    });
+  }
+
+  function applyLoadedSession(session) {
+    if (!session) return;
+    currentSessionId = session.id;
+    chatHistory = [];
+    Array.from(messagesEl.querySelectorAll('.ai-msg')).forEach(el => el.remove());
+
+    if (session.customerId && Array.from(customerSelect.options).some(o => Number(o.value) === Number(session.customerId))) {
+      customerSelect.value = String(session.customerId);
+    } else {
+      customerSelect.value = '';
+    }
+    syncStoreInputDisplay();
+
+    if (session.days && Array.from(daysSelect.options).some(o => Number(o.value) === Number(session.days))) {
+      daysSelect.value = String(session.days);
+    }
+    renderChips();
+
+    const msgs = Array.isArray(session.messages) ? session.messages : [];
+    if (msgs.length === 0) {
+      if (emptyStateEl) emptyStateEl.style.display = '';
+    } else {
+      if (emptyStateEl) emptyStateEl.style.display = 'none';
+      msgs.forEach(m => {
+        if (m.role === 'user') {
+          appendUserBubble(m.content);
+        } else if (m.role === 'assistant') {
+          appendAssistantBubble(m.content, m.cards || []);
+        }
+        chatHistory.push({ role: m.role, content: m.content });
+      });
+      scrollToBottom();
+    }
+
+    renderHistoryList();
+  }
+
+  function startNewChat() {
+    if (isBusy) return;
+    currentSessionId = null;
+    chatHistory = [];
+    Array.from(messagesEl.querySelectorAll('.ai-msg')).forEach(el => el.remove());
+    if (emptyStateEl) emptyStateEl.style.display = '';
+    renderHistoryList();
+    if (window.history && window.history.replaceState) {
+      window.history.replaceState(null, '', '/ai-assistant');
+    }
+  }
+
+  async function loadSessionById(sessionId) {
+    if (isBusy || !sessionId) return;
+    try {
+      const res = await fetch(`/ai-assistant/sessions/${encodeURIComponent(sessionId)}`, {
+        headers: { Accept: 'application/json' }
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok || !data.session) return;
+      applyLoadedSession(data.session);
+      if (historyPanel && !historyPanel.hidden) {
+        historyPanel.hidden = true;
+        historyToggleBtn.setAttribute('aria-expanded', 'false');
+      }
+    } catch (_) {}
+  }
+
+  async function deleteSessionById(sessionId) {
+    if (!sessionId) return;
+    try {
+      const res = await fetch(`/ai-assistant/sessions/${encodeURIComponent(sessionId)}/delete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'X-CSRF-Token': getCsrfToken()
+        },
+        body: JSON.stringify({})
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        sessionsList = Array.isArray(data.sessions) ? data.sessions : [];
+        if (Number(currentSessionId) === Number(sessionId)) {
+          startNewChat();
+        } else {
+          renderHistoryList();
+        }
+      }
+    } catch (_) {}
+  }
+
+  async function clearAllSessions() {
+    if (sessionsList.length === 0) return;
+    if (!window.confirm('确定要清空您名下的全部历史诊断对话吗？')) return;
+    try {
+      const res = await fetch('/ai-assistant/sessions/clear', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'X-CSRF-Token': getCsrfToken()
+        },
+        body: JSON.stringify({})
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        sessionsList = [];
+        startNewChat();
+      }
+    } catch (_) {}
+  }
+
+  // ===== 发送提问与流式渲染 =====
   async function sendMessage(rawText) {
     const text = String(rawText || '').trim();
     if (!text || isBusy) return;
@@ -201,10 +597,7 @@
     inputEl.value = '';
     setBusyState(true);
 
-    const userMsgEl = document.createElement('div');
-    userMsgEl.className = 'ai-msg ai-msg-user';
-    userMsgEl.innerHTML = `<div class="ai-bubble-user">${escapeHtml(text)}</div>`;
-    messagesEl.appendChild(userMsgEl);
+    appendUserBubble(text);
 
     const assistantMsgEl = document.createElement('div');
     assistantMsgEl.className = 'ai-msg ai-msg-assistant';
@@ -217,12 +610,20 @@
     scrollToBottom();
 
     const bubbleEl = assistantMsgEl.querySelector('.ai-bubble-assistant');
-    const csrfMeta = document.querySelector('meta[name="csrf-token"]');
-    const csrfToken = csrfMeta ? csrfMeta.content : '';
     const customerId = customerSelect.value ? Number(customerSelect.value) : null;
     const days = daysSelect.value ? Number(daysSelect.value) : 90;
 
-    function renderFinalReply(answer, cards) {
+    function renderFinalReply(payload) {
+      const answer = payload.answer || '';
+      const cards = payload.cards || [];
+      if (payload.sessionId) {
+        currentSessionId = payload.sessionId;
+      }
+      if (Array.isArray(payload.sessions)) {
+        sessionsList = payload.sessions;
+      }
+      renderHistoryList();
+
       const cardsHtml = renderEvidenceCards(cards);
       const mdHtml = renderMarkdown(answer);
       bubbleEl.innerHTML = `
@@ -232,24 +633,7 @@
           <button type="button" class="btn btn-secondary btn-sm ai-copy-btn">📋 复制诊断结果</button>
         </div>
       `;
-      const copyBtn = bubbleEl.querySelector('.ai-copy-btn');
-      if (copyBtn) {
-        copyBtn.addEventListener('click', async () => {
-          try {
-            await navigator.clipboard.writeText(answer);
-            copyBtn.textContent = '✓ 已复制';
-            setTimeout(() => { copyBtn.textContent = '📋 复制诊断结果'; }, 1800);
-          } catch (_) {
-            copyBtn.textContent = '复制失败';
-          }
-        });
-      }
-      Array.from(bubbleEl.querySelectorAll('img[data-full-src]')).forEach(img => {
-        img.addEventListener('click', () => {
-          lightboxImg.src = img.getAttribute('data-full-src');
-          lightbox.classList.add('open');
-        });
-      });
+      bindBubbleInteractions(bubbleEl, answer);
 
       chatHistory.push({ role: 'user', content: text });
       chatHistory.push({ role: 'assistant', content: answer });
@@ -262,10 +646,11 @@
         headers: {
           'Content-Type': 'application/json',
           Accept: 'text/event-stream, application/json',
-          'X-CSRF-Token': csrfToken
+          'X-CSRF-Token': getCsrfToken()
         },
         body: JSON.stringify({
           message: text,
+          sessionId: currentSessionId,
           customerId,
           days,
           history: chatHistory.slice(-6),
@@ -308,7 +693,7 @@
               bubbleEl.innerHTML = `<div class="ai-status-step">⏳ ${escapeHtml(payload.text)}</div>`;
               scrollToBottom();
             } else if (eventType === 'result') {
-              renderFinalReply(payload.answer || '', payload.cards || []);
+              renderFinalReply(payload);
               finished = true;
             } else if (eventType === 'error') {
               throw new Error(payload.error || '诊断遇到异常');
@@ -318,7 +703,7 @@
       } else {
         const data = await res.json();
         if (!data.ok) throw new Error(data.error || '诊断失败');
-        renderFinalReply(data.answer || '', data.cards || []);
+        renderFinalReply(data);
       }
     } catch (err) {
       bubbleEl.innerHTML = `<div class="error" style="margin:0">⚠️ ${escapeHtml(err.message)}</div>`;
@@ -327,14 +712,27 @@
     }
   }
 
-  customerSelect.addEventListener('change', () => {
-    renderChips();
+  // ===== 事件绑定 =====
+  newChatBtn.addEventListener('click', () => {
+    startNewChat();
   });
 
-  clearBtn.addEventListener('click', () => {
-    chatHistory = [];
-    Array.from(messagesEl.querySelectorAll('.ai-msg')).forEach(el => el.remove());
-    if (emptyStateEl) emptyStateEl.style.display = '';
+  historyToggleBtn.addEventListener('click', () => {
+    const nextHidden = !historyPanel.hidden;
+    historyPanel.hidden = nextHidden;
+    historyToggleBtn.setAttribute('aria-expanded', nextHidden ? 'false' : 'true');
+    if (!nextHidden) {
+      renderHistoryList();
+    }
+  });
+
+  historyCloseBtn.addEventListener('click', () => {
+    historyPanel.hidden = true;
+    historyToggleBtn.setAttribute('aria-expanded', 'false');
+  });
+
+  clearAllHistoryBtn.addEventListener('click', () => {
+    clearAllSessions();
   });
 
   chatForm.addEventListener('submit', e => {
@@ -354,14 +752,20 @@
     lightboxImg.src = '';
   });
 
+  // ===== 初始化渲染 =====
+  syncStoreInputDisplay();
   renderChips();
+  renderHistoryList();
 
-  // 如果是从客户列表/对账页带着 ?customer_id= 进来的，自动发起该店综合诊断
   if (config.initialCustomerId) {
+    // 从客户列表或对账单点击「✨ 诊断」进入：针对该门店自动发起新对话
     const storeName = getSelectedStoreName();
     if (storeName) {
       const firstPrompt = getStorePrompts(storeName)[0];
       sendMessage(firstPrompt);
     }
+  } else if (config.initialSession) {
+    // 平时从导航栏进入或从销售单/对账单返回：自动恢复最近一次对话
+    applyLoadedSession(config.initialSession);
   }
 })();

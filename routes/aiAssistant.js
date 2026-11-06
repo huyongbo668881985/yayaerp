@@ -4,6 +4,12 @@ const express = require('express');
 const { requireAdmin } = require('../middleware/auth');
 const {
   runDiagnosticChat,
+  listUserChatSessions,
+  getUserChatSessionWithMessages,
+  saveDiagnosticTurn,
+  deleteUserChatSession,
+  clearUserChatSessions,
+  CHAT_RETENTION_DAYS,
   shelfguardConfig,
   llmConfig
 } = require('../lib/aiAssistant');
@@ -53,6 +59,7 @@ function requireAiEnabled(req, res, next) {
 router.get('/ai-assistant', requireAdmin, requireAiEnabled, (req, res) => {
   res.set('Cache-Control', 'no-store');
   const db = req.tenantDb;
+  const userId = req.session.user.id;
   const customers = db.prepare(`
     SELECT c.id, c.name, u.name AS operator_name
     FROM customers c
@@ -63,6 +70,18 @@ router.get('/ai-assistant', requireAdmin, requireAiEnabled, (req, res) => {
   const initialCustomerId = req.query.customer_id && /^[1-9]\d*$/.test(String(req.query.customer_id))
     ? Number(req.query.customer_id)
     : null;
+  const requestedSessionId = req.query.session_id && /^[1-9]\d*$/.test(String(req.query.session_id))
+    ? Number(req.query.session_id)
+    : null;
+  const forceNew = req.query.new === '1';
+
+  const sessions = listUserChatSessions(db, userId);
+  let initialSession = null;
+  if (requestedSessionId) {
+    initialSession = getUserChatSessionWithMessages(db, userId, requestedSessionId);
+  } else if (!initialCustomerId && !forceNew && sessions.length > 0) {
+    initialSession = getUserChatSessionWithMessages(db, userId, sessions[0].id);
+  }
 
   const llm = llmConfig();
   const sg = shelfguardConfig();
@@ -70,6 +89,9 @@ router.get('/ai-assistant', requireAdmin, requireAiEnabled, (req, res) => {
   res.render('ai_assistant', {
     customers,
     initialCustomerId,
+    sessions,
+    initialSession,
+    retentionDays: CHAT_RETENTION_DAYS,
     aiStatus: {
       llmConfigured: llm.configured,
       llmModel: llm.model,
@@ -79,8 +101,39 @@ router.get('/ai-assistant', requireAdmin, requireAiEnabled, (req, res) => {
   });
 });
 
+router.get('/ai-assistant/sessions', requireAdmin, requireAiEnabled, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const sessions = listUserChatSessions(req.tenantDb, req.session.user.id);
+  return res.json({ ok: true, sessions });
+});
+
+router.get('/ai-assistant/sessions/:id', requireAdmin, requireAiEnabled, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const sid = /^[1-9]\d*$/.test(String(req.params.id)) ? Number(req.params.id) : null;
+  if (!sid) return res.status(400).json({ ok: false, error: '无效的会话 ID' });
+  const session = getUserChatSessionWithMessages(req.tenantDb, req.session.user.id, sid);
+  if (!session) {
+    return res.status(404).json({ ok: false, error: '未找到该对话记录或已过期自动删除' });
+  }
+  return res.json({ ok: true, session });
+});
+
+router.post('/ai-assistant/sessions/clear', requireAdmin, requireAiEnabled, jsonParser, (req, res) => {
+  clearUserChatSessions(req.tenantDb, req.session.user.id);
+  return res.json({ ok: true, sessions: [] });
+});
+
+router.post('/ai-assistant/sessions/:id/delete', requireAdmin, requireAiEnabled, jsonParser, (req, res) => {
+  const sid = /^[1-9]\d*$/.test(String(req.params.id)) ? Number(req.params.id) : null;
+  if (!sid) return res.status(400).json({ ok: false, error: '无效的会话 ID' });
+  deleteUserChatSession(req.tenantDb, req.session.user.id, sid);
+  const sessions = listUserChatSessions(req.tenantDb, req.session.user.id);
+  return res.json({ ok: true, sessions });
+});
+
 router.post('/ai-assistant/chat', requireAdmin, requireAiEnabled, checkChatRateLimit, jsonParser, async (req, res) => {
   const body = req.body || {};
+  const userId = req.session.user.id;
   const message = String(body.message || '').trim().slice(0, 1000);
   if (!message) {
     return res.status(400).json({ ok: false, error: '请输入要诊断的问题' });
@@ -89,8 +142,18 @@ router.post('/ai-assistant/chat', requireAdmin, requireAiEnabled, checkChatRateL
   const selectedCustomerId = body.customerId && Number.isInteger(Number(body.customerId)) && Number(body.customerId) > 0
     ? Number(body.customerId)
     : null;
+  const sessionId = body.sessionId && Number.isInteger(Number(body.sessionId)) && Number(body.sessionId) > 0
+    ? Number(body.sessionId)
+    : null;
   const days = body.days ? Number(body.days) : 90;
-  const history = Array.isArray(body.history) ? body.history : [];
+
+  let history = Array.isArray(body.history) ? body.history : [];
+  if (history.length === 0 && sessionId) {
+    const existingSession = getUserChatSessionWithMessages(req.tenantDb, userId, sessionId);
+    if (existingSession && Array.isArray(existingSession.messages)) {
+      history = existingSession.messages.slice(-6).map(m => ({ role: m.role, content: m.content }));
+    }
+  }
   const wantStream = Boolean(body.stream);
 
   if (wantStream) {
@@ -114,10 +177,23 @@ router.post('/ai-assistant/chat', requireAdmin, requireAiEnabled, checkChatRateL
         days,
         onStatus: statusText => sendEvent('status', { text: statusText })
       });
+      const saved = saveDiagnosticTurn(req.tenantDb, {
+        userId,
+        sessionId,
+        customerId: selectedCustomerId,
+        days,
+        userMessage: message,
+        assistantAnswer: result.answer,
+        cards: result.cards
+      });
+      const sessions = listUserChatSessions(req.tenantDb, userId);
       sendEvent('result', {
         ok: true,
         answer: result.answer,
-        cards: result.cards
+        cards: result.cards,
+        sessionId: saved.sessionId,
+        session: saved.session,
+        sessions
       });
     } catch (err) {
       console.error('[ai-assistant] 诊断对话异常:', err);
@@ -140,10 +216,23 @@ router.post('/ai-assistant/chat', requireAdmin, requireAiEnabled, checkChatRateL
       selectedCustomerId,
       days
     });
+    const saved = saveDiagnosticTurn(req.tenantDb, {
+      userId,
+      sessionId,
+      customerId: selectedCustomerId,
+      days,
+      userMessage: message,
+      assistantAnswer: result.answer,
+      cards: result.cards
+    });
+    const sessions = listUserChatSessions(req.tenantDb, userId);
     return res.json({
       ok: true,
       answer: result.answer,
-      cards: result.cards
+      cards: result.cards,
+      sessionId: saved.sessionId,
+      session: saved.session,
+      sessions
     });
   } catch (err) {
     console.error('[ai-assistant] 诊断对话异常:', err);

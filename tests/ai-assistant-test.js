@@ -218,10 +218,13 @@ async function main() {
     adminName: '王总',
     warehouseName: '总仓'
   });
-  // 创建一个操作员账号
+  // 创建一个操作员账号与第二个管理员账号（用于验证历史对话按人隔离）
   seedDb.prepare(
     'INSERT INTO users (username, password_hash, name, role, active) VALUES (?,?,?,?,1)'
   ).run('op1', bcrypt.hashSync(TENANT_OP_PW, 10), '张三', 'operator');
+  seedDb.prepare(
+    'INSERT INTO users (username, password_hash, name, role, active) VALUES (?,?,?,?,1)'
+  ).run('admin2', bcrypt.hashSync(TENANT_ADMIN_PW, 10), '李总', 'admin');
   const opUser = seedDb.prepare("SELECT id FROM users WHERE username='op1'").get();
 
   // 创建门店与客户标签（流通 / 餐饮）、商品、销售单
@@ -364,6 +367,40 @@ async function main() {
   const searchRes = querySearchCustomers(tagCheckDb, { operatorName: '张三', tagName: '流通客户' });
   tagCheckDb.close();
   ok(searchRes.total_matched_customers === 1 && searchRes.customers[0].name === '东门烟酒店' && searchRes.customers[0].tags.includes('流通'), 'search_customers 支持按业务员姓名+客户标签（自动兼容“流通客户”后缀）精准筛选');
+
+  section('6. 历史对话按人隔离、30天自动过期清理与门店搜索框');
+  ok(Boolean(chatBody.sessionId) && Array.isArray(globalBody.sessions) && globalBody.sessions.length === 2, '提问后自动落库生成历史会话并返回会话列表');
+
+  r = await adminClient.get('/ai-assistant');
+  ok(r.text.includes('aiCustomerSearchInput') && r.text.includes('aiHistoryPanel'), '诊断页包含可搜索门店输入框与历史对话面板');
+
+  r = await adminClient.get(`/ai-assistant/sessions/${chatBody.sessionId}`);
+  const loadedSess = JSON.parse(r.text);
+  ok(r.status === 200 && loadedSess.ok && loadedSess.session.messages.length === 2 && loadedSess.session.messages[1].cards.length === 2, '可完整回看历史会话的问答正文及当时的数据证据卡片');
+
+  // 第二个管理员登录，验证严格按人隔离
+  const admin2Client = new Client();
+  await admin2Client.post('/login', { tenant_code: TENANT, username: 'admin2', password: TENANT_ADMIN_PW });
+  r = await admin2Client.get('/ai-assistant/sessions');
+  const admin2List = JSON.parse(r.text);
+  ok(r.status === 200 && admin2List.sessions.length === 0, '第二个管理员看到的本人历史会话为空（按人严格隔离）');
+
+  r = await admin2Client.get(`/ai-assistant/sessions/${chatBody.sessionId}`);
+  ok(r.status === 404, '第二个管理员尝试读取王总的历史会话返回 404');
+
+  // 模拟第一个会话最后更新时间超过 30 天（31天前），验证自动过期删除
+  const expDb = openTenantDbByPath(updatedTenant.db_path);
+  expDb.prepare("UPDATE ai_chat_sessions SET updated_at = datetime('now', '-31 days') WHERE id = ?").run(chatBody.sessionId);
+  expDb.close();
+
+  r = await adminClient.get('/ai-assistant/sessions');
+  const afterExpireList = JSON.parse(r.text);
+  ok(afterExpireList.sessions.length === 1 && afterExpireList.sessions[0].id === globalBody.sessionId, '超过30天的历史会话在访问时自动删除，仅保留30天内会话');
+
+  const checkCascadeDb = openTenantDbByPath(updatedTenant.db_path);
+  const orphanMsgs = checkCascadeDb.prepare('SELECT COUNT(*) AS c FROM ai_chat_messages WHERE session_id = ?').get(chatBody.sessionId).c;
+  checkCascadeDb.close();
+  ok(orphanMsgs === 0, '过期会话删除后其名下消息记录通过外键级联自动清除');
 
   console.log(`\n===== AI 经营诊断自检结果：PASS ${PASS} / FAIL ${FAIL} =====`);
   return FAIL;

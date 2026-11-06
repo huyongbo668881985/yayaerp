@@ -31,7 +31,175 @@
   .ai-toolbar-grid .form-row {
     margin-bottom: 0;
     flex: 1;
-    min-width: 180px;
+    min-width: 200px;
+  }
+  /* 可搜索门店选择器 */
+  .ai-store-picker {
+    position: relative;
+  }
+  .ai-store-input-wrap {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    position: relative;
+  }
+  .ai-store-input-wrap input[type="search"] {
+    width: 100%;
+    padding-right: 12px;
+  }
+  .ai-store-reset-btn {
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .ai-store-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    max-height: 280px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #d0d7de;
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(31, 35, 40, 0.14);
+    z-index: 1200;
+    padding: 6px;
+    margin: 0;
+    list-style: none;
+  }
+  .ai-store-dropdown[hidden] {
+    display: none !important;
+  }
+  .ai-store-option {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 13px;
+    color: #1f2328;
+    cursor: pointer;
+  }
+  .ai-store-option:hover,
+  .ai-store-option.active {
+    background: #eef4ff;
+    color: #0969da;
+  }
+  .ai-store-option.selected {
+    font-weight: 600;
+    background: #ddf4ff;
+    color: #0969da;
+  }
+  .ai-store-option-op {
+    font-size: 12px;
+    color: #57606a;
+    flex-shrink: 0;
+  }
+  .ai-store-empty {
+    padding: 12px 10px;
+    font-size: 12px;
+    color: #57606a;
+    text-align: center;
+  }
+  /* 历史对话面板 */
+  .ai-history-panel {
+    margin-bottom: 14px;
+    padding: 14px 16px;
+    border: 1px solid #d0d7de;
+    background: #fff;
+  }
+  .ai-history-panel[hidden] {
+    display: none !important;
+  }
+  .ai-history-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #eaeef2;
+  }
+  .ai-history-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1f2328;
+    margin: 0;
+  }
+  .ai-history-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 260px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .ai-history-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 12px;
+    border: 1px solid #eaeef2;
+    border-radius: 8px;
+    background: #fafbfc;
+    transition: all 0.15s ease;
+  }
+  .ai-history-item:hover {
+    border-color: #2f6feb;
+    background: #f0f6ff;
+  }
+  .ai-history-item.active {
+    border-color: #2f6feb;
+    background: #eef4ff;
+  }
+  .ai-history-select-btn {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    background: transparent;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    color: inherit;
+    font: inherit;
+  }
+  .ai-history-item-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1f2328;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 3px;
+  }
+  .ai-history-item-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 11px;
+    color: #57606a;
+  }
+  .ai-history-empty {
+    padding: 20px 12px;
+    text-align: center;
+    color: #57606a;
+    font-size: 13px;
+  }
+  .ai-history-footer {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px dashed #eaeef2;
+    font-size: 12px;
+    color: #57606a;
   }
   .ai-chips-section {
     margin-bottom: 14px;
@@ -340,12 +508,25 @@
 
 <div class="card ai-toolbar-card">
   <div class="ai-toolbar-grid">
-    <div class="form-row">
-      <label for="aiCustomerSelect">诊断对象（门店）</label>
-      <select id="aiCustomerSelect">
+    <div class="form-row ai-store-picker" id="aiStorePicker">
+      <label for="aiCustomerSearchInput">诊断对象（支持输入店名或业务员搜索）</label>
+      <div class="ai-store-input-wrap">
+        <input
+          type="search"
+          id="aiCustomerSearchInput"
+          placeholder="🔍 输入门店名称或业务员搜索（留空为全局视角）…"
+          autocomplete="off"
+          role="combobox"
+          aria-expanded="false"
+          aria-controls="aiCustomerDropdown"
+        >
+        <button type="button" class="btn btn-secondary btn-sm ai-store-reset-btn" id="aiCustomerResetGlobalBtn" hidden>切回全局</button>
+      </div>
+      <ul class="ai-store-dropdown" id="aiCustomerDropdown" role="listbox" hidden></ul>
+      <select id="aiCustomerSelect" hidden aria-hidden="true" tabindex="-1">
         <option value="">🏢 全局视角（全部门店排行与对比）</option>
         <% customers.forEach(function(c) { %>
-          <option value="<%= c.id %>" data-name="<%= c.name %>" <%= initialCustomerId === c.id ? 'selected' : '' %>>
+          <option value="<%= c.id %>" data-name="<%= c.name %>" data-operator="<%= c.operator_name || '' %>" <%= initialCustomerId === c.id ? 'selected' : '' %>>
             <%= c.name %><%= c.operator_name ? '（' + c.operator_name + '）' : '' %>
           </option>
         <% }) %>
@@ -359,11 +540,28 @@
         <option value="180">近 180 天（半年趋势）</option>
       </select>
     </div>
-    <div style="display:flex; gap:8px;">
-      <button type="button" class="btn btn-secondary" id="aiClearBtn">清空对话</button>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button type="button" class="btn btn-secondary" id="aiNewChatBtn">＋ 新建对话</button>
+      <button type="button" class="btn btn-secondary" id="aiHistoryToggleBtn" aria-expanded="false" aria-controls="aiHistoryPanel">
+        🕘 历史对话 (<span id="aiHistoryCount"><%= Array.isArray(sessions) ? sessions.length : 0 %></span>)
+      </button>
     </div>
   </div>
 </div>
+
+<section class="card ai-history-panel" id="aiHistoryPanel" aria-label="历史对话列表" hidden>
+  <div class="ai-history-header">
+    <h2 class="ai-history-title">🕘 我的历史对话（保留最近 <%= typeof retentionDays === 'number' ? retentionDays : 30 %> 天）</h2>
+    <div style="display:flex; gap:8px;">
+      <button type="button" class="btn btn-secondary btn-sm" id="aiClearAllHistoryBtn">清空全部历史</button>
+      <button type="button" class="btn btn-secondary btn-sm" id="aiHistoryCloseBtn">收起</button>
+    </div>
+  </div>
+  <ul class="ai-history-list" id="aiHistoryList"></ul>
+  <div class="ai-history-footer">
+    🔒 历史对话按当前登录管理员账号独立隔离保存，仅您本人可见；超过 <%= typeof retentionDays === 'number' ? retentionDays : 30 %> 天的对话会自动清除。
+  </div>
+</section>
 
 <div class="ai-chips-section">
   <span class="ai-chips-label" id="aiChipsLabel">💡 点击下方常见问题立即诊断：</span>
@@ -379,20 +577,22 @@
       </p>
     </div>
   </div>
-  <form class="ai-input-bar" id="aiChatForm" onsubmit="return false;">
+  <form class="ai-input-bar" id="aiChatForm">
     <textarea id="aiInput" rows="1" placeholder="输入你想了解的经营问题，例如：东门烟酒店最近为什么销量下滑？（Enter 发送，Shift+Enter 换行）"></textarea>
     <button type="submit" class="btn" id="aiSendBtn">发送诊断</button>
   </form>
 </div>
 
 <div class="ai-lightbox" id="aiLightbox" role="dialog" aria-label="巡检照片预览">
-  <img id="aiLightboxImg" src="" alt="巡检照片大图">
+  <img id="aiLightboxImg" src="" alt="巡检照片大图" width="800" height="600">
 </div>
 
 <script id="aiAssistantConfig" type="application/json"><%- JSON.stringify({
   initialCustomerId: initialCustomerId || null,
-  shelfguardEnabled: Boolean(aiStatus.shelfguardEnabled)
-}) %></script>
+  shelfguardEnabled: Boolean(aiStatus.shelfguardEnabled),
+  sessions: Array.isArray(sessions) ? sessions : [],
+  initialSession: initialSession || null
+}).replace(/</g, '\\u003c') %></script>
 <script src="/aiAssistant.js" defer></script>
 
 <%- include('partials/footer') %>
