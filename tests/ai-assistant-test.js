@@ -224,11 +224,20 @@ async function main() {
   ).run('op1', bcrypt.hashSync(TENANT_OP_PW, 10), '张三', 'operator');
   const opUser = seedDb.prepare("SELECT id FROM users WHERE username='op1'").get();
 
-  // 创建门店与商品、销售单（上期拿过货但本期停拿的商品 B，以及本期仍有欠款的销售单）
+  // 创建门店与客户标签（流通 / 餐饮）、商品、销售单
   seedDb.prepare(
     'INSERT INTO customers (name, contact, phone, address, operator_id) VALUES (?,?,?,?,?)'
   ).run('东门烟酒店', '李老板', '13800000001', '东大街18号', opUser.id);
+  seedDb.prepare(
+    'INSERT INTO customers (name, contact, phone, address, operator_id) VALUES (?,?,?,?,?)'
+  ).run('西街大排档', '陈老板', '13800000002', '西街9号', opUser.id);
   const cust = seedDb.prepare("SELECT id FROM customers WHERE name='东门烟酒店'").get();
+  const cust2 = seedDb.prepare("SELECT id FROM customers WHERE name='西街大排档'").get();
+
+  const tagLiutong = seedDb.prepare("INSERT INTO customer_tags (name, color) VALUES ('流通', 'blue')"). run().lastInsertRowid;
+  const tagCanyin = seedDb.prepare("INSERT INTO customer_tags (name, color) VALUES ('餐饮', 'orange')").run().lastInsertRowid;
+  seedDb.prepare('INSERT INTO customer_tag_links (customer_id, tag_id) VALUES (?,?)').run(cust.id, tagLiutong);
+  seedDb.prepare('INSERT INTO customer_tag_links (customer_id, tag_id) VALUES (?,?)').run(cust2.id, tagCanyin);
 
   seedDb.prepare(
     'INSERT INTO products (sku, name, spec, unit, pack_size, cost_price, sale_price) VALUES (?,?,?,?,?,?,?)'
@@ -348,6 +357,13 @@ async function main() {
   });
   const globalBody = JSON.parse(r.text);
   ok(globalBody.ok === true && globalBody.cards.some(c => c.type === 'tenant_overview'), '全局诊断返回全公司经营与巡检概览卡片');
+  ok(globalBody.answer.includes('流通1家') && globalBody.answer.includes('餐饮1家'), '全局诊断准确统计业务员名下各客户标签（流通/餐饮）数量');
+
+  const { querySearchCustomers } = require('../lib/aiAssistant');
+  const tagCheckDb = openTenantDbByPath(updatedTenant.db_path);
+  const searchRes = querySearchCustomers(tagCheckDb, { operatorName: '张三', tagName: '流通客户' });
+  tagCheckDb.close();
+  ok(searchRes.total_matched_customers === 1 && searchRes.customers[0].name === '东门烟酒店' && searchRes.customers[0].tags.includes('流通'), 'search_customers 支持按业务员姓名+客户标签（自动兼容“流通客户”后缀）精准筛选');
 
   console.log(`\n===== AI 经营诊断自检结果：PASS ${PASS} / FAIL ${FAIL} =====`);
   return FAIL;
