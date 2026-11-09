@@ -133,7 +133,7 @@
 <% const spq = 'start=' + encodeURIComponent(start) + '&end=' + encodeURIComponent(end); %>
 <div class="card report-sp-card">
   <div class="report-detail-head">
-    <h2 class="report-sp-title">业务员业绩 <span class="report-tip" title="按销售单负责人归属；退货按原销售单负责人冲减，无关联原单的退货计入“未归属退货”。毛利固定为实现毛利（不含应收），毛利率 = 实现毛利 / 净销售额。">?</span></h2>
+    <h2 class="report-sp-title">业务员业绩 <span class="report-tip" title="按销售单负责人归属；退货按原销售单负责人冲减，无关联原单的退货计入“未归属退货”。毛利固定为实现毛利（不含应收），毛利率 = 实现毛利 / 不含应收销售额。">?</span></h2>
     <a class="btn btn-sm" href="/reports/salesperson-export?<%= spq %>">⬇ 导出</a>
   </div>
   <% if (salespersonPerf.rows.length === 0) { %>
@@ -148,6 +148,7 @@
           <th class="num-col">销售额</th>
           <th class="num-col">退货额</th>
           <th class="num-col">净销售额</th>
+          <th class="num-col">不含应收销售额</th>
           <th class="num-col">实现毛利（不含应收）</th>
           <th class="num-col">毛利率</th>
           <th class="num-col">客户数</th>
@@ -165,6 +166,7 @@
             <td class="num-col"><%= fmtMoney(r.sales_amount) %></td>
             <td class="num-col <%= r.return_amount > 0 ? 'text-danger' : '' %>"><%= r.return_amount > 0 ? '−' : '' %><%= fmtMoney(r.return_amount) %></td>
             <td class="num-col"><%= fmtMoney(r.net_sales) %></td>
+            <td class="num-col"><%= fmtMoney(r.settled_net_sales) %></td>
             <td class="num-col <%= neg ? 'text-danger' : '' %>"><strong><%= fmtMoney(r.realized_profit) %></strong></td>
             <td class="num-col <%= neg ? 'text-danger' : '' %>"><%= r.margin_rate === null ? '-' : r.margin_rate.toFixed(1) + '%' %></td>
             <td class="num-col"><%= r.unassigned ? '-' : r.customer_count %></td>
@@ -180,6 +182,7 @@
           <td class="num-col"><%= fmtMoney(t.sales_amount) %></td>
           <td class="num-col"><%= fmtMoney(t.return_amount) %></td>
           <td class="num-col"><%= fmtMoney(t.net_sales) %></td>
+          <td class="num-col"><%= fmtMoney(t.settled_net_sales) %></td>
           <td class="num-col <%= t.realized_profit < -0.005 ? 'text-danger' : '' %>"><%= fmtMoney(t.realized_profit) %></td>
           <td class="num-col"><%= t.margin_rate === null ? '-' : t.margin_rate.toFixed(1) + '%' %></td>
           <td class="num-col">-</td>
@@ -194,11 +197,11 @@
       <<%= tag %> class="order-card" <% if (!r.unassigned) { %>href="/sales?status=approved&responsible_id=<%= r.user_id %>&<%= spq %>"<% } %>>
         <div class="order-card-top">
           <span class="order-card-id"><%= r.name %></span>
-          <span class="muted"><%= r.order_count %> 单</span>
+          <span class="muted"><%= r.order_count %> 单 · 未收 ¥<%= fmtMoney(r.receivable) %></span>
         </div>
         <div class="order-card-mid">
           <span>净销售 ¥<%= fmtMoney(r.net_sales) %></span>
-          <span>未收应收 ¥<%= fmtMoney(r.receivable) %></span>
+          <span>不含应收 ¥<%= fmtMoney(r.settled_net_sales) %></span>
         </div>
         <div class="order-card-bottom">
           <span class="muted">实现毛利 <strong class="<%= neg ? 'text-danger' : 'text-strong' %>">¥<%= fmtMoney(r.realized_profit) %></strong></span>
@@ -209,6 +212,7 @@
     <div class="report-mobile-sum">
       <span>合计 <strong><%= salespersonPerf.total.order_count %></strong> 单</span>
       <span>净销售 <strong><%= fmtMoney(salespersonPerf.total.net_sales) %></strong></span>
+      <span>不含应收 <strong><%= fmtMoney(salespersonPerf.total.settled_net_sales) %></strong></span>
       <span>实现毛利 <strong><%= fmtMoney(salespersonPerf.total.realized_profit) %></strong></span>
     </div>
   </div>
@@ -436,7 +440,7 @@
     · 应收未结清只累计正余额；「仅已结清」毛利只计已结清销售单，现金收齐或退货抵扣均可结清。<br>
     · 实收金额 = 区间内已审核销售单的已收现金 − 其关联退货已实际退回的现金，不随「仅已结清 / 含应收」切换。<br>
     · 退货按退货日期冲减毛利；「仅已结清」口径下，已退现金或关联销售单已结清的退货参与冲减。<br>
-    · 业务员业绩：销售按单据负责人归属，退货按原销售单负责人冲减（无关联原单计入“未归属退货”）；毛利固定为「实现毛利（不含应收）」，与顶部「仅已结清」毛利合计一致，毛利率 = 实现毛利 ÷ 净销售额。<br>
+    · 业务员业绩：销售按单据负责人归属，退货按原销售单负责人冲减（无关联原单计入“未归属退货”）；毛利固定为「实现毛利（不含应收）」，与顶部「仅已结清」毛利合计一致，毛利率 = 实现毛利 ÷ 不含应收销售额。<br>
     · 销售成本使用开单快照；关联退货按原销售单该商品的每基本单位加权成本冲回，独立退货使用自身成本快照。
   </div>
 </details>

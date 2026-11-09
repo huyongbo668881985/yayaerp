@@ -73,13 +73,14 @@
   <% } else { %>
     <div class="desktop-table-wrap">
       <table>
-        <tr><th>#</th><th>业务员</th><th>单数</th><th>净销售额</th><th>实现毛利（不含应收）</th><th>毛利率</th></tr>
+        <tr><th>#</th><th>业务员</th><th>单数</th><th>净销售额</th><th>不含应收销售额</th><th>实现毛利（不含应收）</th><th>毛利率</th></tr>
         <% spPerf.rows.forEach(function(r, i) { const neg = r.realized_profit < -0.005; %>
           <tr>
             <td><%= r.unassigned ? '-' : i + 1 %></td>
             <td><%= r.name %></td>
             <td><%= r.order_count %></td>
             <td>¥<%= r.net_sales.toFixed(1) %></td>
+            <td>¥<%= r.settled_net_sales.toFixed(1) %></td>
             <td style="<%= neg ? 'color:#dc2626' : '' %>"><strong>¥<%= r.realized_profit.toFixed(1) %></strong></td>
             <td><%= r.margin_rate === null ? '-' : r.margin_rate.toFixed(1) + '%' %></td>
           </tr>
@@ -87,6 +88,7 @@
         <tr>
           <td></td><td><strong>合计</strong></td><td><%= spPerf.total.order_count %></td>
           <td>¥<%= spPerf.total.net_sales.toFixed(1) %></td>
+          <td>¥<%= spPerf.total.settled_net_sales.toFixed(1) %></td>
           <td><strong>¥<%= spPerf.total.realized_profit.toFixed(1) %></strong></td>
           <td><%= spPerf.total.margin_rate === null ? '-' : spPerf.total.margin_rate.toFixed(1) + '%' %></td>
         </tr>
@@ -101,14 +103,15 @@
           </div>
           <div class="order-card-mid">
             <span>净销售 ¥<%= r.net_sales.toFixed(1) %></span>
-            <span>毛利率 <%= r.margin_rate === null ? '-' : r.margin_rate.toFixed(1) + '%' %></span>
+            <span>不含应收 ¥<%= r.settled_net_sales.toFixed(1) %></span>
           </div>
           <div class="order-card-bottom">
             <span class="muted">实现毛利 <strong style="<%= neg ? 'color:#dc2626' : '' %>">¥<%= r.realized_profit.toFixed(1) %></strong></span>
+            <span class="<%= neg ? 'text-danger' : 'muted' %>">毛利率 <%= r.margin_rate === null ? '-' : r.margin_rate.toFixed(1) + '%' %></span>
           </div>
         </div>
       <% }) %>
-      <div class="muted">合计：净销售 ¥<%= spPerf.total.net_sales.toFixed(1) %> · 实现毛利 ¥<%= spPerf.total.realized_profit.toFixed(1) %></div>
+      <div class="muted">合计：净销售 ¥<%= spPerf.total.net_sales.toFixed(1) %> · 不含应收 ¥<%= spPerf.total.settled_net_sales.toFixed(1) %> · 实现毛利 ¥<%= spPerf.total.realized_profit.toFixed(1) %></div>
     </div>
   <% } %>
 </div>

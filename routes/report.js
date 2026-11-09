@@ -34,12 +34,16 @@ function getSummary(db, start, end) {
   const returnFilter = buildDateFilter('ro', start, end);
 
   const salesRaw = db.prepare(`
-    SELECT COALESCE(SUM(total_amount),0) amount, COUNT(*) count
+    SELECT COALESCE(SUM(total_amount),0) amount,
+           COALESCE(SUM(CASE WHEN ${salesSettledExpr('so')} THEN total_amount ELSE 0 END), 0) settled_amount,
+           COUNT(*) count
     FROM sales_orders so WHERE so.status = 'approved' ${saleFilter.clause}
   `).get(...saleFilter.params);
 
   const returnsRaw = db.prepare(`
-    SELECT COALESCE(SUM(total_amount),0) amount, COUNT(*) count
+    SELECT COALESCE(SUM(total_amount),0) amount,
+           COALESCE(SUM(CASE WHEN ${RETURN_SETTLED_EXPR} THEN total_amount ELSE 0 END), 0) settled_amount,
+           COUNT(*) count
     FROM return_orders ro WHERE ro.status = 'approved' ${returnFilter.clause}
   `).get(...returnFilter.params);
 
@@ -64,11 +68,12 @@ function getSummary(db, start, end) {
   const returnProfitAll = returnProfit(db, { onlySettled: false, filter: returnFilter });
 
   const sales = { amount: salesRaw.amount - returnsRaw.amount, count: salesRaw.count, returnCount: returnsRaw.count };
+  const settledNetSales = salesRaw.settled_amount - returnsRaw.settled_amount;
   const profitWithoutReceivable = salesProfitPaid - returnProfitRefunded;
   const profitWithReceivable = salesProfitAll - returnProfitAll;
   const receivableProfit = profitWithReceivable - profitWithoutReceivable;
 
-  return { sales, returnsAmount: returnsRaw.amount, receivable, received: received.amount, profitWithoutReceivable, profitWithReceivable, receivableProfit };
+  return { sales, settledNetSales, returnsAmount: returnsRaw.amount, receivable, received: received.amount, profitWithoutReceivable, profitWithReceivable, receivableProfit };
 }
 
 // 销售单明细：includeReceivable=false 时只列"有效欠款已结清"的单子（对应"不含应收"口径），
@@ -150,8 +155,9 @@ function buildComparison(db, start, end, includeReceivable, summary, currentMarg
     ? ((summary.sales.amount - prevSummary.sales.amount) / prevSummary.sales.amount) * 100
     : null;
   const prevProfit = includeReceivable ? prevSummary.profitWithReceivable : prevSummary.profitWithoutReceivable;
-  const prevMarginRate = prevSummary.sales.amount > 0.001
-    ? (prevProfit / prevSummary.sales.amount) * 100
+  const prevDenom = includeReceivable ? prevSummary.sales.amount : prevSummary.settledNetSales;
+  const prevMarginRate = prevDenom > 0.001
+    ? (prevProfit / prevDenom) * 100
     : null;
   const marginDiffPt = (prevMarginRate !== null && currentMarginRate !== null)
     ? (currentMarginRate - prevMarginRate)
@@ -170,13 +176,12 @@ router.get('/reports', requireAdmin, (req, res) => {
   const returnOrders = getReturnOrderList(db, start, end, includeReceivable);
 
   const activeProfit = includeReceivable ? summary.profitWithReceivable : summary.profitWithoutReceivable;
-  const settledNetSales = orders.reduce((s, o) => s + o.total_amount, 0) - returnOrders.reduce((s, o) => s + o.total_amount, 0);
-  const marginDenominator = (!includeReceivable && settledNetSales > 0.001) ? settledNetSales : summary.sales.amount;
+  const marginDenominator = includeReceivable ? summary.sales.amount : summary.settledNetSales;
   const marginRate = marginDenominator > 0.001 ? (activeProfit / marginDenominator) * 100 : 0;
   const collectionRate = summary.sales.amount > 0.001
     ? Math.min(100, Math.max(0, (summary.received / summary.sales.amount) * 100))
     : 0;
-  const comparison = buildComparison(db, start, end, includeReceivable, summary, marginRate);
+  const comparison = buildComparison(db, start, end, includeReceivable, summary, marginDenominator > 0.001 ? marginRate : null);
   // 业务员业绩（含毛利，仅管理员；固定为"实现毛利（不含应收）"口径，不随含/不含应收开关变化）
   const salespersonPerf = getSalespersonPerformance(db, start, end);
 
@@ -228,9 +233,10 @@ router.get('/reports/salesperson-export', requireAdmin, (req, res) => {
   const db = req.tenantDb;
   const { start, end } = req.query;
   const perf = getSalespersonPerformance(db, start, end);
-  const headers = ['业务员', '单数', '销售额', '退货额', '净销售额', '实现毛利(不含应收)', '实现毛利率', '客户数', '名下未收应收'];
+  const headers = ['业务员', '单数', '销售额', '退货额', '净销售额', '不含应收销售额', '实现毛利(不含应收)', '实现毛利率', '客户数', '名下未收应收'];
   const rowOf = (name, r) => [
     name, r.order_count, r.sales_amount.toFixed(2), r.return_amount.toFixed(2), r.net_sales.toFixed(2),
+    r.settled_net_sales.toFixed(2),
     r.realized_profit.toFixed(2), r.margin_rate === null ? '' : r.margin_rate.toFixed(1) + '%',
     r.customer_count === undefined ? '' : r.customer_count, r.receivable.toFixed(2)
   ];
