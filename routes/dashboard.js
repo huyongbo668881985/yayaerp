@@ -175,16 +175,17 @@ router.get('/', requireLogin, (req, res) => {
     monthlyProfit = profitOfPeriod(db, { start: `${month}-01`, end: `${month}-${monthEndDay}` }).profit;
   }
 
-  // 业务员业绩排行：仅管理员（服务端硬拦截，含毛利），默认本月，可切今日/本年
+  // 业务员业绩排行：仅管理员（服务端硬拦截，含毛利），默认本月、默认仅操作员（可通过 sp_admin=1 切换含管理员）
   let spRange = null;
   let spPerf = null;
   if (isAdmin) {
     const key = ['today', 'month', 'year'].includes(req.query.sp) ? req.query.sp : 'month';
+    const includeAdmin = req.query.sp_admin === '1';
     const monthEnd = `${month}-${String(new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)), 0)).getUTCDate()).padStart(2, '0')}`;
     const bounds = key === 'today' ? { start: today, end: today }
       : key === 'year' ? { start: yearStart, end: yearEnd } : { start: monthStart, end: monthEnd };
-    spRange = { key, ...bounds };
-    spPerf = getSalespersonPerformance(db, bounds.start, bounds.end);
+    spRange = { key, includeAdmin, ...bounds };
+    spPerf = getSalespersonPerformance(db, bounds.start, bounds.end, { excludeAdmin: !includeAdmin });
   }
 
   // 读取当前角色配置的卡片列表，并在服务端二次硬过滤 adminOnly 卡片

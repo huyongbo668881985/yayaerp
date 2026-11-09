@@ -189,6 +189,61 @@ sale('2026-09-15', 500, 0, 50, alice); // 9月未结清 500，9月已结清净�
       assert.ok(!dashHtml.text.includes('实现毛利'));
       assert.ok(!dashHtml.text.includes('不含应收销售额'));
     });
+
+    await check('首页业务员业绩排行：不显示管理员角色（含在职与停用管理员）的明细，合计仅汇总展示出的业务员；经营报表仍保留', async () => {
+      const admin2 = user('admin2', '副管理员', 'admin', 0);
+      const { todayLocalDate } = require('../utils/dates');
+      const today = todayLocalDate();
+      sale(today, 200, 200, 20, admin);   // 在职管理员本人负责：销售 200，毛利 80
+      sale(today, 100, 100, 10, admin2);  // 停用管理员负责：销售 100，毛利 40
+      sale(today, 400, 400, 40, alice);   // 操作员小王负责：销售 400，毛利 160
+
+      // 首页（sp=today）：不显示管理员和副管理员，合计只算小王
+      const dashJson = await req('/?sp=today', { uid: admin, json: true });
+      assert.equal(dashJson.status, 200);
+      const dashNames = dashJson.data.spPerf.rows.map(r => r.name);
+      assert.deepEqual(dashNames, ['小王']);
+      assert.equal(dashJson.data.spPerf.total.order_count, 1);
+      assert.equal(dashJson.data.spPerf.total.net_sales, 400);
+      assert.equal(dashJson.data.spPerf.total.settled_net_sales, 400);
+      assert.equal(dashJson.data.spPerf.total.realized_profit, 160);
+
+      const dashHtml = await req('/?sp=today', { uid: admin });
+      assert.equal(dashHtml.status, 200);
+      assert.ok(dashHtml.text.includes('小王'));
+      assert.ok(!dashHtml.text.includes('副管理员'));
+      assert.ok(dashHtml.text.includes('href="/?sp=today&amp;sp_admin=1"') || dashHtml.text.includes('href="/?sp=today&sp_admin=1"'));
+
+      // 首页切换「含管理员」（sp=today&sp_admin=1）：显示管理员与副管理员明细，合计包含全部单据，时间范围链接保留 sp_admin=1
+      const dashAdminJson = await req('/?sp=today&sp_admin=1', { uid: admin, json: true });
+      assert.equal(dashAdminJson.status, 200);
+      assert.equal(dashAdminJson.data.spRange.includeAdmin, true);
+      const dashAdminNames = dashAdminJson.data.spPerf.rows.map(r => r.name);
+      assert.deepEqual(dashAdminNames, ['小王', '管理员', '副管理员（已停用）']);
+      assert.equal(dashAdminJson.data.spPerf.total.order_count, 3);
+      assert.equal(dashAdminJson.data.spPerf.total.net_sales, 700);
+      assert.equal(dashAdminJson.data.spPerf.total.realized_profit, 280);
+
+      const dashAdminHtml = await req('/?sp=today&sp_admin=1', { uid: admin });
+      assert.equal(dashAdminHtml.status, 200);
+      assert.ok(dashAdminHtml.text.includes('副管理员（已停用）'));
+      assert.ok(dashAdminHtml.text.includes('href="/?sp=month&amp;sp_admin=1"') || dashAdminHtml.text.includes('href="/?sp=month&sp_admin=1"'));
+
+      // 操作员带 sp_admin=1 访问首页仍硬拦截不返回任何业绩数据
+      const opAdminJson = await req('/?sp=today&sp_admin=1', { uid: alice, json: true });
+      assert.equal(opAdminJson.data.spPerf, null);
+
+      // 经营报表页：仍保留管理员与副管理员明细，合计包含全部单据
+      const repJson = await req(`/reports?start=${today}&end=${today}`, { uid: admin, json: true });
+      assert.equal(repJson.status, 200);
+      const repNames = repJson.data.salespersonPerf.rows.map(r => r.name);
+      assert.ok(repNames.includes('管理员'));
+      assert.ok(repNames.includes('副管理员（已停用）'));
+      assert.ok(repNames.includes('小王'));
+      assert.equal(repJson.data.salespersonPerf.total.order_count, 3);
+      assert.equal(repJson.data.salespersonPerf.total.net_sales, 700);
+      assert.equal(repJson.data.salespersonPerf.total.realized_profit, 280);
+    });
   } finally {
     db.close();
     fs.rmSync(dir, { recursive: true, force: true });

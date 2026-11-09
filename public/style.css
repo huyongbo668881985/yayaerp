@@ -1323,6 +1323,14 @@ button[aria-disabled="true"] { cursor: wait; opacity: .65; }
   font-weight: 600;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
+.dashboard-sp-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
 .report-mobile-date-bar {
   display: none;
 }
@@ -1802,6 +1810,10 @@ button[aria-disabled="true"] { cursor: wait; opacity: .65; }
   .report-sp-card .order-card-mid span:last-child,
   .dashboard-sp-card .order-card-mid span:last-child {
     max-width: none;
+  }
+  .dashboard-sp-toolbar .report-seg a {
+    padding: 5px 10px;
+    font-size: 12px;
   }
   .report-mobile-sum strong {
     color: var(--text);

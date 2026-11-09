@@ -59,14 +59,21 @@
 <% } %>
 
 <% if (user.role === 'admin' && spPerf) { %>
+<% const spAdminSuffix = spRange.includeAdmin ? '&sp_admin=1' : ''; %>
 <div class="card dashboard-sp-card">
   <h2>业务员业绩排行
     <a class="section-link" href="/reports?mode=without_receivable&start=<%= spRange.start %>&end=<%= spRange.end %>">查看经营报表</a>
   </h2>
-  <div class="report-seg dashboard-sp-seg" role="group" aria-label="业绩时间范围">
-    <a class="<%= spRange.key === 'today' ? 'is-active' : '' %>" href="/?sp=today">今日</a>
-    <a class="<%= spRange.key === 'month' ? 'is-active' : '' %>" href="/?sp=month">本月</a>
-    <a class="<%= spRange.key === 'year' ? 'is-active' : '' %>" href="/?sp=year">本年</a>
+  <div class="dashboard-sp-toolbar">
+    <div class="report-seg dashboard-sp-seg" role="group" aria-label="业绩时间范围">
+      <a class="<%= spRange.key === 'today' ? 'is-active' : '' %>" href="/?sp=today<%= spAdminSuffix %>">今日</a>
+      <a class="<%= spRange.key === 'month' ? 'is-active' : '' %>" href="/?sp=month<%= spAdminSuffix %>">本月</a>
+      <a class="<%= spRange.key === 'year' ? 'is-active' : '' %>" href="/?sp=year<%= spAdminSuffix %>">本年</a>
+    </div>
+    <div class="report-seg dashboard-sp-role-seg" role="group" aria-label="业绩人员范围">
+      <a class="<%= !spRange.includeAdmin ? 'is-active' : '' %>" href="/?sp=<%= spRange.key %>">仅操作员</a>
+      <a class="<%= spRange.includeAdmin ? 'is-active' : '' %>" href="/?sp=<%= spRange.key %>&sp_admin=1">含管理员</a>
+    </div>
   </div>
   <% if (spPerf.rows.length === 0) { %>
     <p class="muted">该时间范围暂无业绩数据</p>
@@ -77,7 +84,7 @@
         <% spPerf.rows.forEach(function(r, i) { const neg = r.realized_profit < -0.005; %>
           <tr>
             <td><%= r.unassigned ? '-' : i + 1 %></td>
-            <td><%= r.name %></td>
+            <td><%= r.name %><% if (r.role === 'admin') { %> <span class="badge badge-admin" style="font-size:11px;padding:1px 6px">管理员</span><% } %></td>
             <td><%= r.order_count %></td>
             <td>¥<%= r.net_sales.toFixed(1) %></td>
             <td>¥<%= r.settled_net_sales.toFixed(1) %></td>
@@ -98,7 +105,7 @@
       <% spPerf.rows.forEach(function(r, i) { const neg = r.realized_profit < -0.005; %>
         <div class="order-card">
           <div class="order-card-top">
-            <span class="order-card-id"><%= r.unassigned ? '' : (i + 1) + '. ' %><%= r.name %></span>
+            <span class="order-card-id"><%= r.unassigned ? '' : (i + 1) + '. ' %><%= r.name %><% if (r.role === 'admin') { %> <span class="badge badge-admin" style="font-size:11px;padding:1px 6px">管理员</span><% } %></span>
             <span class="muted"><%= r.order_count %> 单</span>
           </div>
           <div class="order-card-mid">
