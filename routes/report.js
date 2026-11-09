@@ -5,6 +5,7 @@ const {
   RETURN_SETTLED_EXPR, salesProfit, returnProfit,
   returnedAmountSubquery, refundedAmountSubquery, attachEffectivePayment, returnCostExpr, effectiveDebtExpr, salesSettledExpr
 } = require('../lib/profitCalc');
+const { getSalespersonPerformance } = require('../lib/salespersonPerformance');
 const router = express.Router();
 
 // 统计口径统一：只算"已审核"的单据（草稿/待审核/已拒绝不算真实发生的业务），
@@ -176,8 +177,11 @@ router.get('/reports', requireAdmin, (req, res) => {
     ? Math.min(100, Math.max(0, (summary.received / summary.sales.amount) * 100))
     : 0;
   const comparison = buildComparison(db, start, end, includeReceivable, summary, marginRate);
+  // 业务员业绩（含毛利，仅管理员；固定为"实现毛利（不含应收）"口径，不随含/不含应收开关变化）
+  const salespersonPerf = getSalespersonPerformance(db, start, end);
 
   res.render('report', {
+    salespersonPerf,
     start: start || '',
     end: end || '',
     includeReceivable,
@@ -217,6 +221,22 @@ router.get('/reports/export', requireAdmin, (req, res) => {
   const rangeLabel = (start || end) ? `_${start || '起'}_${end || '止'}` : '';
   const modeLabel = includeReceivable ? '_含应收' : '';
   sendCsv(res, `经营报表${rangeLabel}${modeLabel}.csv`, headers, rows);
+});
+
+// 业务员业绩导出（仅管理员）
+router.get('/reports/salesperson-export', requireAdmin, (req, res) => {
+  const db = req.tenantDb;
+  const { start, end } = req.query;
+  const perf = getSalespersonPerformance(db, start, end);
+  const headers = ['业务员', '单数', '销售额', '退货额', '净销售额', '实现毛利(不含应收)', '实现毛利率', '客户数', '名下未收应收'];
+  const rowOf = (name, r) => [
+    name, r.order_count, r.sales_amount.toFixed(2), r.return_amount.toFixed(2), r.net_sales.toFixed(2),
+    r.realized_profit.toFixed(2), r.margin_rate === null ? '' : r.margin_rate.toFixed(1) + '%',
+    r.customer_count === undefined ? '' : r.customer_count, r.receivable.toFixed(2)
+  ];
+  const rows = [...perf.rows.map(r => rowOf(r.name, r)), rowOf('合计', perf.total)];
+  const rangeLabel = (start || end) ? `_${start || '起'}_${end || '止'}` : '';
+  sendCsv(res, `业务员业绩${rangeLabel}.csv`, headers, rows);
 });
 
 module.exports = router;
