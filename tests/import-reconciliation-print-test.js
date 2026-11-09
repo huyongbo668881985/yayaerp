@@ -32,7 +32,7 @@ async function preview(kind,text,options={},filename='test.csv'){
 }
 const batchId=response=>response.json.redirect.split('/').at(-1);
 const idOf=response=>Number(response.location.match(/\/(\d+)/)[1]);
-const saleBody=extra=>({warehouse_id:'1',customer_id:'1',customer_search:'客户甲',items_json:JSON.stringify([{id:1,quantity:4,price:5}]),paid_amount:'0',_request_key:randomUUID(),...extra});
+const saleBody=extra=>({warehouse_id:'1',customer_id:'1',customer_search:'客户甲',items_json:JSON.stringify([{id:1,quantity:4,price:5}]),paid_amount:'0',confirm_customer_owner:'1',_request_key:randomUUID(),...extra});
 const ledgerCount=db=>db.prepare('SELECT COUNT(*) n FROM customer_ledger').get().n;
 (async()=>{
   const app=express();app.set('view engine','ejs');app.set('views',path.join(__dirname,'../views'));app.use(express.urlencoded({extended:true}));
@@ -168,6 +168,14 @@ const ledgerCount=db=>db.prepare('SELECT COUNT(*) n FROM customer_ledger').get()
   await check('旧库升级仅结转已审核旧账，重复迁移不重复入账，不伪造历史日期',()=>{
     const old=new (require('better-sqlite3'))(path.join(dir,'legacy.db'));require('./fixtures/schema-v12').initSchema(old);old.exec("DELETE FROM schema_migrations WHERE version>=12;DROP TABLE customer_ledger;DROP TABLE ledger_metadata;DROP TABLE import_batches;INSERT INTO users(username,password_hash,name,role) VALUES ('old','x','旧管理员','admin');INSERT INTO warehouses(name) VALUES ('旧仓');INSERT INTO customers(name) VALUES ('旧客户');INSERT INTO sales_orders(customer_id,warehouse_id,user_id,order_date,total_amount,paid_amount,status) VALUES (1,1,1,'2020-01-01',100,30,'approved'),(1,1,1,'2020-01-02',999,1,'draft');");initSchema(old);let rows=old.prepare('SELECT * FROM customer_ledger').all();assert.equal(rows.length,1);assert.equal(rows[0].event_date,today);assert.equal(rows[0].document_date,'2020-01-01');assert.equal(rows[0].event_kind,'升级结转');assert.equal(statement(old,1,today,today).ending,7000);assert.equal(old.prepare('SELECT created_at FROM customers WHERE id=1').get().created_at,null);
     old.exec('DELETE FROM schema_migrations WHERE version=12');initSchema(old);assert.equal(ledgerCount(old),1);old.close();
+  });
+  await check('管理员给他人名下客户开单需确认归属，确认后放行；本人客户与操作员不受影响',async()=>{
+    const cid=db.prepare("INSERT INTO customers(name,operator_id) VALUES ('归属提醒客户',2)").run().lastInsertRowid;
+    const count=()=>db.prepare('SELECT COUNT(*) n FROM sales_orders').get().n,before=count();
+    const body=saleBody({customer_id:String(cid),customer_search:'归属提醒客户',save_draft:'1',confirm_customer_owner:undefined});
+    const warned=await request('/sales/new',{body});assert.equal(warned.status,409);assert.ok(warned.text.includes('客户归属提醒'));assert.ok(warned.text.includes('confirm_customer_owner'));assert.equal(count(),before);
+    const ok=await request('/sales/new',{body:{...body,confirm_customer_owner:'1',_request_key:randomUUID()}});assert.equal(ok.status,302);assert.equal(count(),before+1);
+    const own=await request('/sales/new',{body:{...body,responsible_id:'2',_request_key:randomUUID()}});assert.equal(own.status,302);
   });
   console.log(`导入、对账与打印回归：${passes} PASS / 0 FAIL`);
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(()=>{if(server)server.close();for(const db of databases)db.close();fs.rmSync(dir,{recursive:true,force:true});});

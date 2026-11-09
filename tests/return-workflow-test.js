@@ -26,7 +26,7 @@ async function request(route, body, user = 1) {
 const post = (route, body = {}, user = 1) => request(route, { _request_key:randomUUID(), ...body }, user);
 const idOf = response => { assert.equal(response.status,302,response.text); return Number(response.location.match(/\/(\d+)/)[1]); };
 async function sale(paid, items = [{id:1,quantity:10,price:100}]) {
-  const id = idOf(await post('/sales/new',{warehouse_id:'1',customer_id:'1',customer_search:'客户甲',paid_amount:String(paid),items_json:JSON.stringify(items)}));
+  const id = idOf(await post('/sales/new',{warehouse_id:'1',customer_id:'1',customer_search:'客户甲',confirm_customer_owner:'1',paid_amount:String(paid),items_json:JSON.stringify(items)}));
   assert.equal((await post('/sales/approve/'+id)).status,302); return id;
 }
 function returnBody(saleId, quantity = 4, extra = {}) {

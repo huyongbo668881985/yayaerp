@@ -321,6 +321,23 @@ function isCustomerInScope(db, sessionUser, customerId, currentCustomerId) {
   return !!hit;
 }
 
+// 管理员可为任意客户开单/改客户，但当客户归属人与订单负责人不一致时，需勾选确认以防误触。
+// 返回 null=无需提示（已确认、非管理员、散客、归属一致或客户无归属人）。
+function customerOwnerMismatch(db, sessionUser, customerId, responsibleId, body) {
+  if (!sessionUser || sessionUser.role !== 'admin') return null;
+  if (isBlank(customerId)) return null;
+  if (body && (body.confirm_customer_owner === '1' || body.confirm_customer_owner === 'on')) return null;
+  const customer = db.prepare('SELECT name, operator_id FROM customers WHERE id = ?').get(customerId);
+  if (!customer || !customer.operator_id || customer.operator_id === responsibleId) return null;
+  const owner = db.prepare('SELECT name FROM users WHERE id = ?').get(customer.operator_id);
+  const responsible = db.prepare('SELECT name FROM users WHERE id = ?').get(responsibleId);
+  return {
+    customerName: customer.name,
+    ownerName: owner ? owner.name : `#${customer.operator_id}`,
+    responsibleName: responsible ? responsible.name : `#${responsibleId}`
+  };
+}
+
 router.get('/sales/new', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const requestedCustomerId = Number(req.query.customer_id);
@@ -341,11 +358,11 @@ router.post('/sales/new', requireLogin, requireMutationKey, (req, res) => {
   const db = req.tenantDb;
   const { customer_id, warehouse_id, order_date, note, paid_amount, remarks } = req.body;
 
-  const renderError = (msg) => {
+  const renderError = (msg, customerOwnerWarning = null) => {
     const customers = customersForForm(db, req.session.user, isCustomerInScope(db, req.session.user, req.body.customer_id, null) ? req.body.customer_id : null);
     const warehouses = warehousesForUser(db, req.session.user);
     const products = productsForForm(db, req.method === 'POST' ? req.body : (req.params.id ? db.prepare('SELECT product_id FROM sales_order_items WHERE sales_order_id=?').all(req.params.id) : []));
-    return res.render('sale_form', { responsibleOptions: responsibleUsers(db), customers, warehouses, products, error: msg, order: null, existingItems: [], formValues: req.body, draftItems: submittedItemsFromBody(req.body), today: todayLocalDate() });
+    return res.render('sale_form', { responsibleOptions: responsibleUsers(db), customers, warehouses, products, error: msg, customerOwnerWarning, order: null, existingItems: [], formValues: req.body, draftItems: submittedItemsFromBody(req.body), today: todayLocalDate() });
   };
 
   if (!isBlank(order_date) && !isValidDateString(order_date)) {
@@ -382,6 +399,8 @@ router.post('/sales/new', requireLogin, requireMutationKey, (req, res) => {
   if (!isCustomerInScope(db, req.session.user, customer_id, null)) {
     return renderError('所选客户不在你的名下，无权使用：请选择自己负责的客户，或联系管理员处理');
   }
+  const ownerWarning = customerOwnerMismatch(db, req.session.user, customer_id, responsible.id, req.body);
+  if (ownerWarning) { res.status(409); return renderError(null, ownerWarning); }
 
   // 草稿/待审核阶段不动库存，这里只做数据落库，不检查库存、不生成出入库流水
   // 点"存草稿"按钮会带 save_draft=1 → 存为 draft，之后在详情页继续编辑/提交审核
@@ -454,11 +473,11 @@ router.post('/sales/:id/edit', requireLogin, requireMutationKey, (req, res) => {
 
   const { customer_id, warehouse_id, order_date, note, paid_amount, remarks } = req.body;
 
-  const renderError = (msg) => {
+  const renderError = (msg, customerOwnerWarning = null) => {
     const customers = customersForForm(db, req.session.user, order.customer_id);
     const warehouses = warehousesForUser(db, req.session.user);
     const products = productsForForm(db, req.method === 'POST' ? req.body : (req.params.id ? db.prepare('SELECT product_id FROM sales_order_items WHERE sales_order_id=?').all(req.params.id) : []));
-    return res.render('sale_form', { responsibleOptions: responsibleUsers(db, order.responsible_id || order.user_id), customers, warehouses, products, error: msg, order, existingItems: [], formValues: req.body, draftItems: submittedItemsFromBody(req.body), today: todayLocalDate() });
+    return res.render('sale_form', { responsibleOptions: responsibleUsers(db, order.responsible_id || order.user_id), customers, warehouses, products, error: msg, customerOwnerWarning, order, existingItems: [], formValues: req.body, draftItems: submittedItemsFromBody(req.body), today: todayLocalDate() });
   };
 
   if (!isBlank(order_date) && !isValidDateString(order_date)) {
@@ -496,6 +515,11 @@ router.post('/sales/:id/edit', requireLogin, requireMutationKey, (req, res) => {
   // 但创建人编辑自己草稿单时不应因此被拦（与下拉框 customersForForm 的 OR id=? 同口径）。
   if (!isCustomerInScope(db, req.session.user, customer_id, order.customer_id)) {
     return renderError('所选客户不在你的名下，无权使用：请选择自己负责的客户，或联系管理员处理');
+  }
+  // 仅在客户发生变更时提示，避免每次保存同一张单都被打扰
+  if (String(customer_id || '') !== String(order.customer_id || '')) {
+    const ownerWarning = customerOwnerMismatch(db, req.session.user, customer_id, responsible.id, req.body);
+    if (ownerWarning) { res.status(409); return renderError(null, ownerWarning); }
   }
 
   const tenthsTotal = roundToTenths(items.reduce((s, it) => s + it.qty * it.price, 0));

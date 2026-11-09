@@ -249,6 +249,7 @@ async function check(label, work) {
     const createTenthsRes = await admin.request('/sales/new', {
       warehouse_id: '1',
       customer_id: '1',
+      confirm_customer_owner: '1',
       responsible_id: '3',
       order_date: '2026-10-16',
       paid_amount: '300',
@@ -266,6 +267,7 @@ async function check(label, work) {
     const createYuanRes = await admin.request('/sales/new', {
       warehouse_id: '1',
       customer_id: '1',
+      confirm_customer_owner: '1',
       responsible_id: '3',
       order_date: '2026-10-16',
       paid_amount: '300',

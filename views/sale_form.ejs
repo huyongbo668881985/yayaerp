@@ -7,6 +7,12 @@
   <form method="POST" action="<%= order ? '/sales/' + order.id + '/edit' : '/sales/new' %>" id="saleForm" data-order-draft="sales">
     <input type="hidden" name="_request_key" value="<%= typeof formValues !== 'undefined' && formValues && formValues._request_key ? formValues._request_key : newRequestKey() %>">
     <% if (order) { %><input type="hidden" name="draft_revision" value="<%= form.draft_revision != null ? form.draft_revision : order.revision %>"><% } %>
+    <% if (typeof customerOwnerWarning !== 'undefined' && customerOwnerWarning) { %>
+      <div class="error" role="alert" id="customerOwnerWarning">
+        <strong>客户归属提醒：</strong>客户「<%= customerOwnerWarning.customerName %>」归属于 <%= customerOwnerWarning.ownerName %>，而本单负责人是 <%= customerOwnerWarning.responsibleName %>。
+        <label style="display:block;margin-top:6px"><input type="checkbox" name="confirm_customer_owner" value="1" required> 我确认这是有意为之，继续保存</label>
+      </div>
+    <% } %>
     <h2 class="form-section-heading">基本信息</h2>
     <div class="grid-3">
       <div class="form-row customer-picker-field">
