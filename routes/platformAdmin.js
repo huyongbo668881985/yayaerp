@@ -20,6 +20,7 @@ const { updateUserPassword } = require('../lib/accountSecurity');
 const { openTenantDbByPath, getTenantUserCount } = require('../lib/tenantManager');
 const { bootstrapTenant } = require('../lib/schema');
 const { isTenantExpired } = require('../lib/platformDb');
+const { isValidDateString } = require('../lib/validators');
 const { requireSuperAdmin } = require('../middleware/platformAuth');
 const { createLoginLimiter } = require('../middleware/rateLimit');
 
@@ -27,21 +28,20 @@ const { createLoginLimiter } = require('../middleware/rateLimit');
 const platformLoginLimiter = createLoginLimiter({
   windowMs: 15 * 60 * 1000,
   max: 10,
-  extractWho: req => ({ username: req.body.username })
+  extractWho: req => ({ username: req.body && typeof req.body.username === 'string' ? req.body.username : '' })
 });
-
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // 校验并规整"到期日期"、"账号数上限"及"AI 经营诊断开关"
 // 返回 { error } 或 { expiresAt, maxUsers, aiEnabled, aiShelfguardEnabled }
 function parseQuotaFields(body) {
   let expiresAt = null;
-  if (body.expires_at && body.expires_at.trim()) {
-    if (!DATE_RE.test(body.expires_at.trim())) return { error: '到期日期格式不对，应为 YYYY-MM-DD' };
-    expiresAt = body.expires_at.trim();
+  if (typeof body.expires_at === 'string' && body.expires_at.trim()) {
+    const rawDate = body.expires_at.trim();
+    if (!isValidDateString(rawDate)) return { error: '到期日期格式不对或非有效日历日，应为 YYYY-MM-DD' };
+    expiresAt = rawDate;
   }
   let maxUsers = null;
-  if (body.max_users && body.max_users.trim()) {
+  if (typeof body.max_users === 'string' && body.max_users.trim()) {
     const n = Number(body.max_users);
     if (!Number.isInteger(n) || n < 1) return { error: '账号数上限必须是大于0的整数' };
     maxUsers = n;
@@ -62,9 +62,10 @@ router.get('/platform-admin/login', (req, res) => {
 });
 
 router.post('/platform-admin/login', platformLoginLimiter, (req, res) => {
-  const { username, password } = req.body;
-  const admin = getPlatformAdminByUsername(username);
-  if (!admin || !bcrypt.compareSync(password || '', admin.password_hash)) {
+  const username = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  const admin = username ? getPlatformAdminByUsername(username) : null;
+  if (!admin || !bcrypt.compareSync(password, admin.password_hash)) {
     platformLoginLimiter.fail(req); // 只统计失败次数
     return res.render('platform_login', { error: '用户名或密码错误' });
   }
@@ -325,14 +326,18 @@ router.post('/platform-admin/tenants/:id/users/:userId/reset-password', requireS
 
 // 供上面几个 render 分支复用：读取某租户的账号列表，读取失败就返回空数组，不让页面崩掉
 function getTenantUsersSafe(tenant) {
+  let db;
   try {
-    const db = openTenantDbByPath(tenant.db_path);
+    db = openTenantDbByPath(tenant.db_path);
     const users = db.prepare('SELECT id, username, name, role, active FROM users ORDER BY id').all();
-    db.close();
     return users;
   } catch (e) {
     console.error('读取租户账号列表失败:', e);
     return [];
+  } finally {
+    if (db && db.open) {
+      try { db.close(); } catch (_) {}
+    }
   }
 }
 

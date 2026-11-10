@@ -279,6 +279,14 @@ async function main() {
   await startJxcServer();
 
   section('2. 未开启开关时：管理员访问被拒且不显示入口');
+  const anonClient = new Client();
+  let badLogin = await anonClient.raw('/login', { body: 'tenant_code=a&tenant_code=b' });
+  ok(badLogin.status === 200 && badLogin.text.includes('请输入租户代码'), 'POST /login 对数组或缺失参数兜底返回友好提示而非 500');
+  let badLogin2 = await anonClient.raw('/login', { body: `tenant_code=${TENANT}` });
+  ok(badLogin2.status === 200 && badLogin2.text.includes('用户名或密码错误'), 'POST /login 缺少 username 时返回友好提示而非 500');
+  let badSuperLogin = await anonClient.raw('/platform-admin/login', { body: 'username=a&username=b' });
+  ok(badSuperLogin.status === 200 && badSuperLogin.text.includes('用户名或密码错误'), 'POST /platform-admin/login 对畸形参数兜底返回友好提示而非 500');
+
   const adminClient = new Client();
   let r = await adminClient.post('/login', { tenant_code: TENANT, username: 'admin', password: TENANT_ADMIN_PW });
   ok(r.loc === '/', '租户管理员登录成功');
@@ -299,6 +307,16 @@ async function main() {
 
   r = await superClient.get(`/platform-admin/tenants/${tenant.id}/edit`);
   ok(r.status === 200 && r.text.includes('开启 AI 经营诊断'), '平台后台租户编辑页展示 AI 经营诊断开关');
+
+  // 校验非法日历日（如 2026-02-30）被拒绝入库
+  r = await superClient.post(`/platform-admin/tenants/${tenant.id}/edit`, {
+    tenant_name: 'AI诊断测试商贸',
+    expires_at: '2026-02-30',
+    max_users: '',
+    ai_enabled: '1',
+    ai_shelfguard_enabled: '1'
+  });
+  ok(r.status === 200 && r.text.includes('到期日期格式不对或非有效日历日'), '平台后台拒绝非法日历日 2026-02-30 作为租户到期日');
 
   r = await superClient.post(`/platform-admin/tenants/${tenant.id}/edit`, {
     tenant_name: 'AI诊断测试商贸',
@@ -362,11 +380,21 @@ async function main() {
   ok(globalBody.ok === true && globalBody.cards.some(c => c.type === 'tenant_overview'), '全局诊断返回全公司经营与巡检概览卡片');
   ok(globalBody.answer.includes('流通1家') && globalBody.answer.includes('餐饮1家'), '全局诊断准确统计业务员名下各客户标签（流通/餐饮）数量');
 
-  const { querySearchCustomers } = require('../lib/aiAssistant');
+  const { querySearchCustomers, queryCustomerJxcDiagnosis } = require('../lib/aiAssistant');
   const tagCheckDb = openTenantDbByPath(updatedTenant.db_path);
   const searchRes = querySearchCustomers(tagCheckDb, { operatorName: '张三', tagName: '流通客户' });
+  const diagRes = queryCustomerJxcDiagnosis(tagCheckDb, { customerId: cust.id, days: 30 });
   tagCheckDb.close();
   ok(searchRes.total_matched_customers === 1 && searchRes.customers[0].name === '东门烟酒店' && searchRes.customers[0].tags.includes('流通'), 'search_customers 支持按业务员姓名+客户标签（自动兼容“流通客户”后缀）精准筛选');
+  ok(
+    !('phone' in searchRes.customers[0]) &&
+    !('address' in searchRes.customers[0]) &&
+    !('contact' in searchRes.customers[0]) &&
+    !('phone' in diagRes.customer) &&
+    !('address' in diagRes.customer) &&
+    !('contact' in diagRes.customer),
+    'AI 工具返回数据已做最小化脱敏裁剪，不含客户手机号、联系人与街道地址'
+  );
 
   section('6. 历史对话按人隔离、30天自动过期清理与门店搜索框');
   ok(Boolean(chatBody.sessionId) && Array.isArray(globalBody.sessions) && globalBody.sessions.length === 2, '提问后自动落库生成历史会话并返回会话列表');

@@ -5,7 +5,7 @@
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
-    "test": "node tests/regression.js && node tests/commercial-fixes-test.js && node tests/drafts-audit-test.js && node tests/import-reconciliation-print-test.js && node tests/backup-safety-test.js && node tests/backup-env-test.js && node tests/return-workflow-test.js && node tests/return-total-match-test.js && node tests/warehouse-status-test.js && node tests/sales-filters-test.js && node tests/daily-analysis-test.js && node tests/daily-analysis-http-test.js && node tests/payment-refund-test.js && node tests/customer-tags-test.js && node tests/p1-fixes-verify.js && node tests/api-isolation-test.js && node tests/review-fixes-test.js && node tests/report-received-test.js && node tests/batch2-fixes-test.js && node tests/salesperson-performance-test.js",
+    "test": "node tests/regression.js && node tests/commercial-fixes-test.js && node tests/drafts-audit-test.js && node tests/import-reconciliation-print-test.js && node tests/backup-safety-test.js && node tests/backup-env-test.js && node tests/return-workflow-test.js && node tests/return-total-match-test.js && node tests/warehouse-status-test.js && node tests/sales-filters-test.js && node tests/daily-analysis-test.js && node tests/daily-analysis-http-test.js && node tests/payment-refund-test.js && node tests/customer-tags-test.js && node tests/p1-fixes-verify.js && node tests/api-isolation-test.js && node tests/review-fixes-test.js && node tests/report-received-test.js && node tests/batch2-fixes-test.js && node tests/salesperson-performance-test.js && node tests/ai-assistant-test.js",
     "test:p1": "node tests/p1-fixes-verify.js",
     "test:daily-analysis": "node tests/daily-analysis-test.js && node tests/daily-analysis-http-test.js"
   },
@@ -26,7 +26,7 @@
     "express-rate-limit": "^8.7.0",
     "express-session": "^1.19.0",
     "helmet": "^8.3.0",
-    "multer": "2.4.0",
+    "multer": "2.5.0",
     "nodemailer": "^10.0.2",
     "yauzl": "3.4.0"
   },

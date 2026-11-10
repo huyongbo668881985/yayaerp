@@ -12,7 +12,10 @@ const router = express.Router();
 const loginLimiter = createLoginLimiter({
   windowMs: 15 * 60 * 1000,
   max: 10,
-  extractWho: req => ({ tenantCode: req.body.tenant_code, username: req.body.username })
+  extractWho: req => ({
+    tenantCode: req.body && typeof req.body.tenant_code === 'string' ? req.body.tenant_code : '',
+    username: req.body && typeof req.body.username === 'string' ? req.body.username : ''
+  })
 });
 
 const LOGIN_ERRORS = {
@@ -29,13 +32,15 @@ router.get('/login', (req, res) => {
 });
 
 router.post('/login', loginLimiter, (req, res) => {
-  const { tenant_code, username, password } = req.body;
+  const tenant_code = typeof req.body?.tenant_code === 'string' ? req.body.tenant_code.trim() : '';
+  const username = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
 
   if (!tenant_code) {
     return res.render('login', { error: '请输入租户代码', tenantCode: '' });
   }
 
-  const result = getTenantDb(tenant_code.trim());
+  const result = getTenantDb(tenant_code);
   if (result.error === 'not_found') {
     return res.render('login', { error: '租户代码不存在', tenantCode: tenant_code });
   }
@@ -47,8 +52,8 @@ router.post('/login', loginLimiter, (req, res) => {
   }
 
   const { db, tenant } = result;
-  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
-  if (!user || !bcrypt.compareSync(password || '', user.password_hash)) {
+  const user = username ? db.prepare('SELECT * FROM users WHERE username = ?').get(username) : null;
+  if (!user || !bcrypt.compareSync(password, user.password_hash)) {
     loginLimiter.fail(req); // 只统计失败次数；成功登录会清零，团队共用出口 IP 不会被误拦
     return res.render('login', { error: '用户名或密码错误', tenantCode: tenant_code });
   }
