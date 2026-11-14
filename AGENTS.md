@@ -12,11 +12,14 @@
 1. **执行模式**：因 SSH 连接外部服务器需要网络和本地密钥，直接使用提权模式执行，不作无效沙箱试探。
 2. **服务器环境基准**：
    - 项目路径：`/home/ubuntu/yayaerp`
-   - 生产端口配置：`docker-compose.yml` 必须保持 `3000:3000` 端口映射（以适配既有 Nginx Proxy Manager 反向代理，拉取代码后须检查并保留此本地配置）。
+   - 生产端口配置：通过服务器 `/home/ubuntu/yayaerp/.env` 中的 `BIND_ADDR`（如 `10.0.0.145`）控制宿主机监听地址，**禁止**手动修改受 Git 跟踪的 `docker-compose.yml`；禁止回落为 `127.0.0.1`（跨机 Nginx Proxy Manager 无法连通会导致 502）。
 3. **备份规范**：生产数据目录 `/home/ubuntu/yayaerp/data` 属容器内部用户所有，部署前必须使用 `sudo cp -r /home/ubuntu/yayaerp/data /home/ubuntu/jxc-deploy-backups/backup-$(date +%Y%m%d%H%M%S)` 创建安全快照。
-4. **一键构建重启与验收**：
-   - 步骤：`git stash`（或保留端口差异） ➡️ `git pull origin main` ➡️ 还原 `3000:3000` ➡️ `docker compose build` ➡️ `docker compose up -d`。
-   - 验收：检查 `docker compose ps` 健康状态、`curl -fsS http://127.0.0.1:3000/healthz` 响应以及对生产数据库执行 `PRAGMA integrity_check` 完整性校验。
+4. **标准化部署与强制验收门禁**：
+   - 统一直接运行 `./scripts/deploy-myai.sh`（内部按序执行：备份 ➡️ 校验 `.env` 中 `BIND_ADDR` 与工作区干净 ➡️ `git pull --ff-only origin main` ➡️ `docker compose build` ➡️ `docker compose up -d`）。
+   - 验收必须全部通过，缺一不可：
+     1. `docker compose port jxc 3000` 必须等于 `${BIND_ADDR}:3000`（不得为 `127.0.0.1:3000`）；
+     2. 内网 `http://${BIND_ADDR}:3000/healthz` 与**公网反代入口 `https://erp.yayaagent.com/healthz`** 均返回 `{"status":"ok"}`（严禁仅凭 `127.0.0.1:3000/healthz` 宣布成功）；
+     3. 生产数据库及租户库 `PRAGMA integrity_check` 全部为 `ok`。
 
 ## 前端界面交付
 
