@@ -97,12 +97,13 @@ function parseProductNumbers(body) {
 router.post('/products/new', requireAdmin, (req, res) => {
   const db = req.tenantDb;
   const { sku, name, spec, unit, pack_unit, pack_size, cost_price, sale_price, cost_price_pack, sale_price_pack, low_stock_threshold } = req.body;
-  if (!name) return res.render('product_form', { product: req.body, error: '商品名称必填' });
-  const pack = parsePackSize(pack_size);
-  if (pack.error) return res.render('product_form', { product: req.body, error: pack.error });
-  const numbers = parseProductNumbers(req.body);
-  if (numbers.error) return res.status(400).render('product_form', { product: req.body, error: numbers.error });
   const saleVisible = parseSaleVisible(req.body, 1);
+  const formProduct = { ...req.body, sale_visible: saleVisible };
+  if (!name) return res.render('product_form', { product: formProduct, error: '商品名称必填' });
+  const pack = parsePackSize(pack_size);
+  if (pack.error) return res.render('product_form', { product: formProduct, error: pack.error });
+  const numbers = parseProductNumbers(req.body);
+  if (numbers.error) return res.status(400).render('product_form', { product: formProduct, error: numbers.error });
   try {
     db.transaction(() => {
       const info = db.prepare(
@@ -131,7 +132,7 @@ router.post('/products/new', requireAdmin, (req, res) => {
     }).immediate();
     res.redirect('/products?saved=1');
   } catch (e) {
-    res.render('product_form', { product: req.body, error: 'SKU 已存在或数据有误，请核对后重试。' });
+    res.render('product_form', { product: formProduct, error: 'SKU 已存在或数据有误，请核对后重试。' });
   }
 });
 
@@ -146,7 +147,8 @@ router.post('/products/:id/edit', requireAdmin, (req, res) => {
   const db = req.tenantDb;
   const existing = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).render('global_error', { message: '商品不存在', returnTo: '/products' });
-  const formProduct = { ...req.body, id: existing.id };
+  const saleVisible = parseSaleVisible(req.body, existing.sale_visible !== 0 ? 1 : 0);
+  const formProduct = { ...req.body, id: existing.id, sale_visible: saleVisible };
   const { sku, name, spec, unit, pack_unit, pack_size, cost_price, sale_price, cost_price_pack, sale_price_pack, low_stock_threshold } = req.body;
   // 与"新建商品"保持一致：名称必填、换算比例正整数、SKU 撞车等约束错误渲染表单提示，而不是抛到全局 500 错误页
   if (!name) return res.render('product_form', { product: formProduct, error: '商品名称必填' });
@@ -154,7 +156,6 @@ router.post('/products/:id/edit', requireAdmin, (req, res) => {
   if (pack.error) return res.render('product_form', { product: formProduct, error: pack.error });
   const numbers = parseProductNumbers(req.body);
   if (numbers.error) return res.status(400).render('product_form', { product: formProduct, error: numbers.error });
-  const saleVisible = parseSaleVisible(req.body, existing.sale_visible !== 0 ? 1 : 0);
   try {
     db.transaction(() => {
       db.prepare(
@@ -220,6 +221,9 @@ router.post('/products/:id/toggle-visibility', requireAdmin, (req, res) => {
 
 router.post('/products/batch-visibility', requireAdmin, (req, res) => {
   const db = req.tenantDb;
+  if (req.body.sale_visible !== '0' && req.body.sale_visible !== '1') {
+    return res.status(400).send('无效的状态参数');
+  }
   const rawIds = Array.isArray(req.body.ids)
     ? req.body.ids
     : String(req.body.ids || '').split(',');
@@ -251,7 +255,7 @@ router.post('/products/:id/delete', requireAdmin, (req, res) => {
     db.prepare('SELECT COUNT(*) c FROM return_order_items WHERE product_id = ?').get(req.params.id).c +
     db.prepare('SELECT COUNT(*) c FROM stock_transactions WHERE product_id = ?').get(req.params.id).c;
   if (refCount > 0) {
-    return res.status(400).send('无法删除：该商品已有出入库流水或被销售单/采购单/调拨单/退货单引用，删除会破坏历史记录。如果不再销售，可以把名称改成"（停用）xxx"标记一下即可。');
+    return res.status(400).send('无法删除：该商品已有出入库流水或被销售单/采购单/调拨单/退货单引用，删除会破坏历史记录。如果不再销售，可在商品档案中将其“设为隐藏”即可。');
   }
   db.transaction(() => {
     db.prepare('DELETE FROM inventory WHERE product_id = ?').run(req.params.id);

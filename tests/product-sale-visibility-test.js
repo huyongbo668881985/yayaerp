@@ -200,10 +200,21 @@ const server = app.listen(process.argv.includes('--serve') ? 3219 : 0, '127.0.0.
     assert.doesNotMatch(dashRes.text, /一次性赠品物料/);
     assert.match(dashRes.text, /历史停售品/);
 
-    // 9. 批量恢复显示
+    // 9. 批量恢复显示与非法参数校验
+    assert.equal((await request('/products/batch-visibility', { ids: '2,3', sale_visible: 'invalid' }, 1)).status, 400);
     const batchRestore = await request('/products/batch-visibility', { ids: '2,3', sale_visible: '1' }, 1);
     assert.equal(batchRestore.status, 302);
     assert.equal(db.prepare('SELECT COUNT(*) c FROM products WHERE sale_visible=1').get().c, 3);
+
+    // 10. 新增商品校验失败回显时保留未勾选的 sale_visible 状态
+    const invalidNew = await request('/products/new', {
+      name: '报错测试品',
+      unit: '瓶',
+      pack_size: '0',
+      sale_visible_present: '1'
+    }, 1);
+    assert.equal(invalidNew.status, 200);
+    assert.doesNotMatch(invalidNew.text, /name="sale_visible"\s+value="1"\s+checked/);
 
     console.log('product-sale-visibility-test passed');
     server.close();
