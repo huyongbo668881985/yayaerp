@@ -64,6 +64,14 @@
       </div>
     </div>
 
+    <input type="hidden" name="sale_visible_present" value="1">
+    <div class="form-row">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" name="sale_visible" value="1" <%= (!product || (product.sale_visible !== 0 && product.sale_visible !== '0')) ? 'checked' : '' %> style="width:auto">
+        <span>在销售开单时显示（取消勾选后，新建销售单将隐藏该商品；库存为 0 时库存与预警页也不再显示）</span>
+      </label>
+    </div>
+
     <script>
       // 辅助：填了箱价没填瓶价时，自动按换算比例估算一个瓶价（仅作参考，可手动修改，不影响箱价的精确存储）
       (function() {

@@ -198,6 +198,7 @@ router.get('/', requireLogin, (req, res) => {
     JOIN products p ON p.id = inv.product_id
     JOIN warehouses w ON w.id = inv.warehouse_id
     WHERE w.active = 1 AND p.low_stock_threshold > 0 AND inv.quantity <= p.low_stock_threshold
+      AND (p.sale_visible = 1 OR inv.quantity > 0)
       ${operatorFilter ? 'AND w.operator_id = ?' : ''}
     ORDER BY inv.quantity ASC
     LIMIT 20

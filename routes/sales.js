@@ -338,6 +338,16 @@ function customerOwnerMismatch(db, sessionUser, customerId, responsibleId, body)
   };
 }
 
+function hiddenSaleProductNames(items, allowedIds = null) {
+  const names = [];
+  for (const it of items) {
+    if (!it.saleVisible && !(allowedIds && allowedIds.has(it.pid)) && !names.includes(it.productName)) {
+      names.push(it.productName);
+    }
+  }
+  return names;
+}
+
 router.get('/sales/new', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const requestedCustomerId = Number(req.query.customer_id);
@@ -395,6 +405,11 @@ router.post('/sales/new', requireLogin, requireMutationKey, (req, res) => {
   if (hasInvalidPrice(items)) {
     res.status(400);
     return renderError('销售单价必须是大于等于 0 的有效数字');
+  }
+  const hiddenNames = hiddenSaleProductNames(items);
+  if (hiddenNames.length > 0) {
+    res.status(400);
+    return renderError(`以下商品已设为销售隐藏，无法用于新建销售单：${hiddenNames.join('、')}`);
   }
   if (!isCustomerInScope(db, req.session.user, customer_id, null)) {
     return renderError('所选客户不在你的名下，无权使用：请选择自己负责的客户，或联系管理员处理');
@@ -510,6 +525,12 @@ router.post('/sales/:id/edit', requireLogin, requireMutationKey, (req, res) => {
   if (hasInvalidPrice(items)) {
     res.status(400);
     return renderError('销售单价必须是大于等于 0 的有效数字');
+  }
+  const existingPids = new Set(db.prepare('SELECT product_id FROM sales_order_items WHERE sales_order_id = ?').all(order.id).map(r => r.product_id));
+  const hiddenNames = hiddenSaleProductNames(items, existingPids);
+  if (hiddenNames.length > 0) {
+    res.status(400);
+    return renderError(`以下商品已设为销售隐藏，无法新添加到销售单：${hiddenNames.join('、')}`);
   }
   // 编辑时额外放行"单据当前已关联的客户"：管理员可能已把客户转给别人，
   // 但创建人编辑自己草稿单时不应因此被拦（与下拉框 customersForForm 的 OR id=? 同口径）。

@@ -6,23 +6,47 @@
 </div>
 <h1>商品档案</h1>
 <% if (typeof success !== 'undefined' && success) { %><div class="notice-success" role="status">商品档案已更新</div><% } %>
-<form method="GET" action="/products" class="filter-bar"><label>搜索商品 <input type="search" name="q" placeholder="名称、SKU 或规格" value="<%= typeof query !== 'undefined' ? query : '' %>"></label><button class="btn btn-secondary" type="submit">查询</button></form>
-<p class="muted">箱价为整箱下单时使用的精确单价；瓶价仅为拆零参考价，可能有小数误差。库存预警阈值以基本单位计数。</p>
+<form method="GET" action="/products" class="filter-bar">
+  <label>搜索商品 <input type="search" name="q" placeholder="名称、SKU 或规格" value="<%= typeof query !== 'undefined' ? query : '' %>"></label>
+  <label>开单状态
+    <select name="visibility">
+      <option value="all" <%= visibility === 'all' ? 'selected' : '' %>>全部</option>
+      <option value="visible" <%= visibility === 'visible' ? 'selected' : '' %>>开单可见</option>
+      <option value="hidden" <%= visibility === 'hidden' ? 'selected' : '' %>>销售隐藏</option>
+    </select>
+  </label>
+  <button class="btn btn-secondary" type="submit">查询</button>
+</form>
+<p class="muted">箱价为整箱下单时使用的精确单价；瓶价仅为拆零参考价，可能有小数误差。库存预警阈值以基本单位计数。设为“销售隐藏”的商品在新建销售单时不会显示，且库存为 0 时不在库存与低库存预警页展示。</p>
 <% if (isAdmin) { %>
-  <div style="margin-bottom:12px"><a class="btn" href="/products/new">+ 新增商品</a> <a class="btn btn-secondary" href="/imports">批量导入</a></div>
+  <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px">
+    <a class="btn" href="/products/new">+ 新增商品</a>
+    <a class="btn btn-secondary" href="/imports">批量导入</a>
+    <form method="POST" action="/products/batch-visibility" id="batchVisibilityForm" style="display:inline-flex;gap:6px;align-items:center;margin-left:auto">
+      <input type="hidden" name="q" value="<%= typeof query !== 'undefined' ? query : '' %>">
+      <input type="hidden" name="visibility" value="<%= visibility %>">
+      <input type="hidden" name="page" value="<%= paging.page %>">
+      <input type="hidden" name="ids" id="batchVisibilityIds" value="">
+      <span class="muted" id="batchSelectedCount">未勾选</span>
+      <button type="submit" name="sale_visible" value="0" class="btn btn-secondary btn-sm batch-vis-btn" disabled>批量设为隐藏</button>
+      <button type="submit" name="sale_visible" value="1" class="btn btn-secondary btn-sm batch-vis-btn" disabled>批量恢复显示</button>
+    </form>
+  </div>
 <% } %>
 <div class="card desktop-table-wrap">
   <table>
     <tr>
+      <% if (isAdmin) { %><th style="width:32px"><input type="checkbox" id="selectAllProducts" aria-label="全选商品"></th><% } %>
       <th>SKU</th><th>名称</th><th>规格</th><th>单位换算</th>
       <% if (isAdmin) { %><th>箱成本价</th><% } %>
       <th>箱售价</th>
       <% if (isAdmin) { %><th>瓶成本价</th><% } %>
-      <th>瓶售价</th><th>预警阈值</th>
+      <th>瓶售价</th><th>预警阈值</th><th>开单状态</th>
       <% if (isAdmin) { %><th>操作</th><% } %>
     </tr>
     <% products.forEach(function(p) { %>
       <tr>
+        <% if (isAdmin) { %><td><input type="checkbox" class="product-select-cb" value="<%= p.id %>" aria-label="选择 <%= p.name %>"></td><% } %>
         <td><%= p.sku || '-' %></td>
         <td><%= p.name %></td>
         <td><%= p.spec || '-' %></td>
@@ -40,8 +64,22 @@
         <% if (isAdmin) { %><td>¥<%= p.cost_price.toFixed(2) %></td><% } %>
         <td>¥<%= p.sale_price.toFixed(2) %></td>
         <td><%= p.low_stock_threshold %></td>
+        <td>
+          <% if (p.sale_visible === 0) { %>
+            <span class="badge badge-muted">销售隐藏</span>
+          <% } else { %>
+            <span class="badge badge-operator">开单可见</span>
+          <% } %>
+        </td>
         <% if (isAdmin) { %>
-          <td>
+          <td style="white-space:nowrap">
+            <form method="POST" action="/products/<%= p.id %>/toggle-visibility" style="display:inline">
+              <input type="hidden" name="q" value="<%= typeof query !== 'undefined' ? query : '' %>">
+              <input type="hidden" name="visibility" value="<%= visibility %>">
+              <input type="hidden" name="page" value="<%= paging.page %>">
+              <button type="submit" style="background:none;border:none;color:#2563eb;cursor:pointer;padding:0"><%= p.sale_visible === 0 ? '恢复显示' : '设为隐藏' %></button>
+            </form>
+            &nbsp;
             <a href="/products/<%= p.id %>/edit">编辑</a>
             &nbsp;
             <form method="POST" action="/products/<%= p.id %>/delete" style="display:inline" onsubmit="return confirm('确认删除该商品？')">
@@ -58,7 +96,15 @@
   <% products.forEach(function(p) { %>
     <div class="order-card">
       <div class="order-card-top">
-        <span class="order-card-id"><%= p.name %></span>
+        <span class="order-card-id">
+          <% if (isAdmin) { %><input type="checkbox" class="product-select-cb" value="<%= p.id %>" aria-label="选择 <%= p.name %>" style="width:auto;margin-right:6px"><% } %>
+          <%= p.name %>
+        </span>
+        <% if (p.sale_visible === 0) { %>
+          <span class="badge badge-muted">销售隐藏</span>
+        <% } else { %>
+          <span class="badge badge-operator">开单可见</span>
+        <% } %>
         <span class="order-card-amount">¥<%= p.sale_price.toFixed(2) %></span>
       </div>
       <div class="order-card-mid">
@@ -74,6 +120,12 @@
       </div>
       <% if (isAdmin) { %>
         <div style="display:flex; gap:8px; margin-top:10px">
+          <form method="POST" action="/products/<%= p.id %>/toggle-visibility" style="flex:1">
+            <input type="hidden" name="q" value="<%= typeof query !== 'undefined' ? query : '' %>">
+            <input type="hidden" name="visibility" value="<%= visibility %>">
+            <input type="hidden" name="page" value="<%= paging.page %>">
+            <button type="submit" class="btn btn-sm btn-secondary" style="width:100%"><%= p.sale_visible === 0 ? '恢复显示' : '设为隐藏' %></button>
+          </form>
           <a href="/products/<%= p.id %>/edit" class="btn btn-sm btn-secondary" style="flex:1; text-align:center">编辑</a>
           <form method="POST" action="/products/<%= p.id %>/delete" style="flex:1" onsubmit="return confirm('确认删除该商品？')">
             <button type="submit" class="btn btn-sm btn-danger" style="width:100%">删除</button>
@@ -84,5 +136,36 @@
   <% }) %>
   <% if (products.length === 0) { %><p class="muted">暂无商品</p><% } %>
 </div>
+<% if (isAdmin) { %>
+<script>
+  (function() {
+    const selectAll = document.getElementById('selectAllProducts');
+    const cbs = Array.from(document.querySelectorAll('.product-select-cb'));
+    const idsInput = document.getElementById('batchVisibilityIds');
+    const countLabel = document.getElementById('batchSelectedCount');
+    const btns = Array.from(document.querySelectorAll('.batch-vis-btn'));
+    function syncSelection(changedCb) {
+      if (changedCb) {
+        for (const cb of cbs) {
+          if (cb !== changedCb && cb.value === changedCb.value) cb.checked = changedCb.checked;
+        }
+      }
+      const selected = [...new Set(cbs.filter(cb => cb.checked).map(cb => cb.value))];
+      idsInput.value = selected.join(',');
+      countLabel.textContent = selected.length ? `已选 ${selected.length} 项` : '未勾选';
+      for (const btn of btns) btn.disabled = selected.length === 0;
+    }
+    if (selectAll) {
+      selectAll.addEventListener('change', () => {
+        for (const cb of cbs) cb.checked = selectAll.checked;
+        syncSelection(null);
+      });
+    }
+    for (const cb of cbs) {
+      cb.addEventListener('change', () => syncSelection(cb));
+    }
+  })();
+</script>
+<% } %>
 <%- include('partials/pagination') %>
 <%- include('partials/footer') %>

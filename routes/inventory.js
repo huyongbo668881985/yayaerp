@@ -16,7 +16,7 @@ function queryInventorySnapshot(db, warehouseId, user = null, search = '', lowOn
     JOIN warehouses w ON w.id = inv.warehouse_id
   `;
   const params = [];
-  const conditions = [];
+  const conditions = ['(p.sale_visible = 1 OR inv.quantity > 0)'];
   if (user && user.role !== 'admin') {
     conditions.push('w.operator_id = ?');
     params.push(user.id);

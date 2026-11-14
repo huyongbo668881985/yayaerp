@@ -11,8 +11,8 @@ router.get('/order-options/products', (req, res) => {
     ? db.prepare(`SELECT ${PRODUCT_FIELDS} FROM products WHERE id IN (${ids.map(() => '?').join(',')})`).all(...ids)
     : req.query.recent === '1'
       ? db.prepare(`SELECT ${PRODUCT_FIELDS.split(', ').map(field => 'p.' + field).join(', ')} FROM products p JOIN sales_order_items i ON i.product_id=p.id
-          JOIN sales_orders o ON o.id=i.sales_order_id ${user.role === 'admin' ? '' : 'WHERE o.user_id=?'} GROUP BY p.id ORDER BY MAX(o.id) DESC, p.id LIMIT 6`).all(...(user.role === 'admin' ? [] : [user.id]))
-      : db.prepare(`SELECT ${PRODUCT_FIELDS} FROM products WHERE name LIKE ? OR sku LIKE ? OR spec LIKE ? ORDER BY name, id LIMIT 20`).all(...Array(3).fill('%' + keyword + '%'));
+          JOIN sales_orders o ON o.id=i.sales_order_id WHERE p.sale_visible = 1 ${user.role === 'admin' ? '' : 'AND o.user_id=?'} GROUP BY p.id ORDER BY MAX(o.id) DESC, p.id LIMIT 6`).all(...(user.role === 'admin' ? [] : [user.id]))
+      : db.prepare(`SELECT ${PRODUCT_FIELDS} FROM products WHERE sale_visible = 1 AND (name LIKE ? OR sku LIKE ? OR spec LIKE ?) ORDER BY name, id LIMIT 20`).all(...Array(3).fill('%' + keyword + '%'));
   res.json({ products });
 });
 router.get('/order-options/customers', (req, res) => {

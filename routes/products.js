@@ -5,18 +5,51 @@ const { pagination } = require('../lib/catalog');
 const { writeAuditLog } = require('../lib/auditLog');
 const router = express.Router();
 
-const OPERATOR_PRODUCT_FIELDS = 'id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack, low_stock_threshold';
+const OPERATOR_PRODUCT_FIELDS = 'id, sku, name, spec, unit, pack_unit, pack_size, sale_price, sale_price_pack, low_stock_threshold, sale_visible';
+
+function buildProductsRedirect({ q = '', visibility = 'all', page = '' } = {}) {
+  const params = new URLSearchParams({ saved: '1' });
+  if (q) params.set('q', q);
+  if (visibility && visibility !== 'all') params.set('visibility', visibility);
+  if (page && Number(page) > 1) params.set('page', String(page));
+  return '/products?' + params.toString();
+}
+
+function parseSaleVisible(body, defaultValue = 1) {
+  const raw = body.sale_visible;
+  if (Array.isArray(raw)) return raw.includes('1') ? 1 : 0;
+  if (raw === '0' || raw === 0 || raw === false) return 0;
+  if (raw === '1' || raw === 1 || raw === true) return 1;
+  if (body.sale_visible_present === '1') return 0;
+  return defaultValue;
+}
 
 router.get('/products', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const isAdmin = req.session.user.role === 'admin';
   const query = String(req.query.q || '').trim().slice(0, 100);
-  const params = Array(3).fill('%' + query + '%');
-  const where = ' WHERE name LIKE ? OR sku LIKE ? OR spec LIKE ?';
+  const visibility = ['all', 'visible', 'hidden'].includes(req.query.visibility) ? req.query.visibility : 'all';
+  const conditions = [];
+  const params = [];
+  if (query) {
+    conditions.push('(name LIKE ? OR sku LIKE ? OR spec LIKE ?)');
+    params.push(...Array(3).fill('%' + query + '%'));
+  }
+  if (visibility === 'visible') conditions.push('sale_visible = 1');
+  else if (visibility === 'hidden') conditions.push('sale_visible = 0');
+  const where = conditions.length ? ' WHERE ' + conditions.join(' AND ') : '';
   const paging = pagination(db.prepare('SELECT COUNT(*) n FROM products' + where).get(...params).n, req.query.page);
   const fields = isAdmin ? '*' : OPERATOR_PRODUCT_FIELDS;
   const products = db.prepare(`SELECT ${fields} FROM products${where} ORDER BY id DESC LIMIT ? OFFSET ?`).all(...params, paging.size, paging.offset);
-  res.render('products', { products, query, paging, pageLink: page => '/products?' + new URLSearchParams({q:query,page}), success: req.query.saved === '1', isAdmin });
+  res.render('products', {
+    products,
+    query,
+    visibility,
+    paging,
+    pageLink: page => '/products?' + new URLSearchParams({ q: query, visibility, page }),
+    success: req.query.saved === '1',
+    isAdmin
+  });
 });
 
 router.get('/products/new', requireAdmin, (req, res) => {
@@ -69,17 +102,19 @@ router.post('/products/new', requireAdmin, (req, res) => {
   if (pack.error) return res.render('product_form', { product: req.body, error: pack.error });
   const numbers = parseProductNumbers(req.body);
   if (numbers.error) return res.status(400).render('product_form', { product: req.body, error: numbers.error });
+  const saleVisible = parseSaleVisible(req.body, 1);
   try {
     db.transaction(() => {
       const info = db.prepare(
-        `INSERT INTO products (sku, name, spec, unit, pack_unit, pack_size, cost_price, sale_price, cost_price_pack, sale_price_pack, low_stock_threshold)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+        `INSERT INTO products (sku, name, spec, unit, pack_unit, pack_size, cost_price, sale_price, cost_price_pack, sale_price_pack, low_stock_threshold, sale_visible)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
       ).run(
         sku || null, name, spec || '', unit || '瓶',
         pack_unit || null, pack.value,
         numbers.values.cost_price, numbers.values.sale_price,
         numbers.values.cost_price_pack, numbers.values.sale_price_pack,
-        numbers.values.low_stock_threshold
+        numbers.values.low_stock_threshold,
+        saleVisible
       );
       // 为所有已存在的仓库建立库存行（初始为0）
       const warehouses = db.prepare('SELECT id FROM warehouses').all();
@@ -89,6 +124,7 @@ router.post('/products/new', requireAdmin, (req, res) => {
         `新增商品【${name}】，售价 ¥${numbers.values.sale_price.toFixed(2)}，成本价 ¥${numbers.values.cost_price.toFixed(2)}`, {
           sku: sku || null, name, spec: spec || '', unit: unit || '瓶',
           pack_unit: pack_unit || null, pack_size: pack.value,
+          sale_visible: saleVisible,
           ...numbers.values
         }
       );
@@ -118,16 +154,18 @@ router.post('/products/:id/edit', requireAdmin, (req, res) => {
   if (pack.error) return res.render('product_form', { product: formProduct, error: pack.error });
   const numbers = parseProductNumbers(req.body);
   if (numbers.error) return res.status(400).render('product_form', { product: formProduct, error: numbers.error });
+  const saleVisible = parseSaleVisible(req.body, existing.sale_visible !== 0 ? 1 : 0);
   try {
     db.transaction(() => {
       db.prepare(
-        `UPDATE products SET sku=?, name=?, spec=?, unit=?, pack_unit=?, pack_size=?, cost_price=?, sale_price=?, cost_price_pack=?, sale_price_pack=?, low_stock_threshold=? WHERE id=?`
+        `UPDATE products SET sku=?, name=?, spec=?, unit=?, pack_unit=?, pack_size=?, cost_price=?, sale_price=?, cost_price_pack=?, sale_price_pack=?, low_stock_threshold=?, sale_visible=? WHERE id=?`
       ).run(
         sku || null, name, spec || '', unit || '瓶',
         pack_unit || null, pack.value,
         numbers.values.cost_price, numbers.values.sale_price,
         numbers.values.cost_price_pack, numbers.values.sale_price_pack,
         numbers.values.low_stock_threshold,
+        saleVisible,
         req.params.id
       );
 
@@ -144,6 +182,9 @@ router.post('/products/:id/edit', requireAdmin, (req, res) => {
       if (existing.pack_size !== pack.value || (existing.pack_unit || '') !== (pack_unit || '')) {
         changes.push(`换算规格: 1${existing.pack_unit || '箱'}=${existing.pack_size}${existing.unit} → 1${pack_unit || '箱'}=${pack.value}${unit || '瓶'}`);
       }
+      if ((existing.sale_visible !== 0 ? 1 : 0) !== saleVisible) {
+        changes.push(`销售开单显示: ${existing.sale_visible !== 0 ? '显示' : '隐藏'} → ${saleVisible ? '显示' : '隐藏'}`);
+      }
       const summary = changes.length > 0 ? `修改商品【${name}】：${changes.join('，')}` : `修改商品【${name}】基础资料`;
 
       writeAuditLog(db, req.session.user, '修改商品', '商品', existing.id, summary, {
@@ -151,6 +192,7 @@ router.post('/products/:id/edit', requireAdmin, (req, res) => {
         after: {
           sku: sku || null, name, spec: spec || '', unit: unit || '瓶',
           pack_unit: pack_unit || null, pack_size: pack.value,
+          sale_visible: saleVisible,
           ...numbers.values
         }
       });
@@ -159,6 +201,41 @@ router.post('/products/:id/edit', requireAdmin, (req, res) => {
   } catch (e) {
     res.status(400).render('product_form', { product: formProduct, error: 'SKU 已存在或数据有误，请核对后重试。' });
   }
+});
+
+router.post('/products/:id/toggle-visibility', requireAdmin, (req, res) => {
+  const db = req.tenantDb;
+  const product = db.prepare('SELECT id, name, sale_visible FROM products WHERE id = ?').get(req.params.id);
+  if (!product) return res.status(404).send('商品不存在');
+  const nextVisible = product.sale_visible === 0 ? 1 : 0;
+  db.transaction(() => {
+    db.prepare('UPDATE products SET sale_visible = ? WHERE id = ?').run(nextVisible, product.id);
+    writeAuditLog(db, req.session.user, '修改商品', '商品', product.id,
+      `修改商品【${product.name}】销售开单显示：${nextVisible ? '设为显示' : '设为隐藏'}`,
+      { before: { sale_visible: product.sale_visible }, after: { sale_visible: nextVisible } }
+    );
+  }).immediate();
+  res.redirect(buildProductsRedirect({ q: req.body.q, visibility: req.body.visibility, page: req.body.page }));
+});
+
+router.post('/products/batch-visibility', requireAdmin, (req, res) => {
+  const db = req.tenantDb;
+  const rawIds = Array.isArray(req.body.ids)
+    ? req.body.ids
+    : String(req.body.ids || '').split(',');
+  const ids = [...new Set(rawIds.map(Number).filter(id => Number.isSafeInteger(id) && id > 0))].slice(0, 200);
+  const targetVisible = req.body.sale_visible === '0' ? 0 : 1;
+  if (ids.length > 0) {
+    const placeholders = ids.map(() => '?').join(',');
+    db.transaction(() => {
+      db.prepare(`UPDATE products SET sale_visible = ? WHERE id IN (${placeholders})`).run(targetVisible, ...ids);
+      writeAuditLog(db, req.session.user, '批量修改商品', '商品', null,
+        `批量将 ${ids.length} 个商品设为销售${targetVisible ? '显示' : '隐藏'}`,
+        { ids, sale_visible: targetVisible }
+      );
+    }).immediate();
+  }
+  res.redirect(buildProductsRedirect({ q: req.body.q, visibility: req.body.visibility, page: req.body.page }));
 });
 
 router.post('/products/:id/delete', requireAdmin, (req, res) => {
