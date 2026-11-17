@@ -19,20 +19,26 @@
     const meta = document.querySelector('meta[name="order-draft-context"]'); if (!meta) return;
     let context; try { context = JSON.parse(meta.content); } catch (_) { return; }
     if (!context.scope) return;
-    let storageOK = true;
     try {
       for (const entry of entries(context.scope)) if ((context.completed || []).includes(entry.values?._request_key)) localStorage.removeItem(entry.key);
-    } catch (_) { storageOK = false; }
+    } catch (_) {}
     const form = document.querySelector('form[data-order-draft]'); if (!form) return;
     const path = new URL(form.action).pathname;
     const products = Array.from(form.querySelector('[name="product_id"]')?.options || []);
     const initialRevision = form.elements.namedItem('draft_revision')?.value;
-    const panel = document.createElement('section'); panel.className = 'draft-panel'; panel.setAttribute('aria-label','本机暂存');
-    const status = document.createElement('p'); status.setAttribute('role','status'); status.textContent = storageOK ? '本机自动暂存 7 天 · 共用设备请及时清除' : '本机存储不可用，请使用“存草稿”保存到服务器。';
+    const panel = document.createElement('section'); panel.className = 'draft-panel'; panel.setAttribute('aria-label','本机暂存'); panel.hidden = true;
+    const status = document.createElement('p'); status.setAttribute('role','status'); status.textContent = '发现未保存的本机暂存，可按需恢复或丢弃。';
     const list = document.createElement('div'); list.className = 'draft-recovery-list';
     const clear = document.createElement('button'); clear.type = 'button'; clear.className = 'btn btn-secondary btn-sm'; clear.textContent = '清除当前本机暂存'; clear.hidden = true;
     panel.append(status,list,clear); form.before(panel);
-    let dirty = false, saved = false, submitting = false, restoring = false, timer;
+    let dirty = false, saved = false, submitting = false, restoring = false, panelPinned = false, timer;
+    function updatePanelVisibility() { panel.hidden = !panelPinned && list.children.length === 0; }
+    function showNotice(text, { pinned = true, showClear = false } = {}) {
+      status.textContent = text;
+      clear.hidden = !showClear;
+      if (pinned) panelPinned = true;
+      updatePanelVisibility();
+    }
     let storageKey = prefix + context.scope + ':' + form.elements.namedItem('_request_key').value;
     let candidates = [];
     function capture() {
@@ -62,9 +68,9 @@
       try {
         storageKey = prefix + context.scope + ':' + form.elements.namedItem('_request_key').value;
         localStorage.setItem(storageKey, JSON.stringify(capture()));
-        saved = true; clear.hidden = false;
-        status.textContent = '已暂存本机 · ' + new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}) + '（尚未保存到服务器）';
-      } catch (_) { saved = false; status.textContent = '本机暂存失败，请尽快联网并保存草稿，离开前不要关闭页面。'; }
+        saved = true;
+        if (panelPinned) showNotice('已暂存本机 · ' + new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}) + '（尚未保存到服务器）', { pinned: true, showClear: true });
+      } catch (_) { saved = false; showNotice('本机暂存失败，请尽快联网并保存草稿，离开前不要关闭页面。'); }
     }
     function changed() { if (restoring) return; dirty = true; saved = false; clearTimeout(timer); timer = setTimeout(save, 200); }
     function preview(entry, container) {
@@ -81,7 +87,7 @@
     }
     async function restore(entry) {
       if (initialRevision != null && entry.values.draft_revision !== initialRevision) {
-        status.textContent = '服务器草稿已更新，这份旧暂存仅供核对。请查看暂存内容，再在当前草稿中重新填写需要保留的部分。'; return;
+        showNotice('服务器草稿已更新，这份旧暂存仅供核对。请查看暂存内容，再在当前草稿中重新填写需要保留的部分。'); return;
       }
       if (form.id === 'saleForm' && window.prepareSaleProducts) {
         try {
@@ -89,20 +95,20 @@
           for (const product of loaded) if (!products.some(option => option.value === String(product.id))) {
             const option = document.createElement('option'); option.value = product.id; option.dataset.packSize = product.pack_size; products.push(option);
           }
-        } catch (_) { status.textContent = '无法核对暂存商品，请稍后重试'; return; }
+        } catch (_) { showNotice('无法核对暂存商品，请稍后重试'); return; }
       }
       if (entry.rows.some(item => item.id && !products.some(option => option.value === item.id))) {
-        status.textContent = '暂存中的商品已不可选，请查看暂存内容，重新选择当前可用商品。'; return;
+        showNotice('暂存中的商品已不可选，请查看暂存内容，重新选择当前可用商品。'); return;
       }
       if (entry.rows.some(item => item.id && !item.original_sales_item_id && item.unit_size != null && item.unit_size !== (item.unit_choice === 'pack' ? Number(products.find(option => option.value === item.id)?.dataset.packSize || 1) : 1))) {
-        status.textContent = '商品箱规已变化，这份暂存仅供核对。请查看暂存内容，按当前箱规重新填写。'; return;
+        showNotice('商品箱规已变化，这份暂存仅供核对。请查看暂存内容，按当前箱规重新填写。'); return;
       }
       if (window.returnSourceSaleId && Number(entry.values.related_sales_order_id) !== window.returnSourceSaleId) {
-        status.textContent = '这份退货暂存属于另一张原销售单，请从对应原单打开退货页面后恢复。'; return;
+        showNotice('这份退货暂存属于另一张原销售单，请从对应原单打开退货页面后恢复。'); return;
       }
       const responsible = form.elements.namedItem('responsible_id');
       if (responsible && entry.values.responsible_id && !Array.from(responsible.options).some(option => option.value === entry.values.responsible_id)) {
-        status.textContent = '暂存中的负责人已不可选，请查看暂存内容，重新选择当前可用负责人。'; return;
+        showNotice('暂存中的负责人已不可选，请查看暂存内容，重新选择当前可用负责人。'); return;
       }
       restoring = true;
       for (const name of fields) {
@@ -128,8 +134,8 @@
       form.dispatchEvent(new Event('draft-restored'));
       if (typeof window.recalcTotal === 'function') window.recalcTotal();
       storageKey = entry.key; observer.takeRecords(); restoring = false; dirty = true; save();
-      status.textContent = '已恢复本机暂存，请核对客户、仓库、商品和金额后再保存。';
       list.replaceChildren();
+      showNotice('已恢复本机暂存，请核对客户、仓库、商品和金额后再保存。', { pinned: true, showClear: true });
     }
     async function checkCompleted(entry) {
       const response = await fetch('/drafts/result?' + new URLSearchParams({key:entry.values._request_key,route:entry.route}), {cache:'no-store'});
@@ -141,14 +147,14 @@
       catch (_) { return; }
       // 服务端报错页面已保留本次填写，不再用较旧内容覆盖。
       const own = candidates.find(entry => entry.values._request_key === form.elements.namedItem('_request_key').value);
-      if (own) { dirty = true; saved = true; clear.hidden = false; status.textContent = '提交未成功，填写内容仍保留在当前页面和本机。请修正后重试。'; }
+      if (own) { dirty = true; saved = true; showNotice('提交未成功，填写内容仍保留在当前页面和本机。请修正后重试。', { pinned: true, showClear: true }); }
       for (const entry of candidates.filter(item => item !== own)) {
         const card = document.createElement('div'); card.className = 'draft-recovery';
         const label = document.createElement('p'); label.textContent = '发现未完成内容 · ' + new Date(entry.savedAt).toLocaleString('zh-CN') + (entry.values.customer_search ? ' · '+entry.values.customer_search : '');
         const recover = document.createElement('button'); recover.type = 'button'; recover.className = 'btn btn-sm'; recover.textContent = '恢复填写';
         const discard = document.createElement('button'); discard.type = 'button'; discard.className = 'btn btn-secondary btn-sm'; discard.textContent = '丢弃这份暂存';
-        card.append(label,recover,discard); preview(entry,card); list.appendChild(card);
-        discard.addEventListener('click', () => { try { localStorage.removeItem(entry.key); card.remove(); } catch (_) { status.textContent='无法清除本机暂存'; } });
+        card.append(label,recover,discard); preview(entry,card);
+        discard.addEventListener('click', () => { try { localStorage.removeItem(entry.key); card.remove(); updatePanelVisibility(); } catch (_) { showNotice('无法清除本机暂存'); } });
         recover.addEventListener('click', async () => {
           recover.disabled = true;
           try {
@@ -158,23 +164,26 @@
               const message = document.createElement('p'); message.textContent = '这份内容已经保存成功，无需再次提交。';
               const link = document.createElement('a'); link.textContent = '查看已保存单据'; link.href = result.redirect; card.append(message,link);
             } else await restore(entry);
-          } catch (_) { status.textContent = '暂时无法确认是否已保存，请联网后再恢复。暂存内容仍保留，可展开查看。'; }
+          } catch (_) { showNotice('暂时无法确认是否已保存，请联网后再恢复。暂存内容仍保留，可展开查看。'); }
           finally { recover.disabled = false; }
         });
         try {
           const result = await checkCompleted(entry);
-          if (result.completed) { localStorage.removeItem(entry.key); card.remove(); }
-        } catch (_) { /* 断网时保留可查看的内容，联网后恢复会再次检查。 */ }
+          if (result.completed) { localStorage.removeItem(entry.key); }
+          else { list.appendChild(card); updatePanelVisibility(); }
+        } catch (_) {
+          list.appendChild(card); updatePanelVisibility(); /* 断网时保留可查看的内容，联网后恢复会再次检查。 */
+        }
       }
     }
-    clear.addEventListener('click', () => { try { localStorage.removeItem(storageKey); clearTimeout(timer); dirty = false; saved = false; clear.hidden = true; status.textContent='已清除当前本机暂存，表单内容仍保留。'; } catch (_) { status.textContent='无法清除本机暂存'; } });
+    clear.addEventListener('click', () => { try { localStorage.removeItem(storageKey); clearTimeout(timer); dirty = false; saved = false; showNotice('已清除当前本机暂存，表单内容仍保留。', { pinned: true, showClear: false }); } catch (_) { showNotice('无法清除本机暂存', { pinned: true, showClear: !clear.hidden }); } });
     form.addEventListener('input', changed); form.addEventListener('change', changed); form.addEventListener('order-form-change', changed);
     const observer = new MutationObserver(changed);
     observer.observe(form.querySelector('#items'), { childList:true });
     form.addEventListener('submit', event => {
       if (event.defaultPrevented) return;
       dirty = true; clearTimeout(timer); save();
-      if (navigator.onLine === false) { event.preventDefault(); status.textContent = '网络已断开，内容已暂存本机；联网后再保存。'; return; }
+      if (navigator.onLine === false) { event.preventDefault(); showNotice('网络已断开，内容已暂存本机；联网后再保存。', { pinned: true, showClear: false }); panel.scrollIntoView({ block: 'nearest' }); return; }
       submitting = true;
     });
     window.addEventListener('pagehide', save);

@@ -490,7 +490,7 @@ form > .form-section-heading:first-of-type { border-top: 0; padding-top: 0; marg
 .sale-product-option[aria-selected="true"] { background: #eff6ff; outline: 2px solid var(--primary); outline-offset: -2px; }
 .draft-panel { border: 1px solid #bfdbfe; border-radius: 10px; padding: 10px 12px; margin: 0 0 16px; background: #eff6ff; color: #1e3a5f; font-size: 13px; }
 .draft-panel > p { margin: 0 0 6px; }
-.draft-panel [hidden] { display: none !important; }
+.draft-panel[hidden], .draft-panel [hidden] { display: none !important; }
 .draft-panel button, .draft-recovery a { margin: 4px 6px 4px 0; }
 .draft-recovery { border-top: 1px solid #bfdbfe; margin-top: 8px; padding-top: 8px; overflow-wrap: anywhere; }
 .draft-recovery p { margin: 5px 0; }
