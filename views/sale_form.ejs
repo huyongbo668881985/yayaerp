@@ -78,7 +78,7 @@
       }
     %>
     <p style="margin-top:10px;font-size:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-      <span><strong>商品合计：¥<span id="itemsTotal">0.0</span></strong> <span class="muted" id="itemsTotalHint">（赠品不计入）</span></span>
+      <span><strong>商品合计：¥<span id="itemsTotal">0.0</span></strong> <span class="muted" id="itemsTotalHint">（赠品/0元项不计入）</span></span>
       <label style="display:inline-flex;align-items:center;gap:4px;font-size:13px;margin:0;cursor:pointer;font-weight:normal">
         <input type="checkbox" name="round_to_yuan" id="roundToYuanCheckbox" value="1" style="width:auto;min-height:auto;margin:0" <%= initialRoundToYuan ? 'checked' : '' %>>
         <span>抹零到整元</span>
@@ -280,6 +280,7 @@
   }
 
   // 编辑模式下，把已有明细转换成和新建表单一致的结构（quantity 用录入时的原始数量，配合 unit_choice 换算）
+  const GIFT_LABELS = <%- JSON.stringify(typeof giftLabelOptions !== 'undefined' && giftLabelOptions ? giftLabelOptions : ['赠品']).replace(/</g, '\\u003c') %>;
   const EXISTING_ITEMS = <%- JSON.stringify(typeof draftItems !== 'undefined' ? draftItems : (typeof existingItems !== 'undefined' ? existingItems : []).map(function(it) {
     const p = products.find(function(pr) { return pr.id === it.product_id; });
     const isPack = p && p.pack_unit && (it.base_quantity !== it.quantity || it.unit_label === p.pack_unit);
@@ -288,7 +289,8 @@
       quantity: it.quantity,
       price: it.unit_price,
       unit_choice: isPack ? 'pack' : 'base',
-      is_gift: !!it.is_gift
+      is_gift: !!it.is_gift,
+      gift_label: it.is_gift ? (it.gift_label || '赠品') : ''
     };
   })).replace(/</g, '\\u003c') %>;
 
@@ -299,12 +301,71 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
+  function closeAllGiftMenus() {
+    document.querySelectorAll('.sale-gift-picker').forEach(function(picker) {
+      const menu = picker.querySelector('.gift-label-menu');
+      const trigger = picker.querySelector('.gift-label-trigger');
+      if (menu) menu.hidden = true;
+      if (trigger) trigger.setAttribute('aria-expanded', 'false');
+    });
+  }
+
+  function applyGiftState(row, isGift, labelName) {
+    const priceInput = row.querySelector('input[name=unit_price]');
+    const giftCheckbox = row.querySelector('.gift-checkbox');
+    const giftLabelInput = row.querySelector('.gift-label-input');
+    const picker = row.querySelector('.sale-gift-picker');
+    const activeLabel = isGift ? (labelName || '赠品') : '赠品';
+    if (giftCheckbox) giftCheckbox.checked = !!isGift;
+    if (giftLabelInput) giftLabelInput.value = isGift ? activeLabel : '';
+    if (picker) {
+      picker.classList.toggle('is-active', !!isGift);
+      const textEl = picker.querySelector('.gift-label-text');
+      if (textEl) textEl.textContent = activeLabel;
+      picker.querySelectorAll('.gift-label-option').forEach(function(opt) {
+        opt.setAttribute('aria-selected', opt.dataset.label === activeLabel ? 'true' : 'false');
+      });
+    }
+    if (isGift) {
+      priceInput.value = '0';
+      // 用 readOnly 而不是 disabled：disabled 的 input 不参与表单提交，
+      // 一旦 JS 失效走了后端的表单数组回退路径，unit_price/is_gift 数组就会比其他数组短，
+      // 数量跟价格错位、赠品标记串行。readOnly 照常提交值（赠品固定提交 0），数组保持对齐。
+      priceInput.readOnly = true;
+    } else {
+      priceInput.readOnly = false;
+      fillPrice(row.querySelector('select[name=product_id]'));
+    }
+  }
+
   function addRow(initial) {
     const container = document.getElementById('items');
     const div = document.createElement('div');
     div.className = 'item-row';
     div.classList.add('sale-item-row');
     const options = PRODUCTS.map(p => `<option value="${p.id}" data-name="${esc(p.name)}" data-sku="${esc(p.sku || '')}" data-search="${esc([p.name, p.sku, p.spec].filter(Boolean).join(' '))}" data-price="${p.sale_price}" data-price-pack="${p.sale_price_pack != null ? p.sale_price_pack : ''}" data-unit="${esc(p.unit)}" data-pack-unit="${esc(p.pack_unit || '')}" data-pack-size="${p.pack_size || 1}">${esc(p.name)}${p.spec ? ' ('+esc(p.spec)+')' : ''}</option>`).join('');
+    const rowLabels = GIFT_LABELS.slice();
+    if (initial && initial.is_gift && initial.gift_label && !rowLabels.includes(initial.gift_label)) {
+      rowLabels.push(initial.gift_label);
+    }
+    const giftControlHtml = rowLabels.length > 1
+      ? `<div class="sale-gift-field sale-gift-picker">
+          <input type="hidden" name="is_gift" value="0">
+          <input type="checkbox" name="is_gift" value="1" class="gift-checkbox" aria-label="是否赠品或0元出库" onchange="toggleGift(this)">
+          <button type="button" class="gift-label-trigger" aria-haspopup="listbox" aria-expanded="false" onclick="toggleGiftMenu(this)">
+            <span class="gift-label-text">赠品</span>
+            <span class="gift-label-arrow" aria-hidden="true">▾</span>
+          </button>
+          <input type="hidden" name="gift_label" class="gift-label-input" value="">
+          <div class="gift-label-menu" role="listbox" aria-label="选择0元标签" hidden>
+            ${rowLabels.map((lbl, idx) => `<button type="button" class="gift-label-option" role="option" data-label="${esc(lbl)}" aria-selected="${idx === 0 ? 'true' : 'false'}" onclick="selectGiftLabel(this)">${esc(lbl)}</button>`).join('')}
+          </div>
+        </div>`
+      : `<label class="sale-gift-field">
+          <input type="hidden" name="is_gift" value="0">
+          <input type="checkbox" name="is_gift" value="1" class="gift-checkbox" onchange="toggleGift(this)"> 赠品
+          <input type="hidden" name="gift_label" class="gift-label-input" value="">
+        </label>`;
     div.innerHTML = `
       <label class="sale-product-label">商品<input type="search" class="product-search" placeholder="输入名称或 SKU，点击结果选中" aria-label="搜索商品" autocomplete="off" required></label>
       <div class="sale-product-results" hidden></div>
@@ -317,10 +378,7 @@
         <option value="base">（先选商品）</option>
       </select></label>
       <label class="sale-price-field">销售单价<input type="number" name="unit_price" placeholder="销售单价" step="0.01" required></label>
-      <label class="sale-gift-field">
-        <input type="hidden" name="is_gift" value="0">
-        <input type="checkbox" name="is_gift" value="1" class="gift-checkbox" onchange="toggleGift(this)"> 赠品
-      </label>
+      ${giftControlHtml}
       <span class="sale-line-total">小计 <strong>¥0.00</strong></span>
       <button type="button" class="btn btn-danger btn-sm sale-item-delete" onclick="this.closest('.item-row').remove(); recalcTotal();">删除</button>
     `;
@@ -335,10 +393,8 @@
       const unitSelect = div.querySelector('select[name=unit_choice]');
       unitSelect.value = initial.unit_choice;
       div.querySelector('input[name=quantity]').value = initial.quantity;
-      const giftCheckbox = div.querySelector('.gift-checkbox');
       if (initial.is_gift) {
-        giftCheckbox.checked = true;
-        toggleGift(giftCheckbox);
+        applyGiftState(div, true, initial.gift_label || '赠品');
       } else {
         div.querySelector('input[name=unit_price]').value = initial.price;
       }
@@ -348,18 +404,66 @@
 
   function toggleGift(checkbox) {
     const row = checkbox.closest('.item-row');
-    const priceInput = row.querySelector('input[name=unit_price]');
-    if (checkbox.checked) {
-      priceInput.value = '0';
-      // 用 readOnly 而不是 disabled：disabled 的 input 不参与表单提交，
-      // 一旦 JS 失效走了后端的表单数组回退路径，unit_price/is_gift 数组就会比其他数组短，
-      // 数量跟价格错位、赠品标记串行。readOnly 照常提交值（赠品固定提交 0），数组保持对齐。
-      priceInput.readOnly = true;
-    } else {
-      priceInput.readOnly = false;
-      fillPrice(row.querySelector('select[name=product_id]'));
+    closeAllGiftMenus();
+    applyGiftState(row, checkbox.checked, checkbox.checked ? '赠品' : '');
+    recalcTotal();
+  }
+
+  function toggleGiftMenu(trigger) {
+    const picker = trigger.closest('.sale-gift-picker');
+    const menu = picker && picker.querySelector('.gift-label-menu');
+    if (!menu) return;
+    const willOpen = menu.hidden;
+    closeAllGiftMenus();
+    if (willOpen) {
+      menu.classList.remove('is-up');
+      menu.hidden = false;
+      const stickyBar = document.querySelector('.sale-mobile-submit');
+      const stickyHeight = stickyBar && stickyBar.offsetHeight ? stickyBar.offsetHeight : 0;
+      const triggerRect = trigger.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - stickyHeight - triggerRect.bottom;
+      if (spaceBelow < menu.offsetHeight + 12 && triggerRect.top > menu.offsetHeight + 12) {
+        menu.classList.add('is-up');
+      }
+      trigger.setAttribute('aria-expanded', 'true');
+      const selected = menu.querySelector('[aria-selected="true"]') || menu.querySelector('.gift-label-option');
+      if (selected) selected.focus();
     }
   }
+
+  function selectGiftLabel(optionBtn) {
+    const row = optionBtn.closest('.item-row');
+    const label = optionBtn.dataset.label || '赠品';
+    applyGiftState(row, true, label);
+    closeAllGiftMenus();
+    recalcTotal();
+    row.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  document.addEventListener('click', function(event) {
+    if (!event.target.closest('.sale-gift-picker')) closeAllGiftMenus();
+  });
+
+  document.getElementById('items').addEventListener('keydown', function(event) {
+    const picker = event.target.closest('.sale-gift-picker');
+    if (!picker) return;
+    const menu = picker.querySelector('.gift-label-menu');
+    const trigger = picker.querySelector('.gift-label-trigger');
+    if (!menu || menu.hidden) return;
+    const opts = Array.from(menu.querySelectorAll('.gift-label-option'));
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeAllGiftMenus();
+      if (trigger) trigger.focus();
+    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const idx = opts.indexOf(document.activeElement);
+      const nextIdx = event.key === 'ArrowDown'
+        ? (idx + 1) % opts.length
+        : (idx - 1 + opts.length) % opts.length;
+      if (opts[nextIdx]) opts[nextIdx].focus();
+    }
+  });
 
   function onProductChange(select) {
     const row = select.parentElement;
@@ -430,7 +534,7 @@
       const wiped = Math.round((currentTenthsTotal - currentOrderTotal) * 10) / 10;
       hintEl.textContent = wiped > 0
         ? `（原合计 ¥${currentTenthsTotal.toFixed(1)}，已抹零 ¥${wiped.toFixed(1)}）`
-        : '（赠品不计入）';
+        : '（赠品/0元项不计入）';
     }
   }
   document.getElementById('items').addEventListener('input', recalcTotal);
@@ -488,14 +592,17 @@
       const qtyInput = row.querySelector('input[name=quantity]');
       const priceInput = row.querySelector('input[name=unit_price]');
       const giftCheckbox = row.querySelector('.gift-checkbox');
+      const giftLabelInput = row.querySelector('.gift-label-input');
       const unitChoiceSelect = row.querySelector('select[name=unit_choice]');
       if (!productSelect.value || !qtyInput.value) return;
+      const isGift = giftCheckbox ? giftCheckbox.checked : false;
       items.push({
         id: parseInt(productSelect.value),
         quantity: Number(qtyInput.value),
         price: parseFloat(priceInput.value) || 0,
         unit_choice: unitChoiceSelect ? unitChoiceSelect.value : 'base',
-        is_gift: giftCheckbox ? giftCheckbox.checked : false
+        is_gift: isGift,
+        gift_label: isGift ? ((giftLabelInput && giftLabelInput.value) || '赠品') : ''
       });
     });
     let hidden = document.getElementById('itemsJson');

@@ -52,6 +52,7 @@
         unit_size: row.querySelector('[name="unit_choice"]').value === 'pack' ? Number(row.querySelector('[name="product_id"]').selectedOptions[0]?.dataset.packSize || 1) : 1,
         price: row.querySelector('[name="unit_price"]')?.value ?? '',
         is_gift: !!row.querySelector('.gift-checkbox')?.checked,
+        gift_label: row.querySelector('.gift-label-input')?.value || '',
         search: row.querySelector('.product-search')?.value || ''
       }));
       return { version: 1, route: path, savedAt: Date.now(), values, labels, rows };
@@ -75,7 +76,7 @@
         if (!entry.values[name]) continue;
         const line = document.createElement('p'); line.textContent = ({customer_search:'客户',order_date:'日期',paid_amount:'收款',refunded_amount:'退款',remarks:'备注',note:entry.route.startsWith('/purchases/') ? '备注' : '内部备注'})[name] + '：' + entry.values[name]; details.appendChild(line);
       }
-      entry.rows.forEach(row => { const line = document.createElement('p'); line.textContent = `${row.search || '商品 #'+row.id} · 数量 ${row.quantity || '未填'} ${row.unit_label || (row.unit_choice === 'pack' ? '整包单位' : '基本单位')}${row.unit_size > 1 ? '（每份 '+row.unit_size+' 个基本单位）' : ''}${entry.route.startsWith('/transfers/') ? '' : ' · 单价 '+(row.price || '未填')}${row.is_gift ? ' · 赠品' : ''}`; details.appendChild(line); });
+      entry.rows.forEach(row => { const line = document.createElement('p'); line.textContent = `${row.search || '商品 #'+row.id} · 数量 ${row.quantity || '未填'} ${row.unit_label || (row.unit_choice === 'pack' ? '整包单位' : '基本单位')}${row.unit_size > 1 ? '（每份 '+row.unit_size+' 个基本单位）' : ''}${entry.route.startsWith('/transfers/') ? '' : ' · 单价 '+(row.price || '未填')}${row.is_gift ? ' · ' + (row.gift_label || '赠品') : ''}`; details.appendChild(line); });
       container.appendChild(details);
     }
     async function restore(entry) {

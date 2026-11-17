@@ -17,7 +17,7 @@ router.get('/:kind/:id/print',requireLogin,(req,res,next)=>{
   const name=(table,id)=>id?db.prepare(`SELECT name FROM ${table} WHERE id=?`).get(id)?.name||'已删除':'—';
   if(req.params.kind==='sales') order.responsible_name=name('users',order.responsible_id||order.user_id);
   const partner=order.customer_id?db.prepare('SELECT name,contact,phone,address FROM customers WHERE id=?').get(order.customer_id):order.supplier_id?db.prepare('SELECT name,contact,phone FROM suppliers WHERE id=?').get(order.supplier_id):{name:req.params.kind==='purchases'?'无供应商':'散客'};
-  const items=db.prepare(`SELECT i.product_id,i.quantity,i.unit_label,i.base_quantity${req.params.kind==='transfers'?'':',i.unit_price'}${req.params.kind==='sales'?',i.is_gift':''},p.name product_name,p.sku,p.spec FROM ${def.items} i LEFT JOIN products p ON p.id=i.product_id WHERE i.${def.parent}=? ORDER BY i.id`).all(order.id);
+  const items=db.prepare(`SELECT i.product_id,i.quantity,i.unit_label,i.base_quantity${req.params.kind==='transfers'?'':',i.unit_price'}${req.params.kind==='sales'?',i.is_gift,i.gift_label':''},p.name product_name,p.sku,p.spec FROM ${def.items} i LEFT JOIN products p ON p.id=i.product_id WHERE i.${def.parent}=? ORDER BY i.id`).all(order.id);
   res.set('Cache-Control','no-store');
   res.render('document_print',{title:def.title,kind:req.params.kind,order,partner,items,warehouse:order.warehouse_id?name('warehouses',order.warehouse_id):name('warehouses',order.from_warehouse_id)+' → '+name('warehouses',order.to_warehouse_id),payment:req.params.kind==='sales'?getSalePayment(db,order.id):null,printedAt:new Date().toISOString()});
 });

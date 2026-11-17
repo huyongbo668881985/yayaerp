@@ -18,6 +18,16 @@
       <label>结束日期</label>
       <input type="date" name="end" value="<%= end %>">
     </div>
+    <div class="form-row">
+      <label for="summaryGiftFilter">0元/赠品标签</label>
+      <select id="summaryGiftFilter" name="gift_label">
+        <option value="">全部订单</option>
+        <option value="<%= ALL_GIFTS_FILTER %>" <%= giftLabel === ALL_GIFTS_FILTER ? 'selected' : '' %>>全部 0 元项</option>
+        <% giftLabels.forEach(function(label) { %>
+          <option value="<%= label %>" <%= giftLabel === label ? 'selected' : '' %>><%= label %></option>
+        <% }) %>
+      </select>
+    </div>
     <div class="form-row sales-unpaid-filter">
       <input type="checkbox" name="debt" value="1" id="debtCheck" <%= debtOnly ? 'checked' : '' %> style="width:auto">
       <label for="debtCheck" style="margin:0">只看有欠款客户</label>
@@ -27,27 +37,73 @@
   </form>
 </div>
 <p class="muted summary-note">仅统计已审核销售单；销售额已扣除关联的已审核退货，净收款已扣现金退款，欠款按订单当前有效欠款汇总。</p>
+<% if (giftLabel) { %>
+<div class="card">
+  <div class="gift-summary-head">
+    <div>
+      <strong>「<%= giftLabel === ALL_GIFTS_FILTER ? '全部 0 元项' : giftLabel %>」商品数量汇总</strong>
+      <span class="muted">（仅统计已审核销售单内匹配该标签的商品明细）</span>
+    </div>
+    <a class="btn btn-sm btn-secondary" href="/sales/export<%= salesQueryString({ start: start, end: end, status: 'approved', gift_label: giftLabel }) %>">导出明细 CSV</a>
+  </div>
+  <% if (giftProductSummaries && giftProductSummaries.length > 0) { %>
+  <div class="desktop-table-wrap">
+    <table>
+      <tr><th>商品</th><th>涉及单数</th><th>涉及客户数</th><th>累计数量</th></tr>
+      <% giftProductSummaries.forEach(function(gp) {
+        const packSize = Number(gp.pack_size || 1);
+        const packs = gp.pack_unit && packSize > 1 ? Math.floor(gp.total_base_qty / packSize) : 0;
+        const rem = gp.pack_unit && packSize > 1 ? (gp.total_base_qty % packSize) : gp.total_base_qty;
+        const packText = packs > 0 ? (packs + gp.pack_unit + (rem > 0 ? ' ' + rem + gp.unit : '') + '（共 ' + gp.total_base_qty + ' ' + gp.unit + '）') : (gp.total_base_qty + ' ' + gp.unit);
+      %>
+        <tr>
+          <td><%= gp.product_name %><%= gp.spec ? ' (' + gp.spec + ')' : '' %></td>
+          <td><%= gp.order_count %> 单</td>
+          <td><%= gp.customer_count %> 家</td>
+          <td><strong><%= packText %></strong></td>
+        </tr>
+      <% }) %>
+    </table>
+  </div>
+  <div class="mobile-order-cards">
+    <% giftProductSummaries.forEach(function(gp) {
+      const packSize = Number(gp.pack_size || 1);
+      const packs = gp.pack_unit && packSize > 1 ? Math.floor(gp.total_base_qty / packSize) : 0;
+      const rem = gp.pack_unit && packSize > 1 ? (gp.total_base_qty % packSize) : gp.total_base_qty;
+      const packText = packs > 0 ? (packs + gp.pack_unit + (rem > 0 ? ' ' + rem + gp.unit : '') + '（共 ' + gp.total_base_qty + ' ' + gp.unit + '）') : (gp.total_base_qty + ' ' + gp.unit);
+    %>
+      <div class="order-card">
+        <div class="order-card-top"><span class="order-card-id"><%= gp.product_name %><%= gp.spec ? ' (' + gp.spec + ')' : '' %></span><strong><%= packText %></strong></div>
+        <div class="order-card-mid"><span>涉及 <%= gp.order_count %> 单</span><span><%= gp.customer_count %> 位客户</span></div>
+      </div>
+    <% }) %>
+  </div>
+  <% } else { %>
+    <p class="muted" style="margin:8px 0 0">所选条件内暂无「<%= giftLabel === ALL_GIFTS_FILTER ? '0元/赠品' : giftLabel %>」出库记录。</p>
+  <% } %>
+</div>
+<% } %>
 <div class="card desktop-table-wrap">
   <table>
     <tr>
-      <th><a class="table-sort" href="/sales/summary<%= salesQueryString({ start: start, end: end, debt: debtOnly ? 1 : '', sort: 'customer', order: sort === 'customer' && order === 'asc' ? 'desc' : 'asc' }) %>">客户<%= sort === 'customer' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th>
-      <th><a class="table-sort" href="/sales/summary<%= salesQueryString({ start: start, end: end, debt: debtOnly ? 1 : '', sort: 'orders', order: sort === 'orders' && order === 'desc' ? 'asc' : 'desc' }) %>">订单数<%= sort === 'orders' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th>
-      <th><a class="table-sort" href="/sales/summary<%= salesQueryString({ start: start, end: end, debt: debtOnly ? 1 : '', sort: 'amount', order: sort === 'amount' && order === 'desc' ? 'asc' : 'desc' }) %>">销售总额<%= sort === 'amount' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th>
-      <th><a class="table-sort" href="/sales/summary<%= salesQueryString({ start: start, end: end, debt: debtOnly ? 1 : '', sort: 'paid', order: sort === 'paid' && order === 'desc' ? 'asc' : 'desc' }) %>">净收款<%= sort === 'paid' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th>
-      <th><a class="table-sort" href="/sales/summary<%= salesQueryString({ start: start, end: end, debt: debtOnly ? 1 : '', sort: 'debt', order: sort === 'debt' && order === 'desc' ? 'asc' : 'desc' }) %>">合计欠款<%= sort === 'debt' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th>
+      <th><a class="table-sort" href="/sales/summary<%= salesQueryString({ start: start, end: end, debt: debtOnly ? 1 : '', gift_label: giftLabel, sort: 'customer', order: sort === 'customer' && order === 'asc' ? 'desc' : 'asc' }) %>">客户<%= sort === 'customer' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th>
+      <th><a class="table-sort" href="/sales/summary<%= salesQueryString({ start: start, end: end, debt: debtOnly ? 1 : '', gift_label: giftLabel, sort: 'orders', order: sort === 'orders' && order === 'desc' ? 'asc' : 'desc' }) %>">订单数<%= sort === 'orders' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th>
+      <th><a class="table-sort" href="/sales/summary<%= salesQueryString({ start: start, end: end, debt: debtOnly ? 1 : '', gift_label: giftLabel, sort: 'amount', order: sort === 'amount' && order === 'desc' ? 'asc' : 'desc' }) %>">销售总额<%= sort === 'amount' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th>
+      <th><a class="table-sort" href="/sales/summary<%= salesQueryString({ start: start, end: end, debt: debtOnly ? 1 : '', gift_label: giftLabel, sort: 'paid', order: sort === 'paid' && order === 'desc' ? 'asc' : 'desc' }) %>">净收款<%= sort === 'paid' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th>
+      <th><a class="table-sort" href="/sales/summary<%= salesQueryString({ start: start, end: end, debt: debtOnly ? 1 : '', gift_label: giftLabel, sort: 'debt', order: sort === 'debt' && order === 'desc' ? 'asc' : 'desc' }) %>">合计欠款<%= sort === 'debt' ? (order === 'asc' ? ' ↑' : ' ↓') : '' %></a></th>
       <th>操作</th>
     </tr>
     <% summaries.forEach(function(row) { %>
       <tr>
         <td><%= row.customer_name %></td><td><%= row.order_count %></td><td>¥<%= row.total_amount.toFixed(1) %></td><td>¥<%= row.paid_amount.toFixed(1) %></td><td class="summary-debt">¥<%= row.total_debt.toFixed(1) %></td>
-        <td><a class="btn btn-sm btn-secondary" href="/sales<%= salesQueryString({ start: start, end: end, customer_id: row.id, guest: row.id ? '' : 1 }) %>">查看订单</a></td>
+        <td><a class="btn btn-sm btn-secondary" href="/sales<%= salesQueryString({ start: start, end: end, customer_id: row.id, guest: row.id ? '' : 1, gift_label: giftLabel }) %>">查看订单</a></td>
       </tr>
     <% }) %>
   </table>
 </div>
 <div class="mobile-order-cards summary-cards">
   <% summaries.forEach(function(row) { %>
-    <a class="order-card" href="/sales<%= salesQueryString({ start: start, end: end, customer_id: row.id, guest: row.id ? '' : 1 }) %>">
+    <a class="order-card" href="/sales<%= salesQueryString({ start: start, end: end, customer_id: row.id, guest: row.id ? '' : 1, gift_label: giftLabel }) %>">
       <div class="order-card-top"><span class="order-card-id"><%= row.customer_name %></span><span class="badge badge-admin"><%= row.order_count %> 单</span></div>
       <div class="summary-card-grid"><span>销售总额<strong>¥<%= row.total_amount.toFixed(1) %></strong></span><span>净收款<strong>¥<%= row.paid_amount.toFixed(1) %></strong></span><span class="summary-debt">合计欠款<strong>¥<%= row.total_debt.toFixed(1) %></strong></span></div>
       <span class="summary-card-link">查看订单明细 →</span>

@@ -1,6 +1,6 @@
 const express = require('express');
 const { requireMutationKey, completeMutation, completeTransaction } = require('../lib/mutation');
-const { requireLogin } = require('../middleware/auth');
+const { requireLogin, requireAdmin } = require('../middleware/auth');
 const { sendCsv } = require('../utils/csv');
 const { todayLocalDate } = require('../utils/dates');
 const { buildItemsFromRequest } = require('../lib/saleItems');
@@ -11,6 +11,11 @@ const { warehousesForUser, isWarehouseInScope, isWarehouseActive } = require('..
 const { writeAuditLog } = require('../lib/auditLog');
 const { submittedItemsFromBody } = require('../lib/formDraft');
 const { parseTagFilter, getCustomerTags } = require('../lib/customerTags');
+const {
+  DEFAULT_GIFT_LABEL, ALL_GIFTS_FILTER, MAX_GIFT_LABELS,
+  getCustomGiftLabels, getGiftLabelOptions, getFilterableGiftLabels,
+  validateGiftLabel, itemGiftLabel, parseGiftFilter
+} = require('../lib/giftLabels');
 const { responsibleUsers, resolveResponsible, salesVisibility, canViewSale } = require('../lib/salesResponsibility');
 const { productsForForm } = require('../lib/catalog');
 const router = express.Router();
@@ -120,16 +125,60 @@ router.get('/sales', requireLogin, (req, res) => {
   const customers = customersForForm(db, user, isCustomerInScope(db, user, customerId, null) ? customerId : null);
   const tagId = parseTagFilter(req.query.tag_id);
   const tags = getCustomerTags(db);
+  const giftLabel = parseGiftFilter(req.query.gift_label);
+  const giftLabels = getFilterableGiftLabels(db);
+  const customGiftLabels = getCustomGiftLabels(db);
 
   const { orders, totalOrders, totalPages, page } = queryOrders(db, user, start, end, customerId, guestOnly, settlement, pendingOnly, tagId, orderStatus, responsibleId,
-    { size: SALES_PAGE_SIZE, page: req.query.page, sort, order });
+    { size: SALES_PAGE_SIZE, page: req.query.page, sort, order }, giftLabel);
   const draftCount = db.prepare(`SELECT COUNT(*) n FROM sales_orders so WHERE so.status='draft'${visibility.sql}`).get(...visibility.params).n;
   res.render('sales', {
     orders, user, customers, customerId, guestOnly, start: start || '', end: end || '', settlement, responsibleId, responsibleOptions, pendingOnly,
     sort, order, page, totalPages, totalOrders, orderStatus, draftCount,
     tags, tagId,
-    salesQueryString: params => salesQueryString({ start, end, customer_id: customerId, guest: guestOnly ? 1 : '', settlement, responsible_id: responsibleId, unpaid: req.query.unpaid === '1' && settlement === 'outstanding' ? 1 : '', pending: pendingOnly ? 1 : '', status: orderStatus, sort, order, tag_id: tagId, ...params })
+    giftLabel, giftLabels, customGiftLabels,
+    ALL_GIFTS_FILTER, DEFAULT_GIFT_LABEL, MAX_GIFT_LABELS,
+    giftLabelError: typeof req.query.gift_label_error === 'string' ? req.query.gift_label_error : null,
+    giftLabelSuccess: typeof req.query.gift_label_success === 'string' ? req.query.gift_label_success : null,
+    giftLabelDraft: typeof req.query.gift_label_name === 'string' ? req.query.gift_label_name : '',
+    salesQueryString: params => salesQueryString({ start, end, customer_id: customerId, guest: guestOnly ? 1 : '', settlement, responsible_id: responsibleId, unpaid: req.query.unpaid === '1' && settlement === 'outstanding' ? 1 : '', pending: pendingOnly ? 1 : '', status: orderStatus, sort, order, tag_id: tagId, gift_label: giftLabel, ...params })
   });
+});
+
+function giftLabelResponse(res, result, success, draftName = '') {
+  const key = result.error ? 'gift_label_error' : 'gift_label_success';
+  const query = new URLSearchParams({ [key]: result.error || success });
+  if (result.error && typeof draftName === 'string') {
+    query.set('gift_label_name', draftName.slice(0, 200));
+  }
+  return res.redirect('/sales?' + query.toString() + '#giftLabelManagement');
+}
+
+router.post('/gift-labels/new', requireAdmin, (req, res) => {
+  const db = req.tenantDb;
+  const result = db.transaction(() => {
+    const check = validateGiftLabel(db, req.body.name);
+    if (check.error) return check;
+    if (db.prepare('SELECT COUNT(*) AS count FROM gift_labels').get().count >= MAX_GIFT_LABELS) {
+      return { error: `自定义 0 元标签已达上限，最多可创建 ${MAX_GIFT_LABELS} 个` };
+    }
+    const info = db.prepare('INSERT INTO gift_labels (name) VALUES (?)').run(check.name);
+    writeAuditLog(db, req.session.user, '新增0元标签', '0元标签', Number(info.lastInsertRowid), `名称：${check.name}`);
+    return {};
+  }).immediate();
+  return giftLabelResponse(res, result, '0元标签已添加，开单点击「赠品」文字即可选择', req.body.name);
+});
+
+router.post('/gift-labels/:id/delete', requireAdmin, (req, res) => {
+  const db = req.tenantDb;
+  const result = db.transaction(() => {
+    const label = db.prepare('SELECT * FROM gift_labels WHERE id = ?').get(req.params.id);
+    if (!label) return { error: '标签不存在或已被删除' };
+    db.prepare('DELETE FROM gift_labels WHERE id = ?').run(label.id);
+    writeAuditLog(db, req.session.user, '删除0元标签', '0元标签', label.id, `名称：${label.name}`);
+    return {};
+  }).immediate();
+  return giftLabelResponse(res, result, '0元标签已删除，历史订单和导出记录不受影响');
 });
 
 // 客户维度销售汇总：只汇总已审核销售单，避免草稿、待审核、已拒绝单据进入正式销售/应收口径。
@@ -139,8 +188,10 @@ router.get('/sales/summary', requireLogin, (req, res) => {
   const user = req.session.user;
   const { start, end } = req.query;
   const debtOnly = req.query.debt === '1';
+  const giftLabel = parseGiftFilter(req.query.gift_label);
+  const giftLabels = getFilterableGiftLabels(db);
   const { sort, order } = parseSort(req.query, ['customer', 'orders', 'amount', 'paid', 'debt'], 'debt');
-  const allOrders = queryOrders(db, user, start, end, null, false, false, false)
+  const allOrders = queryOrders(db, user, start, end, null, false, false, false, null, '', null, null, giftLabel)
     .filter(order => order.status === 'approved');
   const byCustomer = new Map();
   for (const sale of allOrders) {
@@ -169,8 +220,33 @@ router.get('/sales/summary', requireLogin, (req, res) => {
     debt: row.total_debt
   })[field]);
 
+  let giftProductSummaries = [];
+  if (giftLabel) {
+    const visibility = salesVisibility('so', user);
+    let giftSql = `
+      SELECT p.id AS product_id, p.name AS product_name, p.spec, p.unit, p.pack_unit, p.pack_size,
+             SUM(soi.base_quantity) AS total_base_qty,
+             COUNT(DISTINCT so.id) AS order_count,
+             COUNT(DISTINCT COALESCE(CAST(so.customer_id AS TEXT), 'guest')) AS customer_count
+      FROM sales_order_items soi
+      JOIN sales_orders so ON so.id = soi.sales_order_id
+      JOIN products p ON p.id = soi.product_id
+      WHERE so.status = 'approved' AND soi.is_gift = 1 ${visibility.sql}
+    `;
+    const giftParams = [...visibility.params];
+    if (start) { giftSql += ' AND so.order_date >= ?'; giftParams.push(start); }
+    if (end) { giftSql += ' AND so.order_date <= ?'; giftParams.push(end); }
+    if (giftLabel !== ALL_GIFTS_FILTER) {
+      giftSql += " AND COALESCE(NULLIF(soi.gift_label, ''), ?) = ?";
+      giftParams.push(DEFAULT_GIFT_LABEL, giftLabel);
+    }
+    giftSql += ' GROUP BY p.id ORDER BY total_base_qty DESC, p.id ASC';
+    giftProductSummaries = db.prepare(giftSql).all(...giftParams);
+  }
+
   res.render('sales_summary', {
-    summaries, start: start || '', end: end || '', debtOnly, sort, order, salesQueryString
+    summaries, start: start || '', end: end || '', debtOnly, sort, order, salesQueryString,
+    giftLabel, giftLabels, ALL_GIFTS_FILTER, giftProductSummaries
   });
 });
 
@@ -224,6 +300,7 @@ router.get('/sales/export', requireLogin, (req, res) => {
   const pendingOnly = user.role === 'admin' && req.query.pending === '1';
   const orderStatus = ['draft','approved'].includes(req.query.status) ? req.query.status : '';
   const tagId = parseTagFilter(req.query.tag_id);
+  const giftLabel = parseGiftFilter(req.query.gift_label);
 
   let sql = `
     SELECT so.id AS order_id, so.order_date, so.warehouse_id, so.status,
@@ -234,7 +311,7 @@ router.get('/sales/export', requireLogin, (req, res) => {
              SELECT t.name FROM customer_tag_links l JOIN customer_tags t ON t.id = l.tag_id
              WHERE l.customer_id = so.customer_id ORDER BY t.id
            )) AS customer_tags,
-           soi.quantity, soi.unit_label, soi.unit_price, soi.is_gift, p.name AS product_name
+           soi.quantity, soi.unit_label, soi.unit_price, soi.is_gift, soi.gift_label, p.name AS product_name
     FROM sales_orders so
     LEFT JOIN customers c ON c.id = so.customer_id
     LEFT JOIN warehouses w ON w.id = so.warehouse_id
@@ -257,6 +334,12 @@ router.get('/sales/export', requireLogin, (req, res) => {
     sql += ' AND so.customer_id IN (SELECT customer_id FROM customer_tag_links WHERE tag_id = ?)';
     params.push(tagId);
   }
+  if (giftLabel === ALL_GIFTS_FILTER) {
+    sql += ' AND soi.is_gift = 1';
+  } else if (giftLabel) {
+    sql += " AND soi.is_gift = 1 AND COALESCE(NULLIF(soi.gift_label, ''), ?) = ?";
+    params.push(DEFAULT_GIFT_LABEL, giftLabel);
+  }
   if (guestOnly) sql += ' AND so.customer_id IS NULL';
   if (pendingOnly) sql += " AND so.status = 'submitted'";
   if (orderStatus) { sql += ' AND so.status = ?'; params.push(orderStatus); }
@@ -266,7 +349,7 @@ router.get('/sales/export', requireLogin, (req, res) => {
   const statusText = { draft: '草稿', submitted: '待审核', approved: '已审核', rejected: '已拒绝' };
   const paymentText = { paid: '已结清', partial: '部分结算', unpaid: '未收款', refund_pending: '待退款' };
 
-  const headers = ['单号', '日期', '客户', '客户标签', '仓库', '商品', '数量', '单位', '单价', '小计', '是否赠品', '收款状态', '审核状态', '负责人', '录入人', '备注'];
+  const headers = ['单号', '日期', '客户', '客户标签', '仓库', '商品', '数量', '单位', '单价', '小计', '赠品/0元标签', '收款状态', '审核状态', '负责人', '录入人', '备注'];
   const rows = rows_raw.map(r => [
     r.order_id,
     r.order_date,
@@ -278,7 +361,7 @@ router.get('/sales/export', requireLogin, (req, res) => {
     r.unit_label,
     r.unit_price.toFixed(2),
     (r.quantity * r.unit_price).toFixed(2),
-    r.is_gift ? '赠品' : '',
+    itemGiftLabel(r),
     r.status === 'approved' ? (paymentText[r.effective_status] || r.effective_status) : '待生效',
     statusText[r.status] || r.status,
     r.responsible_name,
@@ -357,9 +440,10 @@ router.get('/sales/new', requireLogin, (req, res) => {
     : null;
   const warehouses = warehousesForUser(db, req.session.user);
   const products = productsForForm(db, req.method === 'POST' ? req.body : (req.params.id ? db.prepare('SELECT product_id FROM sales_order_items WHERE sales_order_id=?').all(req.params.id) : []));
+  const giftLabelOptions = getGiftLabelOptions(db);
   res.render('sale_form', {
     responsibleOptions: responsibleUsers(db),
-    customers, warehouses, products, error: null, order: null, existingItems: [], today: todayLocalDate(),
+    customers, warehouses, products, giftLabelOptions, error: null, order: null, existingItems: [], today: todayLocalDate(),
     formValues: selectedCustomer ? { customer_id: selectedCustomer.id } : null
   });
 });
@@ -372,7 +456,8 @@ router.post('/sales/new', requireLogin, requireMutationKey, (req, res) => {
     const customers = customersForForm(db, req.session.user, isCustomerInScope(db, req.session.user, req.body.customer_id, null) ? req.body.customer_id : null);
     const warehouses = warehousesForUser(db, req.session.user);
     const products = productsForForm(db, req.method === 'POST' ? req.body : (req.params.id ? db.prepare('SELECT product_id FROM sales_order_items WHERE sales_order_id=?').all(req.params.id) : []));
-    return res.render('sale_form', { responsibleOptions: responsibleUsers(db), customers, warehouses, products, error: msg, customerOwnerWarning, order: null, existingItems: [], formValues: req.body, draftItems: submittedItemsFromBody(req.body), today: todayLocalDate() });
+    const giftLabelOptions = getGiftLabelOptions(db);
+    return res.render('sale_form', { responsibleOptions: responsibleUsers(db), customers, warehouses, products, giftLabelOptions, error: msg, customerOwnerWarning, order: null, existingItems: [], formValues: req.body, draftItems: submittedItemsFromBody(req.body), today: todayLocalDate() });
   };
 
   if (!isBlank(order_date) && !isValidDateString(order_date)) {
@@ -390,6 +475,10 @@ router.post('/sales/new', requireLogin, requireMutationKey, (req, res) => {
   if (items.invalidDetailCount > 0) {
     res.status(400);
     return renderError('商品明细包含无效行（商品、数量必须填写且数量为正整数），请修正后再提交');
+  }
+  if (items.invalidGiftLabelCount > 0) {
+    res.status(400);
+    return renderError('所选 0 元/赠品标签不存在或已停用，请重新选择');
   }
   if (!warehouse_id || items.length === 0) {
     return renderError('请选择仓库并至少填写一行有效商品明细');
@@ -450,9 +539,9 @@ router.post('/sales/new', requireLogin, requireMutationKey, (req, res) => {
        VALUES (?,?,?,?,?,?,?,?,?,?,?)`
     ).run(customer_id || null, warehouse_id, req.session.user.id, responsible.id, order_date || todayLocalDate(), total, paid, paymentStatus, status, note || '', remarks || '');
     const soId = info.lastInsertRowid;
-    const insertItem = db.prepare('INSERT INTO sales_order_items (sales_order_id, product_id, quantity, unit_label, base_quantity, unit_price, is_gift, cost_price_snapshot) VALUES (?,?,?,?,?,?,?,?)');
+    const insertItem = db.prepare('INSERT INTO sales_order_items (sales_order_id, product_id, quantity, unit_label, base_quantity, unit_price, is_gift, gift_label, cost_price_snapshot) VALUES (?,?,?,?,?,?,?,?,?)');
     for (const it of items) {
-      insertItem.run(soId, it.pid, it.qty, it.unitLabel, it.baseQty, it.price, it.gift ? 1 : 0, it.costSnapshot);
+      insertItem.run(soId, it.pid, it.qty, it.unitLabel, it.baseQty, it.price, it.gift ? 1 : 0, it.giftLabel, it.costSnapshot);
     }
     const auditSummary = wipedYuanAmount > 0
       ? `金额 ¥${total.toFixed(2)}（已抹零 ¥${wipedYuanAmount.toFixed(1)}）`
@@ -474,8 +563,9 @@ router.get('/sales/:id/edit', requireLogin, (req, res) => {
   const customers = customersForForm(db, req.session.user, order.customer_id);
   const warehouses = warehousesForUser(db, req.session.user);
   const products = productsForForm(db, req.method === 'POST' ? req.body : (req.params.id ? db.prepare('SELECT product_id FROM sales_order_items WHERE sales_order_id=?').all(req.params.id) : []));
-  const existingItems = db.prepare('SELECT id, sales_order_id, product_id, quantity, unit_label, base_quantity, unit_price, is_gift FROM sales_order_items WHERE sales_order_id = ?').all(order.id);
-  res.render('sale_form', { responsibleOptions: responsibleUsers(db, order.responsible_id || order.user_id), customers, warehouses, products, error: null, order, existingItems, today: todayLocalDate() });
+  const existingItems = db.prepare('SELECT id, sales_order_id, product_id, quantity, unit_label, base_quantity, unit_price, is_gift, gift_label FROM sales_order_items WHERE sales_order_id = ?').all(order.id);
+  const giftLabelOptions = getGiftLabelOptions(db);
+  res.render('sale_form', { responsibleOptions: responsibleUsers(db, order.responsible_id || order.user_id), customers, warehouses, products, giftLabelOptions, error: null, order, existingItems, today: todayLocalDate() });
 });
 
 router.post('/sales/:id/edit', requireLogin, requireMutationKey, (req, res) => {
@@ -492,7 +582,8 @@ router.post('/sales/:id/edit', requireLogin, requireMutationKey, (req, res) => {
     const customers = customersForForm(db, req.session.user, order.customer_id);
     const warehouses = warehousesForUser(db, req.session.user);
     const products = productsForForm(db, req.method === 'POST' ? req.body : (req.params.id ? db.prepare('SELECT product_id FROM sales_order_items WHERE sales_order_id=?').all(req.params.id) : []));
-    return res.render('sale_form', { responsibleOptions: responsibleUsers(db, order.responsible_id || order.user_id), customers, warehouses, products, error: msg, customerOwnerWarning, order, existingItems: [], formValues: req.body, draftItems: submittedItemsFromBody(req.body), today: todayLocalDate() });
+    const giftLabelOptions = getGiftLabelOptions(db);
+    return res.render('sale_form', { responsibleOptions: responsibleUsers(db, order.responsible_id || order.user_id), customers, warehouses, products, giftLabelOptions, error: msg, customerOwnerWarning, order, existingItems: [], formValues: req.body, draftItems: submittedItemsFromBody(req.body), today: todayLocalDate() });
   };
 
   if (!isBlank(order_date) && !isValidDateString(order_date)) {
@@ -506,10 +597,16 @@ router.post('/sales/:id/edit', requireLogin, requireMutationKey, (req, res) => {
   const responsible = resolveResponsible(db, req.body.responsible_id, order.responsible_id || order.user_id);
   if (responsible.error) { res.status(400); return renderError(responsible.error); }
 
-  const items = buildItemsFromRequest(db, req.body);
+  const existingRows = db.prepare('SELECT product_id, gift_label FROM sales_order_items WHERE sales_order_id = ?').all(order.id);
+  const existingGiftLabels = new Set(existingRows.map(r => r.gift_label).filter(Boolean));
+  const items = buildItemsFromRequest(db, req.body, { extraGiftLabels: existingGiftLabels });
   if (items.invalidDetailCount > 0) {
     res.status(400);
     return renderError('商品明细包含无效行（商品、数量必须填写且数量为正整数），请修正后再提交');
+  }
+  if (items.invalidGiftLabelCount > 0) {
+    res.status(400);
+    return renderError('所选 0 元/赠品标签不存在或已停用，请重新选择');
   }
   if (!warehouse_id || items.length === 0) {
     return renderError('请选择仓库并至少填写一行有效商品明细');
@@ -526,7 +623,7 @@ router.post('/sales/:id/edit', requireLogin, requireMutationKey, (req, res) => {
     res.status(400);
     return renderError('销售单价必须是大于等于 0 的有效数字');
   }
-  const existingPids = new Set(db.prepare('SELECT product_id FROM sales_order_items WHERE sales_order_id = ?').all(order.id).map(r => r.product_id));
+  const existingPids = new Set(existingRows.map(r => r.product_id));
   const hiddenNames = hiddenSaleProductNames(items, existingPids);
   if (hiddenNames.length > 0) {
     res.status(400);
@@ -571,9 +668,9 @@ router.post('/sales/:id/edit', requireLogin, requireMutationKey, (req, res) => {
       `UPDATE sales_orders SET customer_id=?, warehouse_id=?, responsible_id=?, order_date=?, total_amount=?, paid_amount=?, payment_status=?, note=?, remarks=? WHERE id=?`
     ).run(customer_id || null, warehouse_id, responsible.id, order_date || order.order_date, total, paid, paymentStatus, note || '', remarks || '', order.id);
     db.prepare('DELETE FROM sales_order_items WHERE sales_order_id = ?').run(order.id);
-    const insertItem = db.prepare('INSERT INTO sales_order_items (sales_order_id, product_id, quantity, unit_label, base_quantity, unit_price, is_gift, cost_price_snapshot) VALUES (?,?,?,?,?,?,?,?)');
+    const insertItem = db.prepare('INSERT INTO sales_order_items (sales_order_id, product_id, quantity, unit_label, base_quantity, unit_price, is_gift, gift_label, cost_price_snapshot) VALUES (?,?,?,?,?,?,?,?,?)');
     for (const it of items) {
-      insertItem.run(order.id, it.pid, it.qty, it.unitLabel, it.baseQty, it.price, it.gift ? 1 : 0, it.costSnapshot);
+      insertItem.run(order.id, it.pid, it.qty, it.unitLabel, it.baseQty, it.price, it.gift ? 1 : 0, it.giftLabel, it.costSnapshot);
     }
     const auditSummary = wipedYuanAmount > 0
       ? `金额更新为 ¥${total.toFixed(2)}（已抹零 ¥${wipedYuanAmount.toFixed(1)}）`
@@ -1014,7 +1111,7 @@ router.get('/sales/:id', requireLogin, (req, res) => {
   attachEffectivePayment(order);
   const items = db.prepare(`
     SELECT soi.id, soi.sales_order_id, soi.product_id, soi.quantity, soi.unit_label,
-           soi.base_quantity, soi.unit_price, soi.is_gift, p.name AS product_name
+           soi.base_quantity, soi.unit_price, soi.is_gift, soi.gift_label, p.name AS product_name
     FROM sales_order_items soi
     JOIN products p ON p.id = soi.product_id
     WHERE soi.sales_order_id = ?

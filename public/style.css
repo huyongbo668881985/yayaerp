@@ -340,7 +340,7 @@ input[type=text], input[type=password], input[type=number], input[type=date], in
 .sales-more-filters { width: 100%; border-top: 1px solid var(--border); margin-top: 4px; padding-top: 12px; }
 .sales-filter-panel .sales-more-filters > summary { cursor: pointer; color: var(--text); font-size: 13px; padding: 0; }
 .sales-more-filters > summary span { color: var(--muted); margin-left: 10px; font-size: 12px; font-weight: 400; }
-.sales-more-filter-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+.sales-more-filter-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
 .sales-filter-hint { flex-basis: 100%; color: var(--muted); font-size: 12px; margin: 0; }
 .sales-filter-form > .sales-filter-actions { width: 100%; margin-top: 4px; }
 .sales-export { margin-left: auto; }
@@ -683,7 +683,7 @@ form > .form-section-heading:first-of-type { border-top: 0; padding-top: 0; marg
   .sales-responsible-filter { max-width: none; }
   .sales-responsible-filter select, .sales-settlement-select { min-height: 44px; }
   .sales-more-filter-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 8px; }
-  .sales-more-filter-fields .sales-tag-filter { grid-column: 1 / -1; }
+  .sales-more-filter-fields .sales-tag-filter { grid-column: auto; }
   .sales-filter-form .sales-filter-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sales-export { margin-left: 0; }
   .sales-filter-chip { min-height: 36px; padding: 7px 11px; }
@@ -1836,5 +1836,208 @@ button[aria-disabled="true"] { cursor: wait; opacity: .65; }
     cursor: pointer;
   }
 }
+
+/* ===== 0元/赠品标签设置与开单选择器 ===== */
+.gift-label-management:not([open]) {
+  display: none;
+}
+.gift-label-management > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 650;
+}
+.gift-label-management-content {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.gift-label-create {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 10px 0 12px;
+}
+.gift-label-create .form-row {
+  margin-bottom: 0;
+  flex: 1 1 220px;
+  max-width: 320px;
+}
+.gift-label-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.gift-label-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1e3a8a;
+  font-size: 13px;
+  font-weight: 500;
+}
+.gift-label-chip-default {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+}
+.gift-label-chip-default small {
+  font-size: 11px;
+  color: var(--muted);
+}
+.gift-label-chip form {
+  margin: 0;
+  display: inline-flex;
+}
+.gift-label-delete-btn {
+  border: 0;
+  background: transparent;
+  color: #64748b;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+}
+.gift-label-delete-btn:hover {
+  color: #dc2626;
+}
+.sale-gift-picker {
+  position: relative;
+}
+.sale-gift-picker .gift-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.gift-label-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px;
+  min-height: 38px;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  background: #ffffff;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.gift-label-trigger:hover,
+.gift-label-trigger:focus-visible {
+  border-color: #94a3b8;
+  background: #f8fafc;
+}
+.sale-gift-picker.is-active .gift-label-trigger {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: var(--primary-dark);
+  font-weight: 600;
+}
+.gift-label-arrow {
+  font-size: 11px;
+  color: var(--muted);
+}
+.gift-label-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 55;
+  min-width: 136px;
+  max-width: 220px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px rgba(15, 23, 42, .16);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.gift-label-menu.is-up {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+.gift-label-menu[hidden] {
+  display: none;
+}
+.gift-label-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  min-height: 36px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.gift-label-option:hover,
+.gift-label-option:focus-visible {
+  background: #eff6ff;
+  outline: none;
+}
+.gift-label-option[aria-selected="true"] {
+  background: #eff6ff;
+  color: var(--primary-dark);
+  font-weight: 600;
+}
+.gift-label-option[aria-selected="true"]::after {
+  content: "✓";
+  font-size: 12px;
+}
+.gift-summary-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.gift-summary-head .btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+@media (max-width: 768px) {
+  .sale-gift-picker {
+    min-height: 44px;
+  }
+  .sale-gift-picker .gift-checkbox {
+    width: 20px;
+    height: 20px;
+  }
+  .gift-label-trigger {
+    min-height: 38px;
+    padding: 6px 10px;
+    font-size: 14px;
+  }
+  .gift-label-option {
+    min-height: 44px;
+    font-size: 14px;
+  }
+  .gift-label-create .form-row {
+    max-width: none;
+  }
+  .gift-label-create .btn {
+    width: 100%;
+  }
+}
+
 
 

@@ -1,0 +1,39 @@
+<details class="card gift-label-management" id="giftLabelManagement" <%= giftLabelError || giftLabelSuccess ? 'open' : '' %>>
+  <summary><span>0元 / 赠品标签设置</span><span class="muted">已启用 <%= customGiftLabels.length + 1 %> 个 <span aria-hidden="true">⌄</span></span></summary>
+  <div class="gift-label-management-content">
+    <p class="muted">系统默认包含「赠品」。未添加其他标签时，开单界面仅显示单个赠品勾选框；添加如「瓶盖兑酒」后，开单时点击「赠品」文字即可选择，直接勾选仍默认为赠品。</p>
+    <% if (giftLabelError) { %><div class="error" role="alert"><%= giftLabelError %></div><% } %>
+    <% if (giftLabelSuccess) { %><div class="success" role="status"><%= giftLabelSuccess %></div><% } %>
+    <% if (customGiftLabels.length < MAX_GIFT_LABELS) { %>
+    <form method="POST" action="/gift-labels/new" class="gift-label-create">
+      <div class="form-row">
+        <label for="newGiftLabelName">新增 0 元标签</label>
+        <input id="newGiftLabelName" type="text" name="name" required maxlength="20" placeholder="如：瓶盖兑酒" value="<%= giftLabelDraft || '' %>">
+      </div>
+      <button class="btn" type="submit">添加标签</button>
+    </form>
+    <% } else { %>
+    <p class="muted">自定义 0 元标签已达 <%= MAX_GIFT_LABELS %> 个上限，可删除不再使用的标签后再添加。</p>
+    <% } %>
+    <div class="gift-label-chip-list">
+      <span class="gift-label-chip gift-label-chip-default"><%= DEFAULT_GIFT_LABEL %><small>默认</small></span>
+      <% customGiftLabels.forEach(function(label) { %>
+        <span class="gift-label-chip">
+          <span><%= label.name %></span>
+          <form method="POST" action="/gift-labels/<%= label.id %>/delete" onsubmit="return confirm('确认删除「<%= label.name %>」？删除后新开单不再显示该选项，历史销售单、打印和导出记录不受影响。')">
+            <button type="submit" class="gift-label-delete-btn" aria-label="删除 <%= label.name %>" title="删除">×</button>
+          </form>
+        </span>
+      <% }) %>
+    </div>
+  </div>
+</details>
+<script>
+  (function() {
+    const panel = document.getElementById('giftLabelManagement');
+    if (!panel) return;
+    function reveal() { if (location.hash === '#giftLabelManagement') panel.open = true; }
+    reveal();
+    window.addEventListener('hashchange', reveal);
+  })();
+</script>
