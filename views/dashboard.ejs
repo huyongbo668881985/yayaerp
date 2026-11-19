@@ -14,6 +14,22 @@
       <% if (card.id === 'monthly_sales') { %>
         <div class="num"><a class="stat-number-link" aria-label="查看本月已审核销售明细" href="/sales?status=approved&start=<%= today.slice(0,7) %>-01&end=<%= today %>">¥<%= monthlySales.toFixed(1) %></a></div>
         <div class="label"><%= card.label %></div>
+      <% } else if (card.id === 'monthly_collection') { %>
+        <% const fmtSignedYuan = (v) => v < -0.001 ? '-¥' + Math.abs(v).toFixed(1) : '¥' + Math.abs(v).toFixed(1); %>
+        <div class="num"><a class="stat-number-link" aria-label="查看已审核销售收款明细" href="/sales?status=approved"><%= fmtSignedYuan(monthlyCollection) %></a></div>
+        <div class="label"><%= card.label %></div>
+        <div class="stat-subnote">
+          <span class="stat-subnote-item">当月订单 <%= fmtSignedYuan(monthlyCurrentSalesCollected) %></span>
+          <span class="stat-subnote-sep">·</span>
+          <span class="stat-subnote-item">收回旧欠 <%= fmtSignedYuan(monthlyOldDebtCollected) %></span>
+          <% if (monthlyCashRefunded > 0.001) { %>
+            <span class="stat-subnote-sep">·</span>
+            <span class="stat-subnote-item">退现 ¥<%= monthlyCashRefunded.toFixed(1) %></span>
+          <% } else if (monthlyCashRefunded < -0.001) { %>
+            <span class="stat-subnote-sep">·</span>
+            <span class="stat-subnote-item">冲回退现 ¥<%= Math.abs(monthlyCashRefunded).toFixed(1) %></span>
+          <% } %>
+        </div>
       <% } else if (card.id === 'yearly_sales') { %>
         <div class="num"><a class="stat-number-link" aria-label="查看本年度已审核销售明细" href="/sales?status=approved&start=<%= yearStart %>&end=<%= today %>">¥<%= yearlySales.toFixed(1) %></a></div>
         <div class="label"><%= card.label %></div>

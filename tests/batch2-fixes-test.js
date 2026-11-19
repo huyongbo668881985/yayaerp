@@ -318,11 +318,14 @@ async function check(label, work) {
     assert.equal(rejectWipeRes.status, 400);
   });
 
-  // 5. 首页自定义看板、本月净增欠款口径与操作员毛利绝对隔离
-  await check('首页自定义看板：默认6卡、本月净增欠款拆解、双视角配置与操作员毛利硬拦截', async () => {
+  // 5. 首页自定义看板、本月净增欠款口径、本月回款额与操作员毛利绝对隔离
+  await check('首页自定义看板：默认7卡、本月回款额、本月净增欠款拆解、双视角配置与操作员毛利硬拦截', async () => {
     const adminHome = await admin.request('/');
     assert.equal(adminHome.status, 200);
     assert.ok(adminHome.text.includes('本月销售额（已审核）'), '管理员默认展示本月销售额');
+    assert.ok(adminHome.text.includes('本月回款额'), '管理员默认展示本月回款额');
+    assert.ok(adminHome.text.includes('当月订单'), '本月回款额包含当月订单副标题');
+    assert.ok(adminHome.text.includes('收回旧欠'), '本月回款额包含收回旧欠副标题');
     assert.ok(adminHome.text.includes('本年度销售额（已审核）'), '管理员默认展示本年度销售额');
     assert.ok(adminHome.text.includes('本月净增欠款'), '管理员默认展示本月净增欠款');
     assert.ok(adminHome.text.includes('本月新欠'), '本月净增欠款包含新欠副标题');
@@ -335,29 +338,32 @@ async function check(label, work) {
     // 操作员访问首页：绝不能出现任何毛利字样，且访问 /settings/dashboard 必须 403
     const workerHome = await worker.request('/');
     assert.equal(workerHome.status, 200);
+    assert.ok(workerHome.text.includes('本月回款额'), '操作员默认展示本月回款额');
     assert.ok(!workerHome.text.includes('毛利'), '操作员首页绝不能包含任何毛利数据');
     const workerSettings = await worker.request('/settings/dashboard');
     assert.equal(workerSettings.status, 403, '操作员访问看板配置页必须被拒绝');
 
     // 管理员尝试恶意为 operator 视角注入 monthly_profit 和 today_profit，后端必须硬过滤拦截
     const saveRes = await admin.request('/settings/dashboard', {
-      admin_order: ['total_debt', 'monthly_sales', 'yearly_sales', 'monthly_net_debt', 'monthly_profit', 'pending_orders', 'today_sales', 'today_profit'],
-      admin_enabled: ['total_debt', 'today_sales'],
+      admin_order: ['total_debt', 'monthly_sales', 'monthly_collection', 'yearly_sales', 'monthly_net_debt', 'monthly_profit', 'pending_orders', 'today_sales', 'today_profit'],
+      admin_enabled: ['total_debt', 'today_sales', 'monthly_collection'],
       admin_color_total_debt: 'purple',
       admin_color_today_sales: 'pink',
-      operator_order: ['monthly_profit', 'today_profit', 'monthly_sales', 'yearly_sales', 'monthly_net_debt', 'total_debt', 'pending_orders', 'today_sales'],
-      operator_enabled: ['monthly_profit', 'today_profit', 'monthly_sales']
+      operator_order: ['monthly_profit', 'today_profit', 'monthly_sales', 'monthly_collection', 'yearly_sales', 'monthly_net_debt', 'total_debt', 'pending_orders', 'today_sales'],
+      operator_enabled: ['monthly_profit', 'today_profit', 'monthly_sales', 'monthly_collection']
     });
     assert.equal(saveRes.status, 302);
 
     const adminHomeAfter = await admin.request('/');
     assert.ok(adminHomeAfter.text.includes('stat-theme-purple'), '管理员自定义紫粉卡片色生效');
     assert.ok(adminHomeAfter.text.includes('今日销售额（已审核）'), '管理员开启今日销售额生效');
+    assert.ok(adminHomeAfter.text.includes('本月回款额'), '管理员保留本月回款额生效');
     assert.ok(!adminHomeAfter.text.includes('本年度销售额（已审核）'), '管理员关闭本年度销售额生效');
 
     const workerHomeAfter = await worker.request('/');
     assert.ok(!workerHomeAfter.text.includes('毛利'), '即使伪造请求，操作员首页依然绝不出现毛利');
     assert.ok(workerHomeAfter.text.includes('本月销售额（已审核）'), '操作员视角配置生效');
+    assert.ok(workerHomeAfter.text.includes('本月回款额'), '操作员视角保留本月回款额生效');
   });
 
   console.log(`第二批整改测试通过：${passed} 项`);

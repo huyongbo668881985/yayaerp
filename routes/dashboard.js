@@ -14,6 +14,7 @@ const router = express.Router();
 
 // 统计口径说明（与经营报表 /reports 保持一致）：
 //   销售额 = 已审核销售单（按销售单日期）− 已审核退货单（按退货单日期）
+//   本月回款额 = 当月实际收到的客户回款（含当月订单收款与收回往月欠款）− 当月现金退款
 //   累计总欠款 = Σ max(0, 销售单金额 − 已收款 − 该单关联的已审核退货金额 + 已退现金)
 //   本月净增欠款 = 本月新欠 − 清收旧欠 = 当前累计总欠款 − 上月末累计总欠款
 //   毛利（仅管理员，服务端硬拦截）= 明细行成本快照计算，只算已审核 + 有效欠款已结清的订单
@@ -86,6 +87,108 @@ function calcMonthlyDebtMetrics(db, monthStart, saleScope) {
   };
 }
 
+function calcMonthlyCollectionMetrics(db, monthStart, monthEnd, user, saleScope) {
+  const operatorFilter = user.role !== 'admin';
+  const hasLedgerTable = Boolean(
+    db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='customer_ledger'").get()
+  );
+
+  let currentOrderCents = 0;
+  let priorOrderCents = 0;
+  let cashRefundedCents = 0;
+
+  if (hasLedgerTable) {
+    const receiptRow = db.prepare(`
+      SELECT
+        COALESCE(SUM(CASE WHEN l.document_date >= ? THEN l.received_cents ELSE 0 END), 0) AS current_cents,
+        COALESCE(SUM(CASE WHEN l.document_date < ? THEN l.received_cents ELSE 0 END), 0) AS prior_cents
+      FROM customer_ledger l
+      JOIN sales_orders so ON so.id = l.document_id
+      WHERE l.document_type = 'sales'
+        AND (
+          (l.event_kind != '升级结转' AND l.event_date >= ? AND l.event_date <= ?)
+          OR (l.event_kind = '升级结转' AND l.document_date >= ? AND l.document_date <= ?)
+        )
+        ${saleScope.sql}
+    `).get(monthStart, monthStart, monthStart, monthEnd, monthStart, monthEnd, ...saleScope.params);
+
+    currentOrderCents += Number(receiptRow.current_cents || 0);
+    priorOrderCents += Number(receiptRow.prior_cents || 0);
+
+    // 兜底：若存在未写入对账流水的本月已审核销售单（如旧夹具直接写表）
+    const fallbackReceiptRow = db.prepare(`
+      SELECT COALESCE(SUM(CAST(ROUND(so.paid_amount * 100) AS INTEGER)), 0) AS cents
+      FROM sales_orders so
+      WHERE so.status = 'approved'
+        AND so.order_date >= ? AND so.order_date <= ?
+        ${saleScope.sql}
+        AND NOT EXISTS (
+          SELECT 1 FROM customer_ledger l
+          WHERE l.document_type = 'sales' AND l.document_id = so.id
+        )
+    `).get(monthStart, monthEnd, ...saleScope.params);
+    currentOrderCents += Number(fallbackReceiptRow.cents || 0);
+
+    const refundParams = [monthStart, monthEnd, monthStart, monthEnd];
+    if (operatorFilter) refundParams.push(user.id);
+    const refundRow = db.prepare(`
+      SELECT COALESCE(SUM(l.refunded_cents), 0) AS refund_cents
+      FROM customer_ledger l
+      JOIN return_orders ro ON ro.id = l.document_id
+      WHERE l.document_type = 'returns'
+        AND (
+          (l.event_kind != '升级结转' AND l.event_date >= ? AND l.event_date <= ?)
+          OR (l.event_kind = '升级结转' AND l.document_date >= ? AND l.document_date <= ?)
+        )
+        ${operatorFilter ? 'AND ro.user_id = ?' : ''}
+    `).get(...refundParams);
+    cashRefundedCents += Number(refundRow.refund_cents || 0);
+
+    const fallbackRefundParams = [monthStart, monthEnd];
+    if (operatorFilter) fallbackRefundParams.push(user.id);
+    const fallbackRefundRow = db.prepare(`
+      SELECT COALESCE(SUM(CAST(ROUND(ro.refunded_amount * 100) AS INTEGER)), 0) AS cents
+      FROM return_orders ro
+      WHERE ro.status = 'approved'
+        AND ro.order_date >= ? AND ro.order_date <= ?
+        ${operatorFilter ? 'AND ro.user_id = ?' : ''}
+        AND NOT EXISTS (
+          SELECT 1 FROM customer_ledger l
+          WHERE l.document_type = 'returns' AND l.document_id = ro.id
+        )
+    `).get(...fallbackRefundParams);
+    cashRefundedCents += Number(fallbackRefundRow.cents || 0);
+  } else {
+    const salesFallback = db.prepare(`
+      SELECT COALESCE(SUM(CAST(ROUND(so.paid_amount * 100) AS INTEGER)), 0) AS cents
+      FROM sales_orders so
+      WHERE so.status = 'approved'
+        AND so.order_date >= ? AND so.order_date <= ?
+        ${saleScope.sql}
+    `).get(monthStart, monthEnd, ...saleScope.params);
+    currentOrderCents = Number(salesFallback.cents || 0);
+
+    const refundFallbackParams = [monthStart, monthEnd];
+    if (operatorFilter) refundFallbackParams.push(user.id);
+    const refundFallback = db.prepare(`
+      SELECT COALESCE(SUM(CAST(ROUND(ro.refunded_amount * 100) AS INTEGER)), 0) AS cents
+      FROM return_orders ro
+      WHERE ro.status = 'approved'
+        AND ro.order_date >= ? AND ro.order_date <= ?
+        ${operatorFilter ? 'AND ro.user_id = ?' : ''}
+    `).get(...refundFallbackParams);
+    cashRefundedCents = Number(refundFallback.cents || 0);
+  }
+
+  const netCents = currentOrderCents + priorOrderCents - cashRefundedCents;
+  return {
+    monthlyCollection: netCents / 100,
+    monthlyCurrentSalesCollected: currentOrderCents / 100,
+    monthlyOldDebtCollected: priorOrderCents / 100,
+    monthlyCashRefunded: cashRefundedCents / 100
+  };
+}
+
 router.get('/', requireLogin, (req, res) => {
   const db = req.tenantDb;
   const user = req.session.user;
@@ -93,6 +196,10 @@ router.get('/', requireLogin, (req, res) => {
   const today = todayLocalDate(); // 北京时间 YYYY-MM-DD
   const month = today.slice(0, 7);
   const monthStart = `${month}-01`;
+  const monthEndDay = String(
+    new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)), 0)).getUTCDate()
+  ).padStart(2, '0');
+  const monthEnd = `${month}-${monthEndDay}`;
   const year = today.slice(0, 4);
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year}-12-31`;
@@ -153,6 +260,14 @@ router.get('/', requireLogin, (req, res) => {
   // ---- 本月净增欠款（本月新欠 − 清收旧欠） ----
   const { monthlyNewDebt, monthlyClearedOldDebt, monthlyNetDebt } = calcMonthlyDebtMetrics(db, monthStart, saleScope);
 
+  // ---- 本月回款额（当月实际收款 − 当月现金退款） ----
+  const {
+    monthlyCollection,
+    monthlyCurrentSalesCollected,
+    monthlyOldDebtCollected,
+    monthlyCashRefunded
+  } = calcMonthlyCollectionMetrics(db, monthStart, monthEnd, user, saleScope);
+
   // ---- 待审核单据数：销售单 + 退货单 + 调拨单 三类合计 ----
   const pendingParams = operatorFilter ? [user.id] : [];
   const pendingCount = (table) =>
@@ -168,11 +283,8 @@ router.get('/', requireLogin, (req, res) => {
   let todayProfit = null;
   let monthlyProfit = null;
   if (isAdmin) {
-    const monthEndDay = String(
-      new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)), 0)).getUTCDate()
-    ).padStart(2, '0');
     todayProfit = profitOfPeriod(db, { start: today, end: today }).profit;
-    monthlyProfit = profitOfPeriod(db, { start: `${month}-01`, end: `${month}-${monthEndDay}` }).profit;
+    monthlyProfit = profitOfPeriod(db, { start: monthStart, end: monthEnd }).profit;
   }
 
   // 业务员业绩排行：仅管理员（服务端硬拦截，含毛利），默认本月、默认仅操作员（可通过 sp_admin=1 切换含管理员）
@@ -181,7 +293,6 @@ router.get('/', requireLogin, (req, res) => {
   if (isAdmin) {
     const key = ['today', 'month', 'year'].includes(req.query.sp) ? req.query.sp : 'month';
     const includeAdmin = req.query.sp_admin === '1';
-    const monthEnd = `${month}-${String(new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)), 0)).getUTCDate()).padStart(2, '0')}`;
     const bounds = key === 'today' ? { start: today, end: today }
       : key === 'year' ? { start: yearStart, end: yearEnd } : { start: monthStart, end: monthEnd };
     spRange = { key, includeAdmin, ...bounds };
@@ -219,6 +330,10 @@ router.get('/', requireLogin, (req, res) => {
   res.render('dashboard', {
     todaySales,
     monthlySales,
+    monthlyCollection,
+    monthlyCurrentSalesCollected,
+    monthlyOldDebtCollected,
+    monthlyCashRefunded,
     yearlySales,
     totalDebt,
     monthlyNetDebt,
